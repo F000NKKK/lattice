@@ -101,6 +101,18 @@ depend on `interface`; a per-interface DNS association is expressed with
 `InterfaceId` from `lattice-core` rather than a direct module dependency, to
 avoid coupling modules that should be free to evolve independently.
 
+**Model types must be designed for extension, not for the lowest common
+denominator.** The same domain concept carries a different set of fields on
+each platform — a route on Linux carries a routing table, protocol, scope,
+and type in addition to destination/gateway/metric; Windows and BSD expose
+a narrower set. Shrinking a model type down to only the fields every
+platform happens to share now would make it impossible to add
+platform-specific fields later without a breaking change. The concrete
+field lists are an API design decision for the Stage 0.1 draft, not this
+document, but whatever shape they take must leave room for
+platform-specific extension (e.g. an open-ended properties/extension
+container) from the outset.
+
 ### `lattice-platform`
 
 Defines the contract between the model and platform backends, as a set of
@@ -116,9 +128,7 @@ A backend implements only the provider traits it can actually support
 natively — a monolithic `NetworkBackend` trait covering every domain would
 force every backend to stub out methods for features it doesn't have, and
 would grow without bound as new domains (VLAN, VRF, firewall, ...) are
-added. Splitting by capability keeps each trait small and lets `Capability`
-queries map directly onto "is this provider trait implemented for this
-backend", rather than being a separate, easy-to-desync flag:
+added. Splitting by capability keeps each trait small:
 
 ```rust
 trait RouteProvider {
@@ -134,11 +144,18 @@ trait EventProvider {
 }
 ```
 
-- `Capability` — lets consumers ask whether a given backend supports an
-  optional feature (e.g. VRF, namespaces, IPv6, monitoring) before using it,
-  since platforms differ substantially in what they expose, rather than
-  relying on a method silently failing or panicking on an unsupported
-  platform.
+- `Capability` — distinct from provider traits, and deliberately not the
+  same axis. Provider traits (`RouteProvider`, ...) describe API surfaces
+  that are fixed at compile time: a backend either implements
+  `DnsProvider` or it doesn't, and that's known when the backend crate is
+  built. `Capability` describes *runtime*-dependent operating system
+  features that cannot be expressed through Rust trait implementation alone
+  — for example, a Linux backend always implements `RouteProvider`, but
+  whether the running kernel has IPv6 or VRF support enabled is a fact
+  about the current machine, not the crate. Consumers query
+  `backend.capabilities().contains(Capability::VRF)` at runtime rather than
+  relying on a method silently failing or panicking when a feature isn't
+  actually available.
 - `Event` — the event model for change notifications (interface state
   changes, route changes, ...), backed by RTNetlink multicast groups on
   Linux and `NotifyRouteChange2`-style APIs on Windows.
@@ -181,6 +198,72 @@ The public-facing facade. Re-exports the types consumers need from
 `cfg(target_os = "...")`, and exposes the top-level API (e.g.
 `Lattice::connect()`). This is the only crate most consumers depend on
 directly.
+
+## Error Model
+
+Lattice must not leak `std::io::Error` or raw OS error codes
+(`EPERM`/`ENODEV` on Linux, `ERROR_ACCESS_DENIED` on Windows) as its public
+error type. Different backends fail for the same logical reason through
+completely different codes, and a consumer writing cross-platform code
+needs to match on *why* an operation failed, not on a platform-specific
+integer.
+
+`lattice-core::Error` is the single error type surfaced across the
+workspace, expressed as platform-independent variants such as:
+
+- `PermissionDenied`
+- `NotFound`
+- `AlreadyExists`
+- `Unsupported` — the operation has no meaning on this backend at all (as
+  opposed to a `Capability` being absent at runtime; see below).
+- `InvalidState`
+- `PlatformError { backend, code }` — an escape hatch that preserves the
+  raw backend-specific error for diagnostics, without being the primary
+  way consumers are expected to match on failures.
+
+The exact variant list is an API design decision for the Stage 0.1 draft;
+what this document fixes is that such a taxonomy exists and lives in
+`lattice-core`, and that provider trait methods return `Result<T, Error>`
+using it — never a raw OS error type.
+
+## Privilege Model
+
+Networking configuration is privileged on every target platform, and the
+privilege boundary does not line up the same way across them:
+
+- **Linux** — reading routes/interfaces is generally unprivileged; adding
+  or removing them requires `CAP_NET_ADMIN`.
+- **Windows** — reading is available to normal users; modifying typically
+  requires Administrator.
+- **BSD/macOS** — similar read/write asymmetry via route sockets.
+
+This is not a hypothetical concern: it is the concrete scenario behind the
+`Error::PermissionDenied` variant above, and it means read operations and
+write operations should be expected to fail independently and for
+different reasons in consumer code and in tests. This document does not
+mandate a specific privilege-check API (e.g. a pre-flight
+`backend.can_modify()`) — that is again an API design decision — but the
+provider trait split (read-oriented listing vs. write-oriented add/remove
+methods, already separate methods on the same trait) must not obscure the
+fact that a caller can plausibly have one without the other.
+
+## Async Model
+
+`EventProvider` is inherently push-based on every platform (Netlink
+multicast sockets on Linux, `NotifyRouteChange2`-style callbacks on
+Windows, routing sockets on BSD/macOS), which means it cannot be
+implemented as a plain blocking method the way `RouteProvider` or
+`InterfaceProvider` can. Whether Lattice commits to an async runtime,
+exposes a runtime-agnostic stream abstraction, or offers a blocking
+callback-based API for `EventProvider` is an open decision that affects
+the public API surface and dependency footprint (e.g. `futures`/`tokio`)
+of every crate that touches events.
+
+This decision must be made explicitly as part of the Stage 0.1 (or
+whichever stage first implements `EventProvider`, per the delivery plan
+below) API draft, before `EventProvider` is implemented for any backend —
+not discovered ad hoc through the first backend that happens to implement
+it. This document deliberately does not prescribe the answer.
 
 ## State Model: Imperative Now, Declarative Later
 
