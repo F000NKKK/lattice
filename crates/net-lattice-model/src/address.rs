@@ -1,6 +1,6 @@
 use std::fmt;
 
-use lattice_ip::{Ipv4Address, Ipv4Network, Ipv6Address, Ipv6Network};
+use net_lattice_ip::{Ipv4Address, Ipv4Network, Ipv6Address, Ipv6Network};
 
 /// An IP address of either family.
 ///

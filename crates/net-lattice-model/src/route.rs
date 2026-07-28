@@ -1,4 +1,4 @@
-use lattice_core::Id;
+use net_lattice_core::Id;
 
 use crate::address::{IpAddress, Network};
 
@@ -46,7 +46,7 @@ impl Route {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lattice_ip::{Ipv4Address, Ipv4Network, Ipv4PrefixLength};
+    use net_lattice_ip::{Ipv4Address, Ipv4Network, Ipv4PrefixLength};
 
     fn destination() -> Network {
         Network::from(Ipv4Network::new(

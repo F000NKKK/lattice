@@ -1,5 +1,5 @@
 [package]
-name = "lattice-model"
+name = "net-lattice-model"
 version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
@@ -12,5 +12,5 @@ keywords.workspace = true
 description = "The domain model of operating system networking state (routes, interfaces, DNS, ...), with no operating-system dependency."
 
 [dependencies]
-lattice-core = { workspace = true }
-lattice-ip = { workspace = true }
+net-lattice-core = { workspace = true }
+net-lattice-ip = { workspace = true }

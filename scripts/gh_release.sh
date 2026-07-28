@@ -23,7 +23,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WS="$(cd "$SCRIPT_DIR/.." && pwd)"
-CRATES_IO_USER_AGENT="gh_release.sh (lattice; https://github.com/F000NKKK/lattice)"
+CRATES_IO_USER_AGENT="gh_release.sh (net-lattice; https://github.com/F000NKKK/net-lattice)"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; BOLD='\033[1m'; RESET='\033[0m'
 info()   { echo -e "${CYAN}[gh-release]${RESET} $*"; }

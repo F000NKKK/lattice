@@ -6,24 +6,25 @@ members = ["crates/*"]
 edition = "2024"
 rust-version = "1.93"
 license = "MPL-2.0"
-repository = "https://github.com/F000NKKK/lattice"
-homepage = "https://github.com/F000NKKK/lattice"
-documentation = "https://docs.rs/lattice"
-authors = ["Lattice Contributors", "F000NK"]
+repository = "https://github.com/F000NKKK/net-lattice"
+homepage = "https://github.com/F000NKKK/net-lattice"
+documentation = "https://docs.rs/net-lattice"
+authors = ["Net Lattice Contributors", "F000NK"]
 categories = ["network-programming", "os"]
 keywords = ["networking", "netlink", "cross-platform", "systems", "os"]
 
 # Single source of truth for every internal crate's version + path. Member
-# crates reference these as `lattice-foo = { workspace = true }` instead of
-# repeating path/version — see ARCHITECTURE.md's API Stability Rules for why
-# each crate's version is independent rather than tied to a single
+# crates reference these as `net-lattice-foo = { workspace = true }` instead
+# of repeating path/version — see ARCHITECTURE.md's API Stability Rules for
+# why each crate's version is independent rather than tied to a single
 # workspace-wide number.
 [workspace.dependencies]
-lattice-core = { path = "crates/lattice-core", version = "0.1.0" }
-lattice-ip = { path = "crates/lattice-ip", version = "0.1.0" }
-lattice-model = { path = "crates/lattice-model", version = "0.1.0" }
-lattice-platform = { path = "crates/lattice-platform", version = "0.1.0" }
-lattice-backend-linux = { path = "crates/lattice-backend-linux", version = "0.1.0" }
+net-lattice-core = { path = "crates/net-lattice-core", version = "0.1.0" }
+net-lattice-ip = { path = "crates/net-lattice-ip", version = "0.1.0" }
+net-lattice-model = { path = "crates/net-lattice-model", version = "0.1.0" }
+net-lattice-platform = { path = "crates/net-lattice-platform", version = "0.1.0" }
+net-lattice-backend-linux = { path = "crates/net-lattice-backend-linux", version = "0.1.0" }
+net-lattice = { path = "crates/net-lattice", version = "0.1.0" }
 
 bitflags = "2"
 rtnetlink = "0.21"

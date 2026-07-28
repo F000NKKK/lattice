@@ -4,7 +4,7 @@ use std::marker::PhantomData;
 
 /// A phantom-typed identifier, generic over the domain object it names.
 ///
-/// `lattice-model` defines per-domain aliases (`type RouteId = Id<Route>;`)
+/// `net-lattice-model` defines per-domain aliases (`type RouteId = Id<Route>;`)
 /// instead of hand-writing lookalike structs (`RouteId`, `InterfaceId`,
 /// ...). Passing a `RouteId` where an `InterfaceId` is expected fails to
 /// compile, rather than silently looking up the wrong object.

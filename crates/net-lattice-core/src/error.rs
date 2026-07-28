@@ -1,6 +1,6 @@
 use std::fmt;
 
-/// The single error type surfaced across the Lattice workspace.
+/// The single error type surfaced across the Net Lattice workspace.
 ///
 /// Provider trait methods return `Result<T, Error>` — never a raw OS error
 /// type (`std::io::Error`, a bare `errno`, a Windows `DWORD`). See

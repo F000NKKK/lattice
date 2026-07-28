@@ -1,7 +1,7 @@
 //! The contract between the model and platform backends.
 //!
-//! `lattice-platform` depends only on `lattice-core` — never on
-//! `lattice-model`. Its provider traits describe the *shape* of a
+//! `net-lattice-platform` depends only on `net-lattice-core` — never on
+//! `net-lattice-model`. Its provider traits describe the *shape* of a
 //! contract, not the *content* of the model, via associated types. See
 //! ARCHITECTURE.md for the full rationale, including how model
 //! convergence is enforced one layer up, in `lattice`.

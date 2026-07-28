@@ -1,11 +1,11 @@
-//! Linux backend for Lattice: implements `lattice-platform`'s provider
+//! Linux backend for Net Lattice: implements `net-lattice-platform`'s provider
 //! traits via Netlink.
 //!
 //! Only ever compiled for `target_os = "linux"` — its dependencies
 //! (`rtnetlink`, Linux-only) are gated the same way in `Cargo.toml`. See
-//! ARCHITECTURE.md for how this crate binds `lattice-platform`'s generic
+//! ARCHITECTURE.md for how this crate binds `net-lattice-platform`'s generic
 //! `RouteProvider::Route` associated type to the concrete
-//! `lattice_model::route::Route`.
+//! `net_lattice_model::route::Route`.
 
 #![cfg(target_os = "linux")]
 
@@ -13,14 +13,14 @@ use std::hash::{Hash, Hasher};
 use std::net::IpAddr;
 
 use futures::TryStreamExt;
-use lattice_core::{Error, PlatformErrorCode, Result};
-use lattice_model::route::{Route, RouteId};
-use lattice_model::{IpAddress, Network};
-use lattice_platform::RouteProvider;
+use net_lattice_core::{Error, PlatformErrorCode, Result};
+use net_lattice_model::route::{Route, RouteId};
+use net_lattice_model::{IpAddress, Network};
+use net_lattice_platform::RouteProvider;
 use rtnetlink::packet_route::route::{RouteAddress, RouteAttribute, RouteMessage};
 use rtnetlink::{Handle, RouteMessageBuilder};
 
-/// The Linux Netlink-backed implementation of Lattice's provider traits.
+/// The Linux Netlink-backed implementation of Net Lattice's provider traits.
 pub struct LinuxBackend {
     runtime: tokio::runtime::Runtime,
     handle: Handle,
@@ -75,8 +75,8 @@ fn route_address_to_ip(address: &RouteAddress) -> Option<IpAddr> {
 
 fn std_ip_to_ip_address(addr: IpAddr) -> IpAddress {
     match addr {
-        IpAddr::V4(addr) => IpAddress::from(lattice_ip::Ipv4Address::from(addr)),
-        IpAddr::V6(addr) => IpAddress::from(lattice_ip::Ipv6Address::from(addr)),
+        IpAddr::V4(addr) => IpAddress::from(net_lattice_ip::Ipv4Address::from(addr)),
+        IpAddr::V6(addr) => IpAddress::from(net_lattice_ip::Ipv6Address::from(addr)),
     }
 }
 
@@ -104,12 +104,12 @@ fn message_to_route(message: &RouteMessage) -> Option<Route> {
     let prefix_len = message.header.destination_prefix_length;
     let destination = match destination_addr {
         IpAddr::V4(addr) => {
-            let prefix = lattice_ip::Ipv4PrefixLength::new(prefix_len)?;
-            Network::from(lattice_ip::Ipv4Network::new(addr.into(), prefix))
+            let prefix = net_lattice_ip::Ipv4PrefixLength::new(prefix_len)?;
+            Network::from(net_lattice_ip::Ipv4Network::new(addr.into(), prefix))
         }
         IpAddr::V6(addr) => {
-            let prefix = lattice_ip::Ipv6PrefixLength::new(prefix_len)?;
-            Network::from(lattice_ip::Ipv6Network::new(addr.into(), prefix))
+            let prefix = net_lattice_ip::Ipv6PrefixLength::new(prefix_len)?;
+            Network::from(net_lattice_ip::Ipv6Network::new(addr.into(), prefix))
         }
     };
 

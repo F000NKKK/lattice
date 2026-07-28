@@ -1,7 +1,7 @@
 //! Foundational types with no networking semantics of their own.
 //!
-//! `lattice-core` carries no OS dependency and no networking-specific
-//! types — those belong to `lattice-ip` and `lattice-model`. See
+//! `net-lattice-core` carries no OS dependency and no networking-specific
+//! types — those belong to `net-lattice-ip` and `net-lattice-model`. See
 //! ARCHITECTURE.md for the full rationale.
 
 mod error;

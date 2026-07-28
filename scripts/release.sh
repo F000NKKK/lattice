@@ -25,9 +25,9 @@
 # версия как есть. --no-check-ver отключает эту проверку полностью.
 #
 # Примеры:
-#   ./scripts/release.sh lattice-core --minor    # каскад: core → ip → model → platform → ...
-#   ./scripts/release.sh lattice --patch         # patch: ссылки совместимы, каскада нет
-#   ./scripts/release.sh lattice-ip              # без бампа: публикует текущую версию, если ещё не на crates.io
+#   ./scripts/release.sh net-lattice-core --minor    # каскад: core → ip → model → platform → ...
+#   ./scripts/release.sh net-lattice --patch         # patch: ссылки совместимы, каскада нет
+#   ./scripts/release.sh net-lattice-ip              # без бампа: публикует текущую версию, если ещё не на crates.io
 #   ./scripts/release.sh --publish-all           # весь воркспейс как есть, публикует неопубликованное
 #   ./scripts/release.sh --publish-all --patch   # patch-бамп + публикация всех крейтов
 #
@@ -37,8 +37,8 @@
 # против его опубликованной версии (soft — предупреждает, не блокирует,
 # т.к. умеет ложно сработать на крейте без стабильного публичного API ещё).
 #
-# lattice-platform → lattice-model зависимость запрещена архитектурой (см.
-# ARCHITECTURE.md, "lattice-platform never depends on lattice-model") —
+# net-lattice-platform → net-lattice-model зависимость запрещена архитектурой (см.
+# ARCHITECTURE.md, "net-lattice-platform never depends on net-lattice-model") —
 # в отличие от Meridian-Engine здесь нет отдельного скрипта проверки графа
 # зависимостей; при ревью PR перед релизом сверяйся с ARCHITECTURE.md вручную.
 #
@@ -53,8 +53,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WS="$(cd "$SCRIPT_DIR/.." && pwd)"
-CRATE_PREFIX="lattice-"
-CRATES_IO_USER_AGENT="release.sh (lattice; https://github.com/F000NKKK/lattice)"
+CRATE_PREFIX="net-lattice-"
+CRATES_IO_USER_AGENT="release.sh (net-lattice; https://github.com/F000NKKK/net-lattice)"
 
 # ── Цвета ─────────────────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'

@@ -6,7 +6,7 @@ bitflags::bitflags! {
     /// `RouteProvider` or it doesn't, and that's fixed at compile time.
     /// Whether the *running* kernel has, say, VRF support enabled is a fact
     /// about the current machine, not the crate — see ARCHITECTURE.md's
-    /// `lattice-platform` section.
+    /// `net-lattice-platform` section.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct Capability: u64 {
         const IPV6 = 1 << 0;
