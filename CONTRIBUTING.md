@@ -1,14 +1,17 @@
-# Contributing to Lattice
+# Contributing to Net Lattice
 
-Thank you for your interest in contributing to Lattice. This document describes how to get involved.
+Thank you for your interest in contributing to Net Lattice. This document describes how to get involved.
 
 ## Project Status
 
-Lattice is currently in the **bootstrap stage**. The repository contains no crates or source code yet, and no API design has been finalized. Substantial code contributions are not expected at this stage — the most valuable contributions right now are:
+Net Lattice has landed Stage 0.1 of its [architecture](ARCHITECTURE.md)'s Incremental Delivery Plan — a minimal Linux route provider, not a complete library. Most public API surface is still unbuilt. The most valuable contributions right now are:
 
 - Feedback on the project's vision, scope, and roadmap (see [README.md](README.md))
-- Discussion of API design and architecture once design work begins
+- Discussion of API design and architecture for upcoming stages
+- Implementation work on the next stage in [ARCHITECTURE.md](ARCHITECTURE.md)'s delivery plan (Windows/macOS backends, `interface`/`dns`/`neighbor` modules, ...)
 - Documentation and tooling improvements
+
+Please read [ARCHITECTURE.md](ARCHITECTURE.md) before proposing a new crate, module, or provider trait — it documents the dependency rules (e.g. `net-lattice-platform` never depends on `net-lattice-model`) and the staged delivery order this project follows.
 
 Please check open issues and discussions before starting significant work, to avoid duplicated effort.
 
@@ -21,7 +24,7 @@ Please check open issues and discussions before starting significant work, to av
 
 ## Development Conventions
 
-Once implementation begins, Lattice will follow standard Rust ecosystem conventions:
+Once implementation begins, Net Lattice will follow standard Rust ecosystem conventions:
 
 - Code must be formatted with `rustfmt`.
 - Code must be free of `clippy` warnings.
@@ -43,4 +46,4 @@ By participating in this project, you agree to abide by the [Code of Conduct](CO
 
 ## License
 
-By contributing to Lattice, you agree that your contributions will be licensed under the [Mozilla Public License 2.0](LICENSE).
+By contributing to Net Lattice, you agree that your contributions will be licensed under the [Mozilla Public License 2.0](LICENSE).

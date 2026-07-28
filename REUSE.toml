@@ -1,16 +1,16 @@
 version = 1
-SPDX-PackageName = "lattice"
-SPDX-PackageSupplier = "Lattice Contributors"
-SPDX-PackageDownloadLocation = "https://github.com/F000NKKK/lattice"
+SPDX-PackageName = "net-lattice"
+SPDX-PackageSupplier = "Net Lattice Contributors"
+SPDX-PackageDownloadLocation = "https://github.com/F000NKKK/net-lattice"
 
 [[annotations]]
 path = "**"
-SPDX-FileCopyrightText = "Lattice Contributors"
+SPDX-FileCopyrightText = "Net Lattice Contributors"
 SPDX-License-Identifier = "MPL-2.0"
 
 [[annotations]]
 path = "LICENSE"
-SPDX-FileCopyrightText = "Lattice Contributors"
+SPDX-FileCopyrightText = "Net Lattice Contributors"
 SPDX-License-Identifier = "MPL-2.0"
 
 [[annotations]]
@@ -20,5 +20,5 @@ path = [
     "**.gitattributes",
     "**.editorconfig",
 ]
-SPDX-FileCopyrightText = "Lattice Contributors"
+SPDX-FileCopyrightText = "Net Lattice Contributors"
 SPDX-License-Identifier = "CC0-1.0"

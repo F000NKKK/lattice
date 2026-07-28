@@ -4,15 +4,19 @@
 
 🇺🇸 **English** | 🇷🇺 [Русский](ARCHITECTURE.ru.md)
 
-This document describes the planned workspace structure for Lattice and the
+This document describes the planned workspace structure for Net Lattice and the
 design principles behind it. It reflects intended direction, not current
 state: see [CHANGELOG.md](CHANGELOG.md) and [README.md](README.md) for what
-actually exists in the repository today. As of this writing, the repository
-contains no crates and no implementation code.
+actually exists in the repository today. As of this writing, Stage 0.1 of
+the Incremental Delivery Plan below has landed (`net-lattice-core`,
+`net-lattice-ip`, `net-lattice-model`'s `route` module,
+`net-lattice-platform`'s `RouteProvider`, `net-lattice-backend-linux`, and
+the `net-lattice` facade) — everything past that stage is still a target,
+not current state.
 
 ## Guiding Principle
 
-Lattice separates two concerns that are easy to tangle together in
+Net Lattice separates two concerns that are easy to tangle together in
 cross-platform networking code:
 
 1. **Model** — strongly typed representations of networking concepts (IP
@@ -36,7 +40,7 @@ Applying this test:
 
 - **IP addresses and networks** (`IPv4Address`, `IPv6Address`, `Network`,
   `Prefix`) are a real candidate for standalone use — a consumer might want
-  typed IP parsing without any of the rest of Lattice. This justifies its own
+  typed IP parsing without any of the rest of Net Lattice. This justifies its own
   crate.
 - **MAC addresses**, **routes**, **interfaces**, **neighbor entries (ARP/NDP)**,
   and **DNS configuration** have no independent reuse case: they are always
@@ -52,39 +56,39 @@ is a non-breaking workspace refactor, not an early commitment.
 ## Workspace Layout
 
 ```
-lattice-core          Error, Result, ID types, shared traits
+net-lattice-core          Error, Result, ID types, shared traits
    │
-   ├── lattice-ip        IPv4Address, IPv6Address, Network, Prefix
-   │        (depends on: lattice-core)
+   ├── net-lattice-ip        IPv4Address, IPv6Address, Network, Prefix
+   │        (depends on: net-lattice-core)
    │
-   ├── lattice-model     modules: mac, route, interface, neighbor, dns, event
-   │        (depends on: lattice-core, lattice-ip)
+   ├── net-lattice-model     modules: mac, route, interface, neighbor, dns, event
+   │        (depends on: net-lattice-core, net-lattice-ip)
    │
-   ├── lattice-platform  Generic provider traits, Capability
-   │        (depends on: lattice-core — NOT lattice-model)
+   ├── net-lattice-platform  Generic provider traits, Capability
+   │        (depends on: net-lattice-core — NOT net-lattice-model)
    │
-   ├── lattice-backend-linux    Netlink backend
-   ├── lattice-backend-windows  IP Helper API backend
-   ├── lattice-backend-darwin   Route socket backend
-   │        (each depends on: lattice-platform AND lattice-model —
+   ├── net-lattice-backend-linux    Netlink backend
+   ├── net-lattice-backend-windows  IP Helper API backend
+   ├── net-lattice-backend-darwin   Route socket backend
+   │        (each depends on: net-lattice-platform AND net-lattice-model —
    │         backends are where the generic contract and the concrete
    │         model finally meet)
    │
-   └── lattice           Public facade, default backend selection
-            (depends on: lattice-model, lattice-platform, lattice-backend-*)
+   └── net-lattice           Public facade, default backend selection
+            (depends on: net-lattice-model, net-lattice-platform, net-lattice-backend-*)
 ```
 
-`lattice-model` and `lattice-platform` are siblings under `lattice-core`,
-not a chain. `lattice-platform` depends on nothing that describes what a
+`net-lattice-model` and `net-lattice-platform` are siblings under `net-lattice-core`,
+not a chain. `net-lattice-platform` depends on nothing that describes what a
 route or an interface actually is — it only knows that a backend produces
 *something*, and defers what that something is to whoever implements or
-consumes the trait. `lattice-model` in turn has no idea `lattice-platform`
+consumes the trait. `net-lattice-model` in turn has no idea `net-lattice-platform`
 exists. Neither can build the other into a `if linux { ... } else if
 windows { ... }` situation, because neither has enough information about
-the other's domain to do so. See the `lattice-platform` section below for
+the other's domain to do so. See the `net-lattice-platform` section below for
 how this is expressed concretely.
 
-### `lattice-core`
+### `net-lattice-core`
 
 Foundational types with no networking semantics of their own: `Error`,
 `Result<T>`, ID types, and shared traits used across the rest of the
@@ -92,7 +96,7 @@ workspace. No OS dependency, no networking-specific types.
 
 **ID types are a single generic type, not one struct per domain object.**
 Rather than defining `RouteId`, `InterfaceId`, `NeighborId`, ... as
-independent structs, `lattice-core` defines one phantom-typed `Id<T>` and
+independent structs, `net-lattice-core` defines one phantom-typed `Id<T>` and
 each domain gets a type alias (`type InterfaceId = Id<Interface>;`). This
 costs nothing extra to define and makes a whole class of mistake a compile
 error instead of a runtime bug: passing a `RouteId` where an `InterfaceId`
@@ -111,31 +115,31 @@ stored or transmitted config.
 
 This crate is intentionally kept minimal and stays that way by construction:
 anything that represents a networking concept (an address, a route, a
-resolver setting) belongs in `lattice-ip` or `lattice-model`, never here.
-`lattice-core` should never need a new module just because a new domain
+resolver setting) belongs in `net-lattice-ip` or `net-lattice-model`, never here.
+`net-lattice-core` should never need a new module just because a new domain
 (DNS, firewall, VLAN, ...) was added elsewhere in the workspace — if it does,
 that is a sign something was misplaced.
 
-### `lattice-ip`
+### `net-lattice-ip`
 
 IP address and network primitives: `IPv4Address`, `IPv6Address`,
 `IPv4Network`, `IPv6Network`, `PrefixLength`. Pure data and arithmetic, no
 OS dependency. This crate should be buildable for any target, including
 `wasm32`.
 
-### `lattice-model`
+### `net-lattice-model`
 
 The domain model of operating system networking state, organized as modules:
 
 - `mac` — `MacAddress`
 - `route` — `Route`, gateway, metric
 - `interface` — `Interface` and interface kind (depends on `mac`)
-- `neighbor` — ARP/NDP entries (depends on `lattice-ip` and `mac`)
-- `dns` — DNS resolver configuration (depends on `lattice-ip`)
+- `neighbor` — ARP/NDP entries (depends on `net-lattice-ip` and `mac`)
+- `dns` — DNS resolver configuration (depends on `net-lattice-ip`)
 - `event` — `Event`, the change-notification enum. This lives here, not in
-  `lattice-platform`, because an event refers to domain data — it has no
+  `net-lattice-platform`, because an event refers to domain data — it has no
   meaning without knowing what a route or an interface is, which is
-  exactly the knowledge `lattice-platform` is not allowed to have.
+  exactly the knowledge `net-lattice-platform` is not allowed to have.
 
   **Events are signals, not snapshots.** An event should carry an ID and a
   kind of change (`Added` / `Removed` / `Changed`), not a clone of the full
@@ -169,10 +173,10 @@ The domain model of operating system networking state, organized as modules:
   expected to carry this information eventually, so the enum shape isn't
   designed to preclude it.
 
-Modules within `lattice-model` may depend on each other and on `lattice-ip`,
+Modules within `net-lattice-model` may depend on each other and on `net-lattice-ip`,
 but the crate as a whole has no OS dependency. `dns` intentionally does not
 depend on `interface`; a per-interface DNS association is expressed with
-`InterfaceId` from `lattice-core` rather than a direct module dependency, to
+`InterfaceId` from `net-lattice-core` rather than a direct module dependency, to
 avoid coupling modules that should be free to evolve independently.
 
 **Model types must be designed for extension, not for the lowest common
@@ -187,15 +191,15 @@ document, but whatever shape they take must leave room for
 platform-specific extension (e.g. an open-ended properties/extension
 container) from the outset.
 
-### `lattice-platform`
+### `net-lattice-platform`
 
 This is the crate that makes the model/backend separation real rather than
-aspirational: **`lattice-platform` does not depend on `lattice-model`.**
+aspirational: **`net-lattice-platform` does not depend on `net-lattice-model`.**
 
 Its provider traits describe the *shape* of a contract, not the *content*
 of the model — they are generic over the domain type they operate on via
 associated types, rather than naming `Route`/`Interface` from
-`lattice-model` directly:
+`net-lattice-model` directly:
 
 ```rust
 trait RouteProvider {
@@ -212,9 +216,9 @@ trait InterfaceProvider {
 }
 ```
 
-`lattice-platform` is satisfied by anything shaped like a route; it has no
+`net-lattice-platform` is satisfied by anything shaped like a route; it has no
 way to know or care that the concrete type happens to come from
-`lattice-model`. This is what "platform says *I need something
+`net-lattice-model`. This is what "platform says *I need something
 Route-shaped*; model says *I exist independently of platform*" means in
 Rust terms — it is not achievable by wishing the dependency arrow away, it
 requires the trait to stop naming the concrete type.
@@ -242,7 +246,7 @@ force every backend to stub out methods for features it doesn't have:
   `backend.capabilities().contains(Capability::VRF)` at runtime rather than
   relying on a method silently failing or panicking when a feature isn't
   actually available. `Capability` is a plain enum with no domain types in
-  it, so it costs `lattice-platform` nothing to keep here. Because
+  it, so it costs `net-lattice-platform` nothing to keep here. Because
   consumers routinely need to check for combinations of capabilities
   (`caps.contains(Capability::IPV6 | Capability::VRF)`), it should be
   represented as a bitflags-style value rather than as a `Vec<Capability>`
@@ -252,59 +256,59 @@ force every backend to stub out methods for features it doesn't have:
   Stage 0.1 detail; what this document fixes is that `Capability` is a
   flag set, not a list.
 
-This crate depends only on `lattice-core` (for `Error` and ID types). It
+This crate depends only on `net-lattice-core` (for `Error` and ID types). It
 has no OS-specific code and, unlike the previous revision of this
-document, no dependency on `lattice-model` either.
+document, no dependency on `net-lattice-model` either.
 
 **Where the generic contract meets the concrete model.** Something has to
-bind `Self::Route = lattice_model::route::Route` eventually, or the
+bind `Self::Route = net_lattice_model::route::Route` eventually, or the
 associated types are never resolved to anything real. That binding
 happens in the backend crates, which already depend on both
-`lattice-platform` (for the traits) and `lattice-model` (for the concrete
-types) — see below. `lattice-platform` itself never performs this binding
+`net-lattice-platform` (for the traits) and `net-lattice-model` (for the concrete
+types) — see below. `net-lattice-platform` itself never performs this binding
 and never needs to.
 
-### Platform backends: `lattice-backend-linux`, `lattice-backend-windows`, `lattice-backend-darwin`
+### Platform backends: `net-lattice-backend-linux`, `net-lattice-backend-windows`, `net-lattice-backend-darwin`
 
-Each backend implements the subset of `lattice-platform` provider traits it
+Each backend implements the subset of `net-lattice-platform` provider traits it
 can support, using native OS facilities:
 
-- `lattice-backend-linux` — Netlink (via an existing Netlink crate as a
-  dependency, not a Lattice-owned wrapper crate).
-- `lattice-backend-windows` — IP Helper API via Windows bindings.
-- `lattice-backend-darwin` — BSD/macOS route sockets and related system
+- `net-lattice-backend-linux` — Netlink (via an existing Netlink crate as a
+  dependency, not a Net Lattice-owned wrapper crate).
+- `net-lattice-backend-windows` — IP Helper API via Windows bindings.
+- `net-lattice-backend-darwin` — BSD/macOS route sockets and related system
   APIs.
 
-The `lattice-backend-*` naming (rather than bare `lattice-linux`, etc.)
+The `net-lattice-backend-*` naming (rather than bare `net-lattice-linux`, etc.)
 makes each crate's role legible from its name alone when scanning the
 workspace or `cargo search` results, and leaves room for names like
-`lattice-backend-linux-networkmanager` alongside
-`lattice-backend-linux-netlink` if a given OS ever needs more than one
+`net-lattice-backend-linux-networkmanager` alongside
+`net-lattice-backend-linux-netlink` if a given OS ever needs more than one
 competing backend crate.
 
-`lattice` selects a backend crate for the current target by default via
+`net-lattice` selects a backend crate for the current target by default via
 `cfg(target_os = "...")`, but each backend is additionally gated behind a
 same-named Cargo feature (`linux`, `windows`, `darwin`). This is not about
 runtime backend switching (see the object safety note above — that stays
-a compile-time choice) but about being able to depend on `lattice-backend-linux`
+a compile-time choice) but about being able to depend on `net-lattice-backend-linux`
 specifically — for example to run its unit tests, or to cross-check its
 behavior — without requiring a full build for every other platform's
 backend on a machine that can't target them.
 
 Each backend binds every trait's associated type to the concrete
-`lattice-model` type it produces:
+`net-lattice-model` type it produces:
 
 ```rust
 impl RouteProvider for LinuxBackend {
-    type Route = lattice_model::route::Route;
+    type Route = net_lattice_model::route::Route;
 
     fn routes(&self) -> Result<Vec<Self::Route>, Error> { /* netlink */ }
     fn add_route(&self, route: Self::Route) -> Result<(), Error> { /* netlink */ }
 }
 ```
 
-Backends are the only place in the workspace where `lattice-platform` and
-`lattice-model` are both in scope at once.
+Backends are the only place in the workspace where `net-lattice-platform` and
+`net-lattice-model` are both in scope at once.
 
 Platform-specific nuances that don't map to a single native API (for
 example, DNS on Linux being served by systemd-resolved, NetworkManager, or
@@ -316,38 +320,38 @@ unwieldy (e.g. a Netlink-based `RouteProvider` and a NetworkManager-based
 `DnsProvider` genuinely warranting independent release cycles), that domain
 can be split into its own provider crate at that point — not before.
 
-Backends depend on `lattice-platform` and `lattice-model`. They export
+Backends depend on `net-lattice-platform` and `net-lattice-model`. They export
 nothing upward; nothing outside a backend crate depends on it directly
-except `lattice` itself.
+except `net-lattice` itself.
 
 **Nothing stops a backend from binding a provider's associated type to
-something other than the matching `lattice-model` type** — that is an
-unavoidable consequence of `lattice-platform` staying generic. A backend
+something other than the matching `net-lattice-model` type** — that is an
+unavoidable consequence of `net-lattice-platform` staying generic. A backend
 crate is free to write `type Route = LinuxRoute;` for some
-backend-specific type instead of `lattice_model::route::Route`. This is
-not a gap to close by making `lattice-platform` depend on `lattice-model`
-(see the previous section); it is closed one layer up, in `lattice`. See
+backend-specific type instead of `net_lattice_model::route::Route`. This is
+not a gap to close by making `net-lattice-platform` depend on `net-lattice-model`
+(see the previous section); it is closed one layer up, in `net-lattice`. See
 below.
 
-### `lattice`
+### `net-lattice`
 
 The public-facing facade. Re-exports the types consumers need from
-`lattice-model` and `lattice-ip`, selects a default backend based on
+`net-lattice-model` and `net-lattice-ip`, selects a default backend based on
 `cfg(target_os = "...")`, and exposes the top-level API (e.g.
 `Lattice::connect()`). This is the only crate most consumers depend on
 directly.
 
-**This is where model convergence is enforced.** `lattice-platform`'s
+**This is where model convergence is enforced.** `net-lattice-platform`'s
 generic contract means a backend's associated types could, in principle,
-diverge from `lattice-model` (see the previous section). `lattice` closes
-that gap not by adding a `lattice-platform → lattice-model` dependency,
+diverge from `net-lattice-model` (see the previous section). `net-lattice` closes
+that gap not by adding a `net-lattice-platform → net-lattice-model` dependency,
 but by constraining the associated types to equal the concrete
-`lattice-model` types wherever it accepts a backend:
+`net-lattice-model` types wherever it accepts a backend:
 
 ```rust
 pub trait LatticeBackend:
-    RouteProvider<Route = lattice_model::route::Route>
-    + InterfaceProvider<Interface = lattice_model::interface::Interface>
+    RouteProvider<Route = net_lattice_model::route::Route>
+    + InterfaceProvider<Interface = net_lattice_model::interface::Interface>
 {
 }
 
@@ -357,14 +361,14 @@ pub struct Lattice<B: LatticeBackend> {
 ```
 
 A backend whose `Route` associated type is not literally
-`lattice_model::route::Route` simply fails to satisfy `LatticeBackend` and
+`net_lattice_model::route::Route` simply fails to satisfy `LatticeBackend` and
 cannot be used with the public `Lattice` type — a compile error at the
 point the backend is wired in, not a runtime surprise. Collecting the
 per-provider bounds into one named `LatticeBackend` trait (rather than
 repeating a growing `where` clause on `Lattice` itself) is purely
 ergonomic — it does not change where the constraint lives. This gives the
 same strength of guarantee as a direct dependency would, without requiring
-`lattice-platform` itself to know `lattice-model` exists: the constraint
+`net-lattice-platform` itself to know `net-lattice-model` exists: the constraint
 lives with the consumer of the contract (the facade that assembles a
 concrete system), not with the contract's definition. This is the same
 shape used by crates like `sqlx` and `diesel`, where a generic backend
@@ -376,7 +380,7 @@ unimplementable as `Box<dyn RouteProvider>` — Rust cannot build a vtable
 for a trait whose method signatures depend on a type that varies per
 implementor. Concretely, this means backends must be selected at compile
 time (`Lattice<LinuxBackend>`) rather than chosen dynamically at runtime
-from a list of loaded implementations. For Lattice's actual delivery plan
+from a list of loaded implementations. For Net Lattice's actual delivery plan
 — a fixed, statically-linked backend per target OS, selected via
 `cfg(target_os = "...")` — this costs nothing. It would matter if Lattice
 later needed to pick between multiple competing backends for the same
@@ -384,7 +388,7 @@ platform at runtime (e.g. Netlink vs. a NetworkManager-based backend on
 the same machine); if that need materializes, an object-safe erased layer
 (non-generic `dyn`-compatible traits that internally forward to the
 generic ones, conventionally called `DynRouteProvider` and friends) can be
-added in `lattice-platform` without changing the generic traits consumers
+added in `net-lattice-platform` without changing the generic traits consumers
 already depend on. This is a reserved extension point, not a commitment —
 it is not built until a concrete use case needs it.
 
@@ -397,7 +401,7 @@ completely different codes, and a consumer writing cross-platform code
 needs to match on *why* an operation failed, not on a platform-specific
 integer.
 
-`lattice-core::Error` is the single error type surfaced across the
+`net-lattice-core::Error` is the single error type surfaced across the
 workspace, expressed as platform-independent variants such as:
 
 - `PermissionDenied`
@@ -412,7 +416,7 @@ workspace, expressed as platform-independent variants such as:
 
 The exact variant list is an API design decision for the Stage 0.1 draft;
 what this document fixes is that such a taxonomy exists and lives in
-`lattice-core`, and that provider trait methods return `Result<T, Error>`
+`net-lattice-core`, and that provider trait methods return `Result<T, Error>`
 using it — never a raw OS error type.
 
 **`PlatformError`'s code cannot be a single untyped integer.** Linux errno
@@ -453,7 +457,7 @@ fact that a caller can plausibly have one without the other.
 multicast sockets on Linux, `NotifyRouteChange2`-style callbacks on
 Windows, routing sockets on BSD/macOS), which means it cannot be
 implemented as a plain blocking method the way `RouteProvider` or
-`InterfaceProvider` can. Whether Lattice commits to an async runtime,
+`InterfaceProvider` can. Whether Net Lattice commits to an async runtime,
 exposes a runtime-agnostic stream abstraction, or offers a blocking
 callback-based API for `EventProvider` is an open decision that affects
 the public API surface and dependency footprint (e.g. `futures`/`tokio`)
@@ -466,7 +470,7 @@ not discovered ad hoc through the first backend that happens to implement
 it. This document deliberately does not prescribe the answer.
 
 **One constraint is fixed regardless of that decision: no async runtime is
-tied to `lattice-platform` or `lattice-core`.** Lattice is a library meant
+tied to `net-lattice-platform` or `net-lattice-core`.** Net Lattice is a library meant
 to be embedded inside applications that have already committed to Tokio,
 async-std, smol, or no async runtime at all, and to a runtime dependency to
 either of the crates that every backend and every consumer must compile
@@ -488,14 +492,14 @@ provider traits, not a different backend contract. Retrofitting it later
 would touch every provider if the concept isn't at least named now. The
 architecture reserves room for it as:
 
-- `SnapshotProvider` — a `lattice-platform` provider trait (generic over
+- `SnapshotProvider` — a `net-lattice-platform` provider trait (generic over
   an associated `State` type, like the others) that assembles a
   `CurrentState` by reading the other providers a backend implements. This
   is the concrete mechanism behind `CurrentState` below, rather than each
   backend or the facade having to hand-assemble a snapshot ad hoc.
 - `CurrentState` — the snapshot `SnapshotProvider` produces by reading
   providers (routes, interfaces, ...) for a given backend, built from
-  `lattice-model`'s existing state types (`Route`, `Interface`, ...).
+  `net-lattice-model`'s existing state types (`Route`, `Interface`, ...).
 - `DesiredState` — **not the same type as `CurrentState`.** A desired route
   or interface is expressed as a distinct configuration type
   (`RouteConfig`, `InterfaceConfig`, ...) alongside the corresponding state
@@ -516,7 +520,7 @@ None of these types exist yet, and no crate is created for them now — they
 belong to stage 0.7+ once enough of the imperative provider surface exists
 to compute a meaningful diff against. The state/config split is named here
 — as a parallel `*Config` type per domain object living alongside its state
-type in `lattice-model` — so that it is built in from the first `*Config`
+type in `net-lattice-model` — so that it is built in from the first `*Config`
 type rather than retrofitted after `CurrentState`/`DesiredState` have
 already been conflated into one type.
 
@@ -526,24 +530,24 @@ Once published, different crates in this workspace are expected to change
 at different rates, and consumers need to know which promises hold at
 which layer:
 
-- **`lattice-core`** — the most stable crate in the workspace. `Error`,
+- **`net-lattice-core`** — the most stable crate in the workspace. `Error`,
   `Id<T>`, and shared traits are depended on by everything else; a breaking
   change here forces a breaking change everywhere. Changes require the
   strongest justification and the widest review.
-- **`lattice-ip`** — stable once IPv4/IPv6 types are implemented; the
+- **`net-lattice-ip`** — stable once IPv4/IPv6 types are implemented; the
   domain (IP addressing) is well-understood and slow-moving.
-- **`lattice-model`** — moderate stability. New modules (`dns`, `neighbor`,
+- **`net-lattice-model`** — moderate stability. New modules (`dns`, `neighbor`,
   ...) are expected to be added over time per the delivery plan, but
   existing types should change conservatively once a domain has shipped,
   since both backends and consumers depend on their exact shape.
-- **`lattice-platform`** — expected to evolve faster than `lattice-model`,
+- **`net-lattice-platform`** — expected to evolve faster than `net-lattice-model`,
   since new provider traits are added as new domains gain backend support.
   Adding a trait is not breaking; changing an existing trait's signature
   is, and affects every backend that implements it.
-- **`lattice-backend-*` crates** — the least stable. Internal
+- **`net-lattice-backend-*` crates** — the least stable. Internal
   implementation details may change freely; only the provider trait
   implementations they expose are a compatibility surface, and that
-  surface is owned by `lattice-platform`, not the backend crate itself.
+  surface is owned by `net-lattice-platform`, not the backend crate itself.
 
 This ranking exists so that a change's blast radius can be reasoned about
 before it's made, not so that any crate is exempt from normal semver
@@ -552,19 +556,19 @@ discipline once Lattice reaches 1.0.
 ## Explicit Non-Goals of This Architecture
 
 - **No crate is Linux-, Windows-, or macOS-specific except the backend
-  crates themselves.** `lattice-core`, `lattice-ip`, `lattice-model`, and
-  `lattice-platform` must remain free of `cfg(target_os = "...")` and OS
+  crates themselves.** `net-lattice-core`, `net-lattice-ip`, `net-lattice-model`, and
+  `net-lattice-platform` must remain free of `cfg(target_os = "...")` and OS
   bindings.
-- **`lattice-platform` never depends on `lattice-model`.** Its provider
+- **`net-lattice-platform` never depends on `net-lattice-model`.** Its provider
   traits must stay generic over associated types rather than growing a
   direct dependency on concrete model types, even when it would be
   momentarily convenient (e.g. adding a new provider method whose most
-  obvious signature names `lattice_model::route::Route` directly). If a
+  obvious signature names `net_lattice_model::route::Route` directly). If a
   provider trait cannot be expressed without naming a concrete model type,
   that is a signal to revisit the trait's shape, not to add the
   dependency.
 - **No command-line interface.** Consistent with the project's non-goals in
-  [README.md](README.md), no `lattice-cli` crate is planned.
+  [README.md](README.md), no `net-lattice-cli` crate is planned.
 - **No premature crate creation.** Crates for future domains (VLAN, VRF,
   firewall, tunnels, declarative configuration, transactional apply/rollback)
   are described in the roadmap below but are not created until there is
@@ -577,9 +581,9 @@ are introduced only when there is real implementation work for them:
 
 | Stage | Scope |
 |-------|-------|
-| 0.1 | `lattice-core`, `lattice-ip`, `lattice-model` (`route` module only), `lattice-platform` (`RouteProvider`), `lattice-backend-linux` (routes via Netlink), `lattice` |
-| 0.2 | `lattice-backend-windows` (`RouteProvider`) |
-| 0.3 | `lattice-backend-darwin` (`RouteProvider`) |
+| 0.1 | `net-lattice-core`, `net-lattice-ip`, `net-lattice-model` (`route` module only), `net-lattice-platform` (`RouteProvider`), `net-lattice-backend-linux` (routes via Netlink), `net-lattice` |
+| 0.2 | `net-lattice-backend-windows` (`RouteProvider`) |
+| 0.3 | `net-lattice-backend-darwin` (`RouteProvider`) |
 | 0.4 | `interface` module + `InterfaceProvider` across all backends |
 | 0.5 | `dns` module + `DnsProvider` |
 | 0.6 | `neighbor` module + `NeighborProvider` (ARP/NDP) |

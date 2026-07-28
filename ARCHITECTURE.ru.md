@@ -4,15 +4,19 @@
 
 🇺🇸 [English](ARCHITECTURE.md) | 🇷🇺 **Русский**
 
-Этот документ описывает планируемую структуру workspace Lattice и принципы
+Этот документ описывает планируемую структуру workspace Net Lattice и принципы
 дизайна, лежащие в её основе. Он отражает предполагаемое направление, а не
 текущее состояние: см. [CHANGELOG.md](CHANGELOG.md) и [README.md](README.md)
 для того, что реально существует в репозитории на данный момент. На момент
-написания репозиторий не содержит ни крейтов, ни кода реализации.
+написания реализован этап 0.1 плана поэтапной поставки ниже (`net-lattice-core`,
+`net-lattice-ip`, модуль `route` в `net-lattice-model`, `RouteProvider` в
+`net-lattice-platform`, `net-lattice-backend-linux` и фасад `net-lattice`) —
+всё, что описано дальше этого этапа, по-прежнему только цель, а не текущее
+состояние.
 
 ## Руководящий принцип
 
-Lattice разделяет два аспекта, которые легко перепутать в кроссплатформенном
+Net Lattice разделяет два аспекта, которые легко перепутать в кроссплатформенном
 сетевом коде:
 
 1. **Model (модель)** — строго типизированные представления сетевых понятий
@@ -29,14 +33,14 @@ Lattice разделяет два аспекта, которые легко пе
 
 Понятие получает **собственный крейт** только тогда, когда есть конкретная
 причина выделить его отдельно: потенциал независимого переиспользования вне
-Lattice, отдельный темп релизов или реальный случай самостоятельной публикации
+Net Lattice, отдельный темп релизов или реальный случай самостоятельной публикации
 на crates.io. Всё остальное — **модуль** внутри общего крейта.
 
 Применяя этот критерий:
 
 - **IP-адреса и сети** (`IPv4Address`, `IPv6Address`, `Network`, `Prefix`) —
   реальный кандидат на самостоятельное использование: потребителю может
-  понадобиться типизированный парсинг IP без остальной части Lattice. Это
+  понадобиться типизированный парсинг IP без остальной части Net Lattice. Это
   оправдывает отдельный крейт.
 - **MAC-адреса**, **маршруты**, **интерфейсы**, **записи соседей (ARP/NDP)**
   и **конфигурация DNS** не имеют случая независимого переиспользования: они
@@ -52,39 +56,39 @@ Lattice, отдельный темп релизов или реальный сл
 ## Структура Workspace
 
 ```
-lattice-core          Error, Result, ID types, shared traits
+net-lattice-core          Error, Result, ID types, shared traits
    │
-   ├── lattice-ip        IPv4Address, IPv6Address, Network, Prefix
-   │        (depends on: lattice-core)
+   ├── net-lattice-ip        IPv4Address, IPv6Address, Network, Prefix
+   │        (depends on: net-lattice-core)
    │
-   ├── lattice-model     modules: mac, route, interface, neighbor, dns, event
-   │        (depends on: lattice-core, lattice-ip)
+   ├── net-lattice-model     modules: mac, route, interface, neighbor, dns, event
+   │        (depends on: net-lattice-core, net-lattice-ip)
    │
-   ├── lattice-platform  Generic provider traits, Capability
-   │        (depends on: lattice-core — NOT lattice-model)
+   ├── net-lattice-platform  Generic provider traits, Capability
+   │        (depends on: net-lattice-core — NOT net-lattice-model)
    │
-   ├── lattice-backend-linux    Netlink backend
-   ├── lattice-backend-windows  IP Helper API backend
-   ├── lattice-backend-darwin   Route socket backend
-   │        (each depends on: lattice-platform AND lattice-model —
+   ├── net-lattice-backend-linux    Netlink backend
+   ├── net-lattice-backend-windows  IP Helper API backend
+   ├── net-lattice-backend-darwin   Route socket backend
+   │        (each depends on: net-lattice-platform AND net-lattice-model —
    │         backends are where the generic contract and the concrete
    │         model finally meet)
    │
-   └── lattice           Public facade, default backend selection
-            (depends on: lattice-model, lattice-platform, lattice-backend-*)
+   └── net-lattice           Public facade, default backend selection
+            (depends on: net-lattice-model, net-lattice-platform, net-lattice-backend-*)
 ```
 
-`lattice-model` и `lattice-platform` — сиблинги под `lattice-core`, а не
-цепочка. `lattice-platform` не зависит ни от чего, что описывает, что такое
+`net-lattice-model` и `net-lattice-platform` — сиблинги под `net-lattice-core`, а не
+цепочка. `net-lattice-platform` не зависит ни от чего, что описывает, что такое
 маршрут или интерфейс на самом деле — он знает только, что backend производит
 *что-то*, и оставляет решение о том, что это "что-то" есть, тому, кто
-реализует или потребляет trait. `lattice-model`, в свою очередь, понятия не
-имеет о существовании `lattice-platform`. Ни один из них не может превратиться
+реализует или потребляет trait. `net-lattice-model`, в свою очередь, понятия не
+имеет о существовании `net-lattice-platform`. Ни один из них не может превратиться
 в ситуацию `if linux { ... } else if windows { ... }`, потому что ни у одного
 нет достаточно информации о домене другого, чтобы это сделать. См. раздел
-`lattice-platform` ниже о том, как это выражено конкретно.
+`net-lattice-platform` ниже о том, как это выражено конкретно.
 
-### `lattice-core`
+### `net-lattice-core`
 
 Базовые типы без собственной сетевой семантики: `Error`, `Result<T>`, типы ID
 и общие traits, используемые во всём workspace. Никакой зависимости от ОС,
@@ -92,7 +96,7 @@ lattice-core          Error, Result, ID types, shared traits
 
 **Типы ID — это один generic-тип, а не отдельная структура на каждый доменный
 объект.** Вместо определения `RouteId`, `InterfaceId`, `NeighborId`, ... как
-независимых структур, `lattice-core` определяет один phantom-типизированный
+независимых структур, `net-lattice-core` определяет один phantom-типизированный
 `Id<T>`, и каждый домен получает алиас типа (`type InterfaceId = Id<Interface>;`).
 Это ничего не стоит дополнительно определить и превращает целый класс ошибок
 в ошибку компиляции вместо runtime-бага: передача `RouteId` там, где ожидается
@@ -111,18 +115,18 @@ change для каждого сохранённого или переданно�
 
 Этот крейт намеренно держится минимальным и остаётся таким по построению:
 всё, что представляет сетевое понятие (адрес, маршрут, настройка резолвера),
-относится к `lattice-ip` или `lattice-model`, никогда не сюда. `lattice-core`
+относится к `net-lattice-ip` или `net-lattice-model`, никогда не сюда. `net-lattice-core`
 никогда не должен требовать нового модуля просто потому, что где-то в
 workspace появился новый домен (DNS, firewall, VLAN, ...) — если это
 происходит, значит что-то было размещено не туда.
 
-### `lattice-ip`
+### `net-lattice-ip`
 
 Примитивы IP-адресов и сетей: `IPv4Address`, `IPv6Address`, `IPv4Network`,
 `IPv6Network`, `PrefixLength`. Чистые данные и арифметика, никакой зависимости
 от ОС. Этот крейт должен собираться под любую цель, включая `wasm32`.
 
-### `lattice-model`
+### `net-lattice-model`
 
 Доменная модель сетевого состояния операционной системы, организованная как
 модули:
@@ -130,12 +134,12 @@ workspace появился новый домен (DNS, firewall, VLAN, ...) — 
 - `mac` — `MacAddress`
 - `route` — `Route`, gateway, metric
 - `interface` — `Interface` и тип интерфейса (зависит от `mac`)
-- `neighbor` — записи ARP/NDP (зависит от `lattice-ip` и `mac`)
-- `dns` — конфигурация DNS-резолвера (зависит от `lattice-ip`)
+- `neighbor` — записи ARP/NDP (зависит от `net-lattice-ip` и `mac`)
+- `dns` — конфигурация DNS-резолвера (зависит от `net-lattice-ip`)
 - `event` — `Event`, enum уведомлений об изменениях. Он живёт здесь, а не в
-  `lattice-platform`, потому что событие ссылается на доменные данные — оно
+  `net-lattice-platform`, потому что событие ссылается на доменные данные — оно
   бессмысленно без знания того, что такое маршрут или интерфейс, а это ровно
-  то знание, которого `lattice-platform` иметь не должен.
+  то знание, которого `net-lattice-platform` иметь не должен.
 
   **События — это сигналы, а не снапшоты.** Событие должно нести ID и вид
   изменения (`Added` / `Removed` / `Changed`), а не клон полного доменного
@@ -169,10 +173,10 @@ workspace появился новый домен (DNS, firewall, VLAN, ...) — 
   фиксирует лишь то, что `Changed` со временем должен нести эту информацию,
   так что форма enum не должна этому препятствовать.
 
-Модули внутри `lattice-model` могут зависеть друг от друга и от `lattice-ip`,
+Модули внутри `net-lattice-model` могут зависеть друг от друга и от `net-lattice-ip`,
 но крейт в целом не имеет зависимости от ОС. `dns` намеренно не зависит от
 `interface`; связь DNS с конкретным интерфейсом выражается через `InterfaceId`
-из `lattice-core`, а не через прямую зависимость модулей, чтобы избежать
+из `net-lattice-core`, а не через прямую зависимость модулей, чтобы избежать
 связывания модулей, которые должны свободно эволюционировать независимо.
 
 **Типы модели должны проектироваться с расчётом на расширение, а не под
@@ -187,14 +191,14 @@ BSD предоставляют более узкий набор. Сжатие т
 для платформо-специфичного расширения (например, через открытый
 properties/extension-контейнер).
 
-### `lattice-platform`
+### `net-lattice-platform`
 
 Это крейт, который делает разделение model/backend реальным, а не
-декларативным: **`lattice-platform` не зависит от `lattice-model`.**
+декларативным: **`net-lattice-platform` не зависит от `net-lattice-model`.**
 
 Его provider-traits описывают *форму* контракта, а не *содержимое* модели —
 они generic относительно доменного типа, с которым работают, через
-associated types, а не называют `Route`/`Interface` из `lattice-model`
+associated types, а не называют `Route`/`Interface` из `net-lattice-model`
 напрямую:
 
 ```rust
@@ -212,9 +216,9 @@ trait InterfaceProvider {
 }
 ```
 
-`lattice-platform` удовлетворён чем угодно, что имеет форму маршрута; у него
+`net-lattice-platform` удовлетворён чем угодно, что имеет форму маршрута; у него
 нет способа знать или заботиться о том, что конкретный тип на самом деле
-происходит из `lattice-model`. Именно это означают на языке Rust слова
+происходит из `net-lattice-model`. Именно это означают на языке Rust слова
 "platform говорит: *мне нужно что-то Route-образное*; model говорит: *я
 существую независимо от platform*" — это не достигается желанием убрать
 стрелку зависимости, для этого trait должен перестать называть конкретный
@@ -244,7 +248,7 @@ Provider-traits, по одному на возможность, а не один
   во время выполнения, вместо того чтобы полагаться на метод, молча
   проваливающийся или паникующий, когда возможность на самом деле
   недоступна. `Capability` — простой enum без доменных типов внутри, так что
-  держать его здесь ничего не стоит `lattice-platform`. Поскольку
+  держать его здесь ничего не стоит `net-lattice-platform`. Поскольку
   потребителям регулярно нужно проверять комбинации возможностей
   (`caps.contains(Capability::IPV6 | Capability::VRF)`), он должен быть
   представлен как значение в стиле bitflags, а не как `Vec<Capability>` или
@@ -254,60 +258,60 @@ Provider-traits, по одному на возможность, а не один
   Stage 0.1; этот документ фиксирует лишь то, что `Capability` — это набор
   флагов, а не список.
 
-Этот крейт зависит только от `lattice-core` (ради `Error` и типов ID). У него
+Этот крейт зависит только от `net-lattice-core` (ради `Error` и типов ID). У него
 нет OS-специфичного кода и, в отличие от предыдущей редакции этого документа,
-никакой зависимости от `lattice-model`.
+никакой зависимости от `net-lattice-model`.
 
 **Где generic-контракт встречается с конкретной моделью.** Что-то в итоге
-должно связать `Self::Route = lattice_model::route::Route`, иначе associated
+должно связать `Self::Route = net_lattice_model::route::Route`, иначе associated
 types никогда не разрешатся во что-то реальное. Это связывание происходит в
-крейтах backend'ов, которые уже зависят и от `lattice-platform` (ради
-traits), и от `lattice-model` (ради конкретных типов) — см. ниже.
-`lattice-platform` сам это связывание никогда не выполняет и никогда не
+крейтах backend'ов, которые уже зависят и от `net-lattice-platform` (ради
+traits), и от `net-lattice-model` (ради конкретных типов) — см. ниже.
+`net-lattice-platform` сам это связывание никогда не выполняет и никогда не
 должен.
 
-### Backend-крейты платформ: `lattice-backend-linux`, `lattice-backend-windows`, `lattice-backend-darwin`
+### Backend-крейты платформ: `net-lattice-backend-linux`, `net-lattice-backend-windows`, `net-lattice-backend-darwin`
 
 Каждый backend реализует то подмножество provider-traits из
-`lattice-platform`, которое реально может поддержать, используя нативные
+`net-lattice-platform`, которое реально может поддержать, используя нативные
 средства ОС:
 
-- `lattice-backend-linux` — Netlink (через существующий Netlink-крейт как
-  зависимость, а не собственную обёртку Lattice).
-- `lattice-backend-windows` — IP Helper API через Windows-биндинги.
-- `lattice-backend-darwin` — BSD/macOS route sockets и связанные системные
+- `net-lattice-backend-linux` — Netlink (через существующий Netlink-крейт как
+  зависимость, а не собственную обёртку Net Lattice).
+- `net-lattice-backend-windows` — IP Helper API через Windows-биндинги.
+- `net-lattice-backend-darwin` — BSD/macOS route sockets и связанные системные
   API.
 
-Нейминг `lattice-backend-*` (вместо голых `lattice-linux` и т.п.) делает роль
+Нейминг `net-lattice-backend-*` (вместо голых `net-lattice-linux` и т.п.) делает роль
 каждого крейта понятной из одного лишь имени при просмотре workspace или
 результатов `cargo search`, и оставляет место для имён вроде
-`lattice-backend-linux-networkmanager` рядом с `lattice-backend-linux-netlink`,
+`net-lattice-backend-linux-networkmanager` рядом с `net-lattice-backend-linux-netlink`,
 если какой-то ОС когда-нибудь понадобится больше одного конкурирующего
 backend-крейта.
 
-`lattice` по умолчанию выбирает backend-крейт для текущей цели через
+`net-lattice` по умолчанию выбирает backend-крейт для текущей цели через
 `cfg(target_os = "...")`, но каждый backend дополнительно закрыт одноимённым
 Cargo-feature (`linux`, `windows`, `darwin`). Речь не о переключении backend'а
 во время выполнения (см. замечание об object safety выше — это остаётся
 выбором на этапе компиляции), а о возможности зависеть конкретно от
-`lattice-backend-linux` — например, чтобы запустить его unit-тесты или
+`net-lattice-backend-linux` — например, чтобы запустить его unit-тесты или
 перепроверить его поведение — без необходимости полной сборки под каждую
 другую платформу на машине, которая не может собирать под них.
 
 Каждый backend связывает associated type каждого trait'а с конкретным типом
-`lattice-model`, который он производит:
+`net-lattice-model`, который он производит:
 
 ```rust
 impl RouteProvider for LinuxBackend {
-    type Route = lattice_model::route::Route;
+    type Route = net_lattice_model::route::Route;
 
     fn routes(&self) -> Result<Vec<Self::Route>, Error> { /* netlink */ }
     fn add_route(&self, route: Self::Route) -> Result<(), Error> { /* netlink */ }
 }
 ```
 
-Backend'ы — единственное место в workspace, где `lattice-platform` и
-`lattice-model` одновременно находятся в области видимости.
+Backend'ы — единственное место в workspace, где `net-lattice-platform` и
+`net-lattice-model` одновременно находятся в области видимости.
 
 Платформо-специфичные нюансы, не сводящиеся к одному нативному API (например,
 DNS в Linux, обслуживаемый systemd-resolved, NetworkManager или простым
@@ -320,37 +324,37 @@ NetworkManager-реализация `DnsProvider`, реально заслужи
 циклов релизов), этот домен можно будет выделить в собственный
 provider-крейт в этот момент — не раньше.
 
-Backend'ы зависят от `lattice-platform` и `lattice-model`. Они ничего не
+Backend'ы зависят от `net-lattice-platform` и `net-lattice-model`. Они ничего не
 экспортируют выше; ничто вне backend-крейта не зависит от него напрямую,
-кроме самого `lattice`.
+кроме самого `net-lattice`.
 
 **Ничто не мешает backend'у связать associated type provider'а с чем-то, что
-не совпадает с соответствующим типом `lattice-model`** — это неизбежное
-следствие того, что `lattice-platform` остаётся generic. Крейт backend'а
+не совпадает с соответствующим типом `net-lattice-model`** — это неизбежное
+следствие того, что `net-lattice-platform` остаётся generic. Крейт backend'а
 волен написать `type Route = LinuxRoute;` для какого-то backend-специфичного
-типа вместо `lattice_model::route::Route`. Это не пробел, который закрывается
-через зависимость `lattice-platform` от `lattice-model` (см. предыдущий
-раздел); он закрывается на слой выше, в `lattice`. См. ниже.
+типа вместо `net_lattice_model::route::Route`. Это не пробел, который закрывается
+через зависимость `net-lattice-platform` от `net-lattice-model` (см. предыдущий
+раздел); он закрывается на слой выше, в `net-lattice`. См. ниже.
 
-### `lattice`
+### `net-lattice`
 
-Публичный фасад. Реэкспортирует типы, нужные потребителям, из `lattice-model`
-и `lattice-ip`, выбирает backend по умолчанию на основе
+Публичный фасад. Реэкспортирует типы, нужные потребителям, из `net-lattice-model`
+и `net-lattice-ip`, выбирает backend по умолчанию на основе
 `cfg(target_os = "...")` и предоставляет верхнеуровневый API (например,
 `Lattice::connect()`). Это единственный крейт, от которого напрямую зависит
 большинство потребителей.
 
 **Именно здесь обеспечивается схождение модели.** Generic-контракт
-`lattice-platform` означает, что associated types backend'а в принципе могут
-разойтись с `lattice-model` (см. предыдущий раздел). `lattice` закрывает этот
-пробел не добавлением зависимости `lattice-platform → lattice-model`, а
-ограничением associated types равенством конкретным типам `lattice-model`
+`net-lattice-platform` означает, что associated types backend'а в принципе могут
+разойтись с `net-lattice-model` (см. предыдущий раздел). `net-lattice` закрывает этот
+пробел не добавлением зависимости `net-lattice-platform → net-lattice-model`, а
+ограничением associated types равенством конкретным типам `net-lattice-model`
 везде, где он принимает backend:
 
 ```rust
 pub trait LatticeBackend:
-    RouteProvider<Route = lattice_model::route::Route>
-    + InterfaceProvider<Interface = lattice_model::interface::Interface>
+    RouteProvider<Route = net_lattice_model::route::Route>
+    + InterfaceProvider<Interface = net_lattice_model::interface::Interface>
 {
 }
 
@@ -360,14 +364,14 @@ pub struct Lattice<B: LatticeBackend> {
 ```
 
 Backend, чей associated type `Route` не является буквально
-`lattice_model::route::Route`, просто не удовлетворяет `LatticeBackend` и не
+`net_lattice_model::route::Route`, просто не удовлетворяет `LatticeBackend` и не
 может быть использован с публичным типом `Lattice` — ошибка компиляции в
 момент подключения backend'а, а не сюрприз во время выполнения. Сбор
 ограничений по каждому provider'у в один именованный trait `LatticeBackend`
 (вместо повторения растущего `where`-условия на самом `Lattice`) — чисто
 эргономическое решение, оно не меняет, где именно живёт ограничение. Это
 даёт ту же силу гарантии, что и прямая зависимость, не требуя от
-`lattice-platform` знать о существовании `lattice-model`: ограничение живёт
+`net-lattice-platform` знать о существовании `net-lattice-model`: ограничение живёт
 у потребителя контракта (фасада, который собирает конкретную систему), а не
 у определения контракта. Это та же форма, что используется в таких крейтах,
 как `sqlx` и `diesel`, где generic-trait backend'а сочетается со связыванием
@@ -380,29 +384,29 @@ Associated types (`RouteProvider::Route`, ...) делают эти traits
 реализации к реализации. Конкретно это означает, что backend'ы должны
 выбираться во время компиляции (`Lattice<LinuxBackend>`), а не динамически во
 время выполнения из списка загруженных реализаций. Для реального плана
-поставки Lattice — фиксированный, статически слинкованный backend на целевую
+поставки Net Lattice — фиксированный, статически слинкованный backend на целевую
 ОС, выбираемый через `cfg(target_os = "...")` — это ничего не стоит. Это
-имело бы значение, если бы Lattice впоследствии понадобилось выбирать между
+имело бы значение, если бы Net Lattice впоследствии понадобилось выбирать между
 несколькими конкурирующими backend'ами для одной и той же платформы во время
 выполнения (например, Netlink против backend'а на основе NetworkManager на
 одной машине); если такая потребность материализуется, object-safe erased
 слой (не-generic `dyn`-совместимые traits, внутренне делегирующие к generic
 версиям, условно называемые `DynRouteProvider` и подобными) можно будет
-добавить в `lattice-platform`, не меняя generic-traits, от которых уже
+добавить в `net-lattice-platform`, не меняя generic-traits, от которых уже
 зависят потребители. Это зарезервированная точка расширения, а не
 обязательство — она не строится, пока не появится конкретный случай
 использования.
 
 ## Модель ошибок
 
-Lattice не должна допускать утечку `std::io::Error` или сырых кодов ошибок ОС
+Net Lattice не должна допускать утечку `std::io::Error` или сырых кодов ошибок ОС
 (`EPERM`/`ENODEV` в Linux, `ERROR_ACCESS_DENIED` в Windows) в качестве своего
 публичного типа ошибки. Разные backend'ы проваливаются по одной и той же
 логической причине через совершенно разные коды, а потребителю,
 пишущему кроссплатформенный код, нужно матчиться на *причину* сбоя, а не на
 платформо-специфичное целое число.
 
-`lattice-core::Error` — единственный тип ошибки, предъявляемый во всём
+`net-lattice-core::Error` — единственный тип ошибки, предъявляемый во всём
 workspace, выраженный через платформо-независимые варианты, такие как:
 
 - `PermissionDenied`
@@ -417,7 +421,7 @@ workspace, выраженный через платформо-независим
 
 Точный список вариантов — решение API-дизайна для черновика Stage 0.1; этот
 документ фиксирует лишь то, что такая таксономия существует и живёт в
-`lattice-core`, и что методы provider-traits возвращают `Result<T, Error>`
+`net-lattice-core`, и что методы provider-traits возвращают `Result<T, Error>`
 с её использованием — никогда сырой тип ошибки ОС.
 
 **Код `PlatformError` не может быть одним нетипизированным целым числом.**
@@ -459,7 +463,7 @@ trait'а) не должно скрывать тот факт, что у вызы
 сокеты Netlink в Linux, callback'и в стиле `NotifyRouteChange2` в Windows,
 routing sockets в BSD/macOS), а значит его нельзя реализовать как обычный
 блокирующий метод, как `RouteProvider` или `InterfaceProvider`. Свяжет ли
-Lattice себя с асинхронным runtime, предоставит ли runtime-агностичную
+Net Lattice себя с асинхронным runtime, предоставит ли runtime-агностичную
 абстракцию потока, или предложит блокирующий callback-based API для
 `EventProvider` — это открытое решение, влияющее на публичную поверхность
 API и на зависимости (например, `futures`/`tokio`) каждого крейта, который
@@ -472,8 +476,8 @@ backend'а — а не обнаружено ситуативно через пе
 случайно его реализует. Этот документ намеренно не предписывает ответ.
 
 **Одно ограничение фиксировано вне зависимости от этого решения: никакой
-асинхронный runtime не привязывается к `lattice-platform` или
-`lattice-core`.** Lattice — это библиотека, предназначенная для встраивания
+асинхронный runtime не привязывается к `net-lattice-platform` или
+`net-lattice-core`.** Net Lattice — это библиотека, предназначенная для встраивания
 в приложения, уже определившиеся с Tokio, async-std, smol, или вообще без
 асинхронного runtime, и зависимость от runtime в любом из этих крейтов,
 против которых обязаны компилироваться каждый backend и каждый потребитель,
@@ -484,7 +488,7 @@ backend'а — а не обнаружено ситуативно через пе
 
 ## Модель состояния: императивно сейчас, декларативно позже
 
-Изначальная поверхность API Lattice императивна: `route.add()`,
+Изначальная поверхность API Net Lattice императивна: `route.add()`,
 `route.delete()`, отражая то, что естественно предоставляют
 `RouteProvider`/`InterfaceProvider`. Это осознанное решение — это наименьшая
 полезная поверхность, и она напрямую отображается на то, что предоставляют
@@ -496,7 +500,7 @@ provider-traits, а не другой контракт backend'а. Дорабо�
 затронула бы каждый provider, если это понятие не названо хотя бы сейчас.
 Архитектура резервирует под это место как:
 
-- `SnapshotProvider` — provider-trait в `lattice-platform` (generic
+- `SnapshotProvider` — provider-trait в `net-lattice-platform` (generic
   относительно associated-типа `State`, как и остальные), собирающий
   `CurrentState`, читая другие provider'ы, которые реализует backend. Это
   конкретный механизм, стоящий за `CurrentState` ниже, вместо того чтобы
@@ -504,7 +508,7 @@ provider-traits, а не другой контракт backend'а. Дорабо�
   ситуативно.
 - `CurrentState` — снапшот, который производит `SnapshotProvider`, читая
   provider'ы (маршруты, интерфейсы, ...) для данного backend'а, построенный
-  из уже существующих типов состояния `lattice-model` (`Route`, `Interface`,
+  из уже существующих типов состояния `net-lattice-model` (`Route`, `Interface`,
   ...).
 - `DesiredState` — **не тот же тип, что `CurrentState`.** Желаемый маршрут
   или интерфейс выражается отдельным типом конфигурации (`RouteConfig`,
@@ -527,7 +531,7 @@ provider-traits, а не другой контракт backend'а. Дорабо�
 императивной поверхности provider'ов, чтобы вычислять содержательный diff.
 Разделение state/config названо здесь — как параллельный тип `*Config` на
 каждый доменный объект, живущий рядом с его типом состояния в
-`lattice-model` — чтобы оно было заложено с первого типа `*Config`, а не
+`net-lattice-model` — чтобы оно было заложено с первого типа `*Config`, а не
 доделано после того, как `CurrentState`/`DesiredState` уже были бы слиты в
 один тип.
 
@@ -537,46 +541,46 @@ provider-traits, а не другой контракт backend'а. Дорабо�
 скоростью, и потребителям нужно знать, какие обещания действуют на каком
 уровне:
 
-- **`lattice-core`** — самый стабильный крейт в workspace. От `Error`,
+- **`net-lattice-core`** — самый стабильный крейт в workspace. От `Error`,
   `Id<T>` и общих traits зависит всё остальное; breaking change здесь
   вынуждает breaking change везде. Изменения требуют самого веского
   обоснования и самого широкого рецензирования.
-- **`lattice-ip`** — стабилен, как только реализованы типы IPv4/IPv6; домен
+- **`net-lattice-ip`** — стабилен, как только реализованы типы IPv4/IPv6; домен
   (адресация IP) хорошо изучен и медленно меняется.
-- **`lattice-model`** — умеренная стабильность. Новые модули (`dns`,
+- **`net-lattice-model`** — умеренная стабильность. Новые модули (`dns`,
   `neighbor`, ...) со временем добавляются согласно плану поставки, но
   существующие типы должны меняться консервативно после того, как домен
   вышел, поскольку и backend'ы, и потребители зависят от их точной формы.
-- **`lattice-platform`** — ожидается, что будет эволюционировать быстрее,
-  чем `lattice-model`, поскольку новые provider-traits добавляются по мере
+- **`net-lattice-platform`** — ожидается, что будет эволюционировать быстрее,
+  чем `net-lattice-model`, поскольку новые provider-traits добавляются по мере
   того, как новые домены получают поддержку backend'ов. Добавление trait'а
   не является breaking; изменение сигнатуры существующего trait'а —
   является, и затрагивает каждый backend, который его реализует.
-- **Крейты `lattice-backend-*`** — наименее стабильны. Внутренние детали
+- **Крейты `net-lattice-backend-*`** — наименее стабильны. Внутренние детали
   реализации могут меняться свободно; лишь реализации provider-traits,
   которые они предоставляют, являются поверхностью совместимости, и эта
-  поверхность принадлежит `lattice-platform`, а не самому backend-крейту.
+  поверхность принадлежит `net-lattice-platform`, а не самому backend-крейту.
 
 Это ранжирование существует, чтобы можно было оценить радиус поражения от
 изменения до того, как оно сделано, а не для того, чтобы освободить какой-
-либо крейт от обычной semver-дисциплины после достижения Lattice версии 1.0.
+либо крейт от обычной semver-дисциплины после достижения Net Lattice версии 1.0.
 
 ## Явные не-цели этой архитектуры
 
 - **Ни один крейт не является Linux-, Windows- или macOS-специфичным, кроме
-  самих backend-крейтов.** `lattice-core`, `lattice-ip`, `lattice-model` и
-  `lattice-platform` обязаны оставаться свободными от `cfg(target_os = "...")`
+  самих backend-крейтов.** `net-lattice-core`, `net-lattice-ip`, `net-lattice-model` и
+  `net-lattice-platform` обязаны оставаться свободными от `cfg(target_os = "...")`
   и OS-биндингов.
-- **`lattice-platform` никогда не зависит от `lattice-model`.** Его
+- **`net-lattice-platform` никогда не зависит от `net-lattice-model`.** Его
   provider-traits обязаны оставаться generic относительно associated types,
   а не обрастать прямой зависимостью от конкретных типов модели, даже когда
   это было бы моментально удобно (например, добавление нового метода
   provider'а, чья наиболее очевидная сигнатура напрямую называет
-  `lattice_model::route::Route`). Если provider-trait невозможно выразить
+  `net_lattice_model::route::Route`). Если provider-trait невозможно выразить
   без называния конкретного типа модели — это сигнал пересмотреть форму
   trait'а, а не добавлять зависимость.
 - **Никакого интерфейса командной строки.** В соответствии с не-целями
-  проекта в [README.md](README.md), крейт `lattice-cli` не планируется.
+  проекта в [README.md](README.md), крейт `net-lattice-cli` не планируется.
 - **Никакого преждевременного создания крейтов.** Крейты для будущих доменов
   (VLAN, VRF, firewall, туннели, декларативная конфигурация, транзакционные
   apply/rollback) описаны в дорожной карте ниже, но не создаются, пока под
@@ -589,9 +593,9 @@ provider-traits, а не другой контракт backend'а. Дорабо�
 
 | Этап | Объём |
 |-------|-------|
-| 0.1 | `lattice-core`, `lattice-ip`, `lattice-model` (только модуль `route`), `lattice-platform` (`RouteProvider`), `lattice-backend-linux` (маршруты через Netlink), `lattice` |
-| 0.2 | `lattice-backend-windows` (`RouteProvider`) |
-| 0.3 | `lattice-backend-darwin` (`RouteProvider`) |
+| 0.1 | `net-lattice-core`, `net-lattice-ip`, `net-lattice-model` (только модуль `route`), `net-lattice-platform` (`RouteProvider`), `net-lattice-backend-linux` (маршруты через Netlink), `net-lattice` |
+| 0.2 | `net-lattice-backend-windows` (`RouteProvider`) |
+| 0.3 | `net-lattice-backend-darwin` (`RouteProvider`) |
 | 0.4 | модуль `interface` + `InterfaceProvider` на всех backend'ах |
 | 0.5 | модуль `dns` + `DnsProvider` |
 | 0.6 | модуль `neighbor` + `NeighborProvider` (ARP/NDP) |
