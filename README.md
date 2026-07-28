@@ -31,7 +31,7 @@ Lattice is intended to fill this gap by providing a single, well-designed abstra
 - **Strong typing over strings.** Consumers interact with typed Rust values — addresses, prefixes, routes, interfaces — never raw strings or shell commands.
 - **Native APIs, not subprocesses.** Lattice talks directly to platform networking APIs (Netlink, IP Helper API, route sockets) rather than invoking external CLI tools.
 - **Cross-platform by design.** A single API surface backed by platform-specific implementations, so applications do not need to special-case operating systems.
-- **Correctness and safety first.** Network3ing configuration is sensitive; the library should make incorrect states difficult to represent.
+- **Correctness and safety first.** Networking configuration is sensitive; the library should make incorrect states difficult to represent.
 - **Incremental, well-considered growth.** Features are added deliberately, with attention to API design and long-term maintainability, rather than rushed to cover every possible use case.
 
 ## Long-Term Goals
