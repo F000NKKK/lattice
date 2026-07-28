@@ -5,7 +5,7 @@ members = []
 [workspace.package]
 version = "0.0.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.93"
 license = "MPL-2.0"
 repository = "https://github.com/F000NKKK/lattice"
 homepage = "https://github.com/F000NKKK/lattice"

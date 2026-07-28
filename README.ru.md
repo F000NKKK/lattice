@@ -8,7 +8,7 @@
 [![Rust](https://img.shields.io/badge/language-Rust-orange.svg)](https://www.rust-lang.org)
 [![crates.io](https://img.shields.io/badge/crates.io-not%20yet%20published-lightgrey.svg)](https://crates.io)
 [![docs.rs](https://img.shields.io/badge/docs.rs-not%20yet%20published-lightgrey.svg)](https://docs.rs)
-[![MSRV](https://img.shields.io/badge/MSRV-1.85-lightgrey.svg)](Cargo.toml)
+[![MSRV](https://img.shields.io/badge/MSRV-1.93-lightgrey.svg)](Cargo.toml)
 
 **Lattice** — это современная кроссплатформенная библиотека для Rust, предназначенная для настройки и анализа сетевой конфигурации операционной системы через единый строго типизированный API.
 
