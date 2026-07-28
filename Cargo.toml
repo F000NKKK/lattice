@@ -1,0 +1,15 @@
+[workspace]
+resolver = "3"
+members = []
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MPL-2.0"
+repository = "https://github.com/F000NKKK/lattice"
+homepage = "https://github.com/F000NKKK/lattice"
+documentation = "https://docs.rs/lattice"
+authors = ["Lattice Contributors", "F000NK"]
+categories = ["network-programming", "os"]
+keywords = ["networking", "netlink", "cross-platform", "systems", "os"]

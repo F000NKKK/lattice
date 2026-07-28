@@ -1,0 +1,14 @@
+version = 1
+SPDX-PackageName = "lattice"
+SPDX-PackageSupplier = "Lattice Contributors"
+SPDX-PackageDownloadLocation = "https://github.com/F000NKKK/lattice"
+
+[[annotations]]
+path = "**"
+SPDX-FileCopyrightText = "Lattice Contributors"
+SPDX-License-Identifier = "MPL-2.0"
+
+[[annotations]]
+path = ["LICENSE", "CHANGELOG.md", "**.gitignore", "**.gitattributes", "**.editorconfig"]
+SPDX-FileCopyrightText = "Lattice Contributors"
+SPDX-License-Identifier = "CC0-1.0"
