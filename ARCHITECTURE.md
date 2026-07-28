@@ -83,8 +83,19 @@ how this is expressed concretely.
 ### `lattice-core`
 
 Foundational types with no networking semantics of their own: `Error`,
-`Result<T>`, ID types (e.g. `InterfaceId`), and shared traits used across the
-rest of the workspace. No OS dependency, no networking-specific types.
+`Result<T>`, ID types, and shared traits used across the rest of the
+workspace. No OS dependency, no networking-specific types.
+
+**ID types are a single generic type, not one struct per domain object.**
+Rather than defining `RouteId`, `InterfaceId`, `NeighborId`, ... as
+independent structs, `lattice-core` defines one phantom-typed `Id<T>` and
+each domain gets a type alias (`type InterfaceId = Id<Interface>;`). This
+costs nothing extra to define and makes a whole class of mistake a compile
+error instead of a runtime bug: passing a `RouteId` where an `InterfaceId`
+is expected fails to compile, rather than silently looking up the wrong
+object. The exact shape of `Id<T>` is a Stage 0.1 API detail; what this
+document fixes is that IDs are one generic mechanism, not N hand-written
+lookalike structs.
 
 This crate is intentionally kept minimal and stays that way by construction:
 anything that represents a networking concept (an address, a route, a
@@ -109,11 +120,32 @@ The domain model of operating system networking state, organized as modules:
 - `interface` — `Interface` and interface kind (depends on `mac`)
 - `neighbor` — ARP/NDP entries (depends on `lattice-ip` and `mac`)
 - `dns` — DNS resolver configuration (depends on `lattice-ip`)
-- `event` — `Event`, the change-notification enum (`RouteAdded(Route)`,
-  `InterfaceDown(Interface)`, ...). This lives here, not in
-  `lattice-platform`, because an event's payload *is* domain data — it has
-  no meaning without knowing what a `Route` or `Interface` is, which is
+- `event` — `Event`, the change-notification enum. This lives here, not in
+  `lattice-platform`, because an event refers to domain data — it has no
+  meaning without knowing what a route or an interface is, which is
   exactly the knowledge `lattice-platform` is not allowed to have.
+
+  **Events are signals, not snapshots.** An event should carry an ID and a
+  kind of change (`Added` / `Removed` / `Changed`), not a clone of the full
+  domain object:
+
+  ```rust
+  pub enum Event {
+      Route { id: RouteId, kind: ChangeKind },
+      Interface { id: InterfaceId, kind: ChangeKind },
+  }
+  ```
+
+  rather than `Event::RouteAdded(Route)`. Two reasons: native change
+  notifications frequently don't hand over the full object in the first
+  place (an `RTM_NEWROUTE` message or a Windows route-change callback can
+  carry only what changed, not a complete record), so an `Event` that
+  demands a full `Route` would force backends to reconstruct one that
+  wasn't actually delivered; and cloning a full domain object on every
+  change is wasted work when most consumers only want to know *that*
+  something changed before deciding whether to re-query it. A consumer
+  that needs the current value re-reads it through the relevant provider
+  (`backend.routes()`, keyed by the ID from the event).
 
 Modules within `lattice-model` may depend on each other and on `lattice-ip`,
 but the crate as a whole has no OS dependency. `dns` intentionally does not
@@ -272,14 +304,25 @@ workspace, expressed as platform-independent variants such as:
 - `Unsupported` — the operation has no meaning on this backend at all (as
   opposed to a `Capability` being absent at runtime; see below).
 - `InvalidState`
-- `PlatformError { backend, code }` — an escape hatch that preserves the
-  raw backend-specific error for diagnostics, without being the primary
-  way consumers are expected to match on failures.
+- `PlatformError` — an escape hatch that preserves the raw backend-specific
+  error for diagnostics, without being the primary way consumers are
+  expected to match on failures.
 
 The exact variant list is an API design decision for the Stage 0.1 draft;
 what this document fixes is that such a taxonomy exists and lives in
 `lattice-core`, and that provider trait methods return `Result<T, Error>`
 using it — never a raw OS error type.
+
+**`PlatformError`'s code cannot be a single untyped integer.** Linux errno
+is a signed `i32`, Windows error codes are an unsigned `DWORD` (`u32`), and
+collapsing both into one bare `i32`/`u32` field either silently truncates
+one of them or gives a false impression that codes are comparable across
+platforms when they are not — a Linux `13` and a Windows `13` mean nothing
+alike. The code must be tagged by platform, e.g. an enum
+(`PlatformErrorCode::Linux(i32)` / `Windows(u32)` / `Darwin(i32)`) or a
+boxed `dyn Error`. Either resolves the ambiguity; picking between them is a
+Stage 0.1 decision, but leaving the code as one plain integer type is
+ruled out here.
 
 ## Privilege Model
 
@@ -320,6 +363,16 @@ below) API draft, before `EventProvider` is implemented for any backend —
 not discovered ad hoc through the first backend that happens to implement
 it. This document deliberately does not prescribe the answer.
 
+**One constraint is fixed regardless of that decision: no async runtime is
+tied to `lattice-platform` or `lattice-core`.** Lattice is a library meant
+to be embedded inside applications that have already committed to Tokio,
+async-std, smol, or no async runtime at all, and to a runtime dependency to
+either of the crates that every backend and every consumer must compile
+against would force that choice onto all of them. If `EventProvider` ends
+up exposing a stream, it is expressed against `futures-core::Stream` (or an
+equally minimal, executor-agnostic abstraction) — never `tokio::Stream` or
+anything that pulls in a specific executor.
+
 ## State Model: Imperative Now, Declarative Later
 
 Lattice's initial API surface is imperative: `route.add()`, `route.delete()`,
@@ -334,21 +387,60 @@ would touch every provider if the concept isn't at least named now. The
 architecture reserves room for it as:
 
 - `CurrentState` — a snapshot assembled by reading providers (routes,
-  interfaces, ...) for a given backend.
-- `DesiredState` — the same shape, constructed by the consumer instead of
-  read from the OS.
-- `Diff` — the computed difference between `CurrentState` and
-  `DesiredState`.
+  interfaces, ...) for a given backend, built from `lattice-model`'s
+  existing state types (`Route`, `Interface`, ...).
+- `DesiredState` — **not the same type as `CurrentState`.** A desired route
+  or interface is expressed as a distinct configuration type
+  (`RouteConfig`, `InterfaceConfig`, ...) alongside the corresponding state
+  type, not a reused `Route`/`Interface`. State objects carry fields that
+  are read-only facts about the current system (an interface's live MTU,
+  its operational state, traffic counters) which cannot be meaningfully
+  "desired" — a consumer expressing intent should not be able to construct
+  a `Route` with a nonsensical read-only field set, nor should the
+  compiler let them try.
+- `Diff` — the computed difference between a `CurrentState` and a
+  `DesiredState`, comparing state and config types field-by-field where
+  they overlap.
 - `ApplyPlan` — an ordered sequence of provider calls (add/remove/modify)
   that would resolve a `Diff`, which can be inspected before being executed
   and rolled back if a step fails.
 
 None of these types exist yet, and no crate is created for them now — they
 belong to stage 0.7+ once enough of the imperative provider surface exists
-to compute a meaningful diff against. They are named here so that
-`CurrentState`/`DesiredState` are built from the same `lattice-model` types
-as the imperative API from the start, rather than as a parallel model
-introduced later.
+to compute a meaningful diff against. The state/config split is named here
+— as a parallel `*Config` type per domain object living alongside its state
+type in `lattice-model` — so that it is built in from the first `*Config`
+type rather than retrofitted after `CurrentState`/`DesiredState` have
+already been conflated into one type.
+
+## API Stability Rules
+
+Once published, different crates in this workspace are expected to change
+at different rates, and consumers need to know which promises hold at
+which layer:
+
+- **`lattice-core`** — the most stable crate in the workspace. `Error`,
+  `Id<T>`, and shared traits are depended on by everything else; a breaking
+  change here forces a breaking change everywhere. Changes require the
+  strongest justification and the widest review.
+- **`lattice-ip`** — stable once IPv4/IPv6 types are implemented; the
+  domain (IP addressing) is well-understood and slow-moving.
+- **`lattice-model`** — moderate stability. New modules (`dns`, `neighbor`,
+  ...) are expected to be added over time per the delivery plan, but
+  existing types should change conservatively once a domain has shipped,
+  since both backends and consumers depend on their exact shape.
+- **`lattice-platform`** — expected to evolve faster than `lattice-model`,
+  since new provider traits are added as new domains gain backend support.
+  Adding a trait is not breaking; changing an existing trait's signature
+  is, and affects every backend that implements it.
+- **`lattice-backend-*` crates** — the least stable. Internal
+  implementation details may change freely; only the provider trait
+  implementations they expose are a compatibility surface, and that
+  surface is owned by `lattice-platform`, not the backend crate itself.
+
+This ranking exists so that a change's blast radius can be reasoned about
+before it's made, not so that any crate is exempt from normal semver
+discipline once Lattice reaches 1.0.
 
 ## Explicit Non-Goals of This Architecture
 
