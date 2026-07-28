@@ -1,5 +1,15 @@
 # Lattice
 
+**Languages**
+
+🇺🇸 **English** | 🇷🇺 [Русский](README.ru.md)
+
+[![License: MPL 2.0](https://img.shields.io/badge/license-MPL--2.0-blue.svg)](LICENSE)
+[![Rust](https://img.shields.io/badge/language-Rust-orange.svg)](https://www.rust-lang.org)
+[![crates.io](https://img.shields.io/badge/crates.io-not%20yet%20published-lightgrey.svg)](https://crates.io)
+[![docs.rs](https://img.shields.io/badge/docs.rs-not%20yet%20published-lightgrey.svg)](https://docs.rs)
+[![MSRV](https://img.shields.io/badge/MSRV-1.85-lightgrey.svg)](Cargo.toml)
+
 **Lattice** is a modern, cross-platform Rust library for configuring and inspecting operating system networking through a single, strongly typed API.
 
 > **Status:** This repository is currently bootstrapped only. It contains no implementation, no crates, and no source code. Development has not yet begun.
