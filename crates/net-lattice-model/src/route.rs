@@ -17,6 +17,18 @@ pub struct Route {
     pub destination: Network,
     pub gateway: Option<IpAddress>,
     pub metric: Option<u32>,
+    /// The outgoing interface, identified by its raw OS-level index.
+    ///
+    /// This is a raw `u32` rather than a typed `InterfaceId` because the
+    /// `interface` domain module doesn't exist yet (it lands in Stage 0.4
+    /// per ARCHITECTURE.md's Incremental Delivery Plan) — `Route` shouldn't
+    /// block on it just to express what the kernel already gives us
+    /// directly. Many routes are ambiguous or outright rejected by the
+    /// kernel without an explicit output interface (on-link routes,
+    /// multiple interfaces on the same subnet), so this isn't optional
+    /// polish: without it, a meaningful fraction of real routes can't be
+    /// added at all.
+    pub interface_index: Option<u32>,
 }
 
 /// Identifies a [`Route`].
@@ -29,6 +41,7 @@ impl Route {
             destination,
             gateway: None,
             metric: None,
+            interface_index: None,
         }
     }
 
@@ -39,6 +52,11 @@ impl Route {
 
     pub fn with_metric(mut self, metric: u32) -> Self {
         self.metric = Some(metric);
+        self
+    }
+
+    pub fn with_interface_index(mut self, interface_index: u32) -> Self {
+        self.interface_index = Some(interface_index);
         self
     }
 }
@@ -67,8 +85,10 @@ mod tests {
         let gateway = IpAddress::from(Ipv4Address::new(10, 0, 0, 1));
         let route = Route::new(RouteId::new(1), destination())
             .with_gateway(gateway)
-            .with_metric(100);
+            .with_metric(100)
+            .with_interface_index(2);
         assert_eq!(route.gateway, Some(gateway));
         assert_eq!(route.metric, Some(100));
+        assert_eq!(route.interface_index, Some(2));
     }
 }
