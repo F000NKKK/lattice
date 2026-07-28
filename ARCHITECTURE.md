@@ -97,6 +97,14 @@ object. The exact shape of `Id<T>` is a Stage 0.1 API detail; what this
 document fixes is that IDs are one generic mechanism, not N hand-written
 lookalike structs.
 
+`Id<T>` must have a stable, `T`-independent serialized representation
+(e.g. it serializes as its underlying value, not as a struct carrying a
+phantom marker) from the moment serialization is added. IDs are exactly
+the kind of type that ends up embedded in `RouteConfig`/`DesiredState`
+persisted to disk or sent over a wire (see State Model below); changing
+their wire format after the fact would be a breaking change to every
+stored or transmitted config.
+
 This crate is intentionally kept minimal and stays that way by construction:
 anything that represents a networking concept (an address, a route, a
 resolver setting) belongs in `lattice-ip` or `lattice-model`, never here.
@@ -146,6 +154,16 @@ The domain model of operating system networking state, organized as modules:
   something changed before deciding whether to re-query it. A consumer
   that needs the current value re-reads it through the relevant provider
   (`backend.routes()`, keyed by the ID from the event).
+
+  `ChangeKind::Changed` should eventually carry which fields changed
+  (e.g. `Changed { fields: RouteFieldMask }`), not be a bare marker.
+  Without it, a consumer that only cares about gateway changes still has
+  to re-fetch and diff the whole object on every unrelated metric update,
+  which defeats much of the point of a signal-shaped event. The exact
+  field-mask representation is a Stage 0.1 (or whenever `EventProvider`
+  ships) API detail; what this document fixes is that `Changed` is
+  expected to carry this information eventually, so the enum shape isn't
+  designed to preclude it.
 
 Modules within `lattice-model` may depend on each other and on `lattice-ip`,
 but the crate as a whole has no OS dependency. `dns` intentionally does not
@@ -220,7 +238,15 @@ force every backend to stub out methods for features it doesn't have:
   `backend.capabilities().contains(Capability::VRF)` at runtime rather than
   relying on a method silently failing or panicking when a feature isn't
   actually available. `Capability` is a plain enum with no domain types in
-  it, so it costs `lattice-platform` nothing to keep here.
+  it, so it costs `lattice-platform` nothing to keep here. Because
+  consumers routinely need to check for combinations of capabilities
+  (`caps.contains(Capability::IPV6 | Capability::VRF)`), it should be
+  represented as a bitflags-style value rather than as a `Vec<Capability>`
+  or `HashSet<Capability>` — combination and containment checks are then
+  cheap bitwise operations instead of collection scans. The exact
+  representation (`bitflags!`-generated type vs. a hand-rolled one) is a
+  Stage 0.1 detail; what this document fixes is that `Capability` is a
+  flag set, not a list.
 
 This crate depends only on `lattice-core` (for `Error` and ID types). It
 has no OS-specific code and, unlike the previous revision of this
@@ -247,7 +273,19 @@ can support, using native OS facilities:
 
 The `lattice-backend-*` naming (rather than bare `lattice-linux`, etc.)
 makes each crate's role legible from its name alone when scanning the
-workspace or `cargo search` results.
+workspace or `cargo search` results, and leaves room for names like
+`lattice-backend-linux-networkmanager` alongside
+`lattice-backend-linux-netlink` if a given OS ever needs more than one
+competing backend crate.
+
+`lattice` selects a backend crate for the current target by default via
+`cfg(target_os = "...")`, but each backend is additionally gated behind a
+same-named Cargo feature (`linux`, `windows`, `darwin`). This is not about
+runtime backend switching (see the object safety note above — that stays
+a compile-time choice) but about being able to depend on `lattice-backend-linux`
+specifically — for example to run its unit tests, or to cross-check its
+behavior — without requiring a full build for every other platform's
+backend on a machine that can't target them.
 
 Each backend binds every trait's associated type to the concrete
 `lattice-model` type it produces:
@@ -303,25 +341,48 @@ but by constraining the associated types to equal the concrete
 `lattice-model` types wherever it accepts a backend:
 
 ```rust
-pub struct Lattice<B>
-where
-    B: RouteProvider<Route = lattice_model::route::Route>
-        + InterfaceProvider<Interface = lattice_model::interface::Interface>,
+pub trait LatticeBackend:
+    RouteProvider<Route = lattice_model::route::Route>
+    + InterfaceProvider<Interface = lattice_model::interface::Interface>
 {
+}
+
+pub struct Lattice<B: LatticeBackend> {
     backend: B,
 }
 ```
 
 A backend whose `Route` associated type is not literally
-`lattice_model::route::Route` simply fails to satisfy this bound and
+`lattice_model::route::Route` simply fails to satisfy `LatticeBackend` and
 cannot be used with the public `Lattice` type — a compile error at the
-point the backend is wired in, not a runtime surprise. This gives the same
-strength of guarantee as a direct dependency would, without requiring
+point the backend is wired in, not a runtime surprise. Collecting the
+per-provider bounds into one named `LatticeBackend` trait (rather than
+repeating a growing `where` clause on `Lattice` itself) is purely
+ergonomic — it does not change where the constraint lives. This gives the
+same strength of guarantee as a direct dependency would, without requiring
 `lattice-platform` itself to know `lattice-model` exists: the constraint
 lives with the consumer of the contract (the facade that assembles a
 concrete system), not with the contract's definition. This is the same
 shape used by crates like `sqlx` and `diesel`, where a generic backend
 trait is paired with a concrete type binding enforced at the point of use.
+
+**This generic design trades away object safety, deliberately, for now.**
+Associated types (`RouteProvider::Route`, ...) make these traits
+unimplementable as `Box<dyn RouteProvider>` — Rust cannot build a vtable
+for a trait whose method signatures depend on a type that varies per
+implementor. Concretely, this means backends must be selected at compile
+time (`Lattice<LinuxBackend>`) rather than chosen dynamically at runtime
+from a list of loaded implementations. For Lattice's actual delivery plan
+— a fixed, statically-linked backend per target OS, selected via
+`cfg(target_os = "...")` — this costs nothing. It would matter if Lattice
+later needed to pick between multiple competing backends for the same
+platform at runtime (e.g. Netlink vs. a NetworkManager-based backend on
+the same machine); if that need materializes, an object-safe erased layer
+(non-generic `dyn`-compatible traits that internally forward to the
+generic ones, conventionally called `DynRouteProvider` and friends) can be
+added in `lattice-platform` without changing the generic traits consumers
+already depend on. This is a reserved extension point, not a commitment —
+it is not built until a concrete use case needs it.
 
 ## Error Model
 
@@ -423,9 +484,14 @@ provider traits, not a different backend contract. Retrofitting it later
 would touch every provider if the concept isn't at least named now. The
 architecture reserves room for it as:
 
-- `CurrentState` — a snapshot assembled by reading providers (routes,
-  interfaces, ...) for a given backend, built from `lattice-model`'s
-  existing state types (`Route`, `Interface`, ...).
+- `SnapshotProvider` — a `lattice-platform` provider trait (generic over
+  an associated `State` type, like the others) that assembles a
+  `CurrentState` by reading the other providers a backend implements. This
+  is the concrete mechanism behind `CurrentState` below, rather than each
+  backend or the facade having to hand-assemble a snapshot ad hoc.
+- `CurrentState` — the snapshot `SnapshotProvider` produces by reading
+  providers (routes, interfaces, ...) for a given backend, built from
+  `lattice-model`'s existing state types (`Route`, `Interface`, ...).
 - `DesiredState` — **not the same type as `CurrentState`.** A desired route
   or interface is expressed as a distinct configuration type
   (`RouteConfig`, `InterfaceConfig`, ...) alongside the corresponding state
