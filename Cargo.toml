@@ -1,9 +1,8 @@
 [workspace]
 resolver = "3"
-members = []
+members = ["crates/*"]
 
 [workspace.package]
-version = "0.0.0"
 edition = "2024"
 rust-version = "1.93"
 license = "MPL-2.0"
@@ -13,3 +12,20 @@ documentation = "https://docs.rs/lattice"
 authors = ["Lattice Contributors", "F000NK"]
 categories = ["network-programming", "os"]
 keywords = ["networking", "netlink", "cross-platform", "systems", "os"]
+
+# Single source of truth for every internal crate's version + path. Member
+# crates reference these as `lattice-foo = { workspace = true }` instead of
+# repeating path/version — see ARCHITECTURE.md's API Stability Rules for why
+# each crate's version is independent rather than tied to a single
+# workspace-wide number.
+[workspace.dependencies]
+lattice-core = { path = "crates/lattice-core", version = "0.1.0" }
+lattice-ip = { path = "crates/lattice-ip", version = "0.1.0" }
+lattice-model = { path = "crates/lattice-model", version = "0.1.0" }
+lattice-platform = { path = "crates/lattice-platform", version = "0.1.0" }
+lattice-backend-linux = { path = "crates/lattice-backend-linux", version = "0.1.0" }
+
+bitflags = "2"
+rtnetlink = "0.21"
+tokio = { version = "1", features = ["rt"] }
+futures = "0.3"
