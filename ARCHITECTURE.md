@@ -1,5 +1,9 @@
 # Architecture
 
+**Languages**
+
+🇺🇸 **English** | 🇷🇺 [Русский](ARCHITECTURE.ru.md)
+
 This document describes the planned workspace structure for Lattice and the
 design principles behind it. It reflects intended direction, not current
 state: see [CHANGELOG.md](CHANGELOG.md) and [README.md](README.md) for what
