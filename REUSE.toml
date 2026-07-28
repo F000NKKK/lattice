@@ -9,6 +9,16 @@ SPDX-FileCopyrightText = "Lattice Contributors"
 SPDX-License-Identifier = "MPL-2.0"
 
 [[annotations]]
-path = ["LICENSE", "CHANGELOG.md", "**.gitignore", "**.gitattributes", "**.editorconfig"]
+path = "LICENSE"
+SPDX-FileCopyrightText = "Lattice Contributors"
+SPDX-License-Identifier = "MPL-2.0"
+
+[[annotations]]
+path = [
+    "CHANGELOG.md",
+    "**.gitignore",
+    "**.gitattributes",
+    "**.editorconfig",
+]
 SPDX-FileCopyrightText = "Lattice Contributors"
 SPDX-License-Identifier = "CC0-1.0"
