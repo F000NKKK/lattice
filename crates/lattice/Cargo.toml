@@ -1,0 +1,21 @@
+[package]
+name = "lattice"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+categories.workspace = true
+keywords.workspace = true
+description = "A modern, cross-platform Rust library for configuring and inspecting operating system networking through a single, strongly typed API."
+
+[dependencies]
+lattice-core = { workspace = true }
+lattice-ip = { workspace = true }
+lattice-model = { workspace = true }
+lattice-platform = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+lattice-backend-linux = { workspace = true }
