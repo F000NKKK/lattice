@@ -73,7 +73,7 @@ No crates, source code, examples, tests, or benchmarks exist yet. No API design 
 ## Roadmap
 
 1. **Bootstrap** *(current stage)* — repository infrastructure, licensing, community health files, and tooling configuration.
-2. **Design** — define the crate layout, core abstractions, and platform abstraction strategy.
+2. **Design** — define the crate layout, core abstractions, and platform abstraction strategy. See [ARCHITECTURE.md](ARCHITECTURE.md) for the planned workspace structure.
 3. **Foundations** — implement core types (addresses, prefixes, interfaces) and the first platform backend.
 4. **Platform parity** — extend support across Linux, Windows, and BSD/macOS.
 5. **Advanced features** — monitoring, notifications, transactional configuration, and declarative networking.
