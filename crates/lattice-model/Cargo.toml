@@ -1,0 +1,16 @@
+[package]
+name = "lattice-model"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+categories.workspace = true
+keywords.workspace = true
+description = "The domain model of operating system networking state (routes, interfaces, DNS, ...), with no operating-system dependency."
+
+[dependencies]
+lattice-core = { workspace = true }
+lattice-ip = { workspace = true }

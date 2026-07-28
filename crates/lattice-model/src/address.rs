@@ -1,0 +1,64 @@
+use std::fmt;
+
+use lattice_ip::{Ipv4Address, Ipv4Network, Ipv6Address, Ipv6Network};
+
+/// An IP address of either family.
+///
+/// Domain objects (routes, interfaces, ...) that need to hold "an IP
+/// address, either family" use this instead of picking one family, since
+/// most networking state (a gateway, a resolver entry) is not inherently
+/// v4- or v6-only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum IpAddress {
+    V4(Ipv4Address),
+    V6(Ipv6Address),
+}
+
+impl From<Ipv4Address> for IpAddress {
+    fn from(value: Ipv4Address) -> Self {
+        IpAddress::V4(value)
+    }
+}
+
+impl From<Ipv6Address> for IpAddress {
+    fn from(value: Ipv6Address) -> Self {
+        IpAddress::V6(value)
+    }
+}
+
+impl fmt::Display for IpAddress {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            IpAddress::V4(addr) => write!(f, "{addr}"),
+            IpAddress::V6(addr) => write!(f, "{addr}"),
+        }
+    }
+}
+
+/// An IP network of either family.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Network {
+    V4(Ipv4Network),
+    V6(Ipv6Network),
+}
+
+impl From<Ipv4Network> for Network {
+    fn from(value: Ipv4Network) -> Self {
+        Network::V4(value)
+    }
+}
+
+impl From<Ipv6Network> for Network {
+    fn from(value: Ipv6Network) -> Self {
+        Network::V6(value)
+    }
+}
+
+impl fmt::Display for Network {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Network::V4(net) => write!(f, "{net}"),
+            Network::V6(net) => write!(f, "{net}"),
+        }
+    }
+}
