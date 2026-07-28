@@ -278,6 +278,15 @@ Backends depend on `lattice-platform` and `lattice-model`. They export
 nothing upward; nothing outside a backend crate depends on it directly
 except `lattice` itself.
 
+**Nothing stops a backend from binding a provider's associated type to
+something other than the matching `lattice-model` type** — that is an
+unavoidable consequence of `lattice-platform` staying generic. A backend
+crate is free to write `type Route = LinuxRoute;` for some
+backend-specific type instead of `lattice_model::route::Route`. This is
+not a gap to close by making `lattice-platform` depend on `lattice-model`
+(see the previous section); it is closed one layer up, in `lattice`. See
+below.
+
 ### `lattice`
 
 The public-facing facade. Re-exports the types consumers need from
@@ -285,6 +294,34 @@ The public-facing facade. Re-exports the types consumers need from
 `cfg(target_os = "...")`, and exposes the top-level API (e.g.
 `Lattice::connect()`). This is the only crate most consumers depend on
 directly.
+
+**This is where model convergence is enforced.** `lattice-platform`'s
+generic contract means a backend's associated types could, in principle,
+diverge from `lattice-model` (see the previous section). `lattice` closes
+that gap not by adding a `lattice-platform → lattice-model` dependency,
+but by constraining the associated types to equal the concrete
+`lattice-model` types wherever it accepts a backend:
+
+```rust
+pub struct Lattice<B>
+where
+    B: RouteProvider<Route = lattice_model::route::Route>
+        + InterfaceProvider<Interface = lattice_model::interface::Interface>,
+{
+    backend: B,
+}
+```
+
+A backend whose `Route` associated type is not literally
+`lattice_model::route::Route` simply fails to satisfy this bound and
+cannot be used with the public `Lattice` type — a compile error at the
+point the backend is wired in, not a runtime surprise. This gives the same
+strength of guarantee as a direct dependency would, without requiring
+`lattice-platform` itself to know `lattice-model` exists: the constraint
+lives with the consumer of the contract (the facade that assembles a
+concrete system), not with the contract's definition. This is the same
+shape used by crates like `sqlx` and `diesel`, where a generic backend
+trait is paired with a concrete type binding enforced at the point of use.
 
 ## Error Model
 
