@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-07-28
+
 ### Added
 
 - Repository bootstrap: workspace `Cargo.toml`, licensing, community health
@@ -15,13 +17,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `net-lattice-ip`: `Ipv4Address`/`Ipv6Address`, `Ipv4Network`/`Ipv6Network`,
   `Ipv4PrefixLength`/`Ipv6PrefixLength`.
 - `net-lattice-model`: the `route` module (`Route`, `RouteId`, `IpAddress`,
-  `Network`).
+  `Network`), including `Route::interface_index` for specifying the
+  outgoing interface by raw ifindex.
 - `net-lattice-platform`: `RouteProvider` and `Capability`, with no
   dependency on `net-lattice-model`.
 - `net-lattice-backend-linux`: `RouteProvider` implementation via Netlink
-  (`rtnetlink`), gated to `target_os = "linux"`.
+  (`rtnetlink`), gated to `target_os = "linux"`. Covered by a real,
+  unprivileged `routes()` test and a `CAP_NET_ADMIN`-gated add/remove
+  round-trip test (`#[ignore]`, run manually with elevated privileges).
 - `net-lattice` facade: `LatticeBackend`, `Lattice<B>`, and
-  `Lattice::connect()` (Linux default).
+  `Lattice::connect()` (Linux default), plus a `list_routes` example.
 - `scripts/release.sh` and `scripts/gh_release.sh` for versioning,
   publishing, and tagging workspace crates.
 
