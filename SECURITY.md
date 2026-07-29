@@ -34,7 +34,7 @@ informed as the issue is investigated and resolved.
 Net Lattice has landed Stage 0.1, 0.2, and 0.3 of its [architecture](ARCHITECTURE.md)'s
 Incremental Delivery Plan: route providers for Linux (`net-lattice-backend-linux`,
 via Netlink), Windows (`net-lattice-backend-windows`, via the IP Helper API),
-and a scaffolded BSD/macOS backend (`net-lattice-backend-darwin`). These are
+and BSD/macOS (`net-lattice-backend-darwin`, via route sockets). These are
 privileged operations (see ARCHITECTURE.md's Privilege Model) — vulnerability
 reports involving unintended route manipulation, privilege confusion, or
 memory-safety issues in route message handling are in scope. No

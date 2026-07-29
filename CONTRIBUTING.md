@@ -4,11 +4,11 @@ Thank you for your interest in contributing to Net Lattice. This document descri
 
 ## Project Status
 
-Net Lattice has landed Stage 0.1, 0.2, and 0.3 of its [architecture](ARCHITECTURE.md)'s Incremental Delivery Plan — minimal Linux and Windows route providers, plus a scaffolded BSD/macOS backend, not a complete library. Most public API surface is still unbuilt. The most valuable contributions right now are:
+Net Lattice has landed Stage 0.1, 0.2, and 0.3 of its [architecture](ARCHITECTURE.md)'s Incremental Delivery Plan — route providers for Linux, Windows, and BSD/macOS, not a complete library. Most public API surface is still unbuilt. The most valuable contributions right now are:
 
 - Feedback on the project's vision, scope, and roadmap (see [README.md](README.md))
 - Discussion of API design and architecture for upcoming stages
-- Implementation work on the next stages in [ARCHITECTURE.md](ARCHITECTURE.md)'s delivery plan (BSD/macOS route socket implementation, `interface`/`dns`/`neighbor` modules, ...)
+- Implementation work on the next stages in [ARCHITECTURE.md](ARCHITECTURE.md)'s delivery plan (`interface`/`dns`/`neighbor` modules, ...)
 - Documentation and tooling improvements
 
 Please read [ARCHITECTURE.md](ARCHITECTURE.md) before proposing a new crate, module, or provider trait — it documents the dependency rules (e.g. `net-lattice-platform` never depends on `net-lattice-model`) and the staged delivery order this project follows.
