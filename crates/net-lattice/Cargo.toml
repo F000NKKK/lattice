@@ -19,3 +19,6 @@ net-lattice-platform = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 net-lattice-backend-linux = { workspace = true }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+net-lattice-backend-windows = { workspace = true }

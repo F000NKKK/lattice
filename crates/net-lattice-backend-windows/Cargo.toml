@@ -1,12 +1,14 @@
 [package]
 name = "net-lattice-backend-windows"
-version.workspace = true
+version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 documentation.workspace = true
+categories.workspace = true
+keywords.workspace = true
 description = "Windows backend for Net Lattice: implements platform provider traits via the Windows IP Helper API."
 
 [lib]
@@ -16,7 +18,4 @@ cfg-target = "target_os = \"windows\""
 net-lattice-core = { workspace = true }
 net-lattice-model = { workspace = true }
 net-lattice-platform = { workspace = true }
-windows = { version = "0.62", features = [
-    "Win32_Foundation",
-    "Win32_NetworkManagement_IpHelper",
-] }
+windows = { workspace = true }
