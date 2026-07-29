@@ -165,7 +165,7 @@ unsafe fn message_to_route(hdr: &libc::rt_msghdr) -> Option<Route> {
     let mut interface_index = None;
     let mut netmask_bytes: Option<Vec<u8>> = None;
 
-    let mut ptr = (hdr as *const libc::rt_msghdr).add(1) as *const u8;
+    let mut ptr = unsafe { (hdr as *const libc::rt_msghdr).add(1) as *const u8 };
     let mut remaining = hdr.rtm_msglen as usize - mem::size_of::<libc::rt_msghdr>();
     let mut bit: libc::c_int = 1;
     while bit <= hdr.rtm_addrs && remaining >= 1 {
@@ -177,17 +177,18 @@ unsafe fn message_to_route(hdr: &libc::rt_msghdr) -> Option<Route> {
         // it directly rather than requiring a full-size `sockaddr` to be
         // present, since the netmask entry (`RTA_NETMASK`) is routinely
         // shorter than that (trailing zero mask bytes are omitted).
-        let sa_len = *ptr as usize;
+        let sa_len = unsafe { *ptr } as usize;
         let aligned_len = if sa_len == 0 { 4 } else { (sa_len + 3) & !3 };
         if aligned_len > remaining {
             break;
         }
         match bit {
             RTA_DST => {
-                destination_addr = sockaddr_to_ip(ptr as *const libc::sockaddr);
+                destination_addr = unsafe { sockaddr_to_ip(ptr as *const libc::sockaddr) };
             }
             RTA_GATEWAY => {
-                gateway = sockaddr_to_ip(ptr as *const libc::sockaddr).map(std_ip_to_ip_address);
+                gateway = unsafe { sockaddr_to_ip(ptr as *const libc::sockaddr) }
+                    .map(std_ip_to_ip_address);
             }
             RTA_NETMASK => {
                 // The mask's address bytes start at the same offset a real
@@ -201,16 +202,15 @@ unsafe fn message_to_route(hdr: &libc::rt_msghdr) -> Option<Route> {
                     _ => 4,
                 };
                 let available = sa_len.saturating_sub(header);
-                if available > 0 {
-                    let data = std::slice::from_raw_parts(ptr.add(header), available);
-                    netmask_bytes = Some(data.to_vec());
+                netmask_bytes = Some(if available > 0 {
+                    unsafe { std::slice::from_raw_parts(ptr.add(header), available) }.to_vec()
                 } else {
-                    netmask_bytes = Some(Vec::new());
-                }
+                    Vec::new()
+                });
             }
             _ => {}
         }
-        ptr = ptr.add(aligned_len);
+        ptr = unsafe { ptr.add(aligned_len) };
         remaining -= aligned_len;
         bit <<= 1;
     }
