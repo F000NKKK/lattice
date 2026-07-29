@@ -54,3 +54,13 @@ impl Lattice<net_lattice_backend_linux::LinuxBackend> {
         })
     }
 }
+
+#[cfg(target_os = "windows")]
+impl Lattice<net_lattice_backend_windows::WindowsBackend> {
+    /// Connects using the default backend for the current platform.
+    pub fn connect() -> Result<Self> {
+        Ok(Self {
+            backend: net_lattice_backend_windows::WindowsBackend::new()?,
+        })
+    }
+}
