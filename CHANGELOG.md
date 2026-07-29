@@ -69,6 +69,16 @@ BSD/macOS.
   the same shape `route add -interface` uses — without setting
   `RTF_GATEWAY` (that flag means "real next hop", not "no next hop, just
   this wire").
+- `net-lattice-backend-darwin`: `add_route`/`remove_route` always wrapped
+  the routing socket's errno in `Error::Platform`, even for errno values
+  that map directly onto Net Lattice's error taxonomy per ARCHITECTURE.md's
+  Error Model (`EEXIST` on `RTM_ADD` for a route that already exists,
+  `ESRCH`/`ENOENT` on `RTM_DELETE` for no matching route, `EPERM`/`EACCES`
+  for missing privilege) — callers had to pattern-match a raw Darwin errno
+  instead of `Error::AlreadyExists`/`NotFound`/`PermissionDenied`. The
+  privileged round-trip test also now cleans up any route left over from a
+  prior interrupted run before adding, rather than surfacing that stale
+  state as a fresh `AlreadyExists` failure.
 
 ## [0.3.0] - TBD
 
