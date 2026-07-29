@@ -14,15 +14,25 @@ use std::net::IpAddr;
 use std::os::unix::io::AsRawFd;
 use std::{io, mem};
 
-use net_lattice_core::{Error, PlatformErrorCode, Result};
+use net_lattice_core::{Error, Id, PlatformErrorCode, Result};
+use net_lattice_model::interface::{AdminState, Interface, InterfaceKind, OperationalState};
+use net_lattice_model::mac::MacAddress;
 use net_lattice_model::route::{Route, RouteId};
 use net_lattice_model::{IpAddress, Network};
-use net_lattice_platform::RouteProvider;
+use net_lattice_platform::{InterfaceProvider, RouteProvider};
 
 const RTM_VERSION: u8 = 5;
 const RTM_GET: u8 = 4;
 const RTM_ADD: u8 = 1;
 const RTM_DELETE: u8 = 2;
+
+// `IFT_*` constants from `<net/if_types.h>`, not exposed by the `libc` crate
+// for `apple`.
+const IFT_ETHER: libc::c_uchar = 0x06;
+const IFT_LOOP: libc::c_uchar = 0x18;
+const IFT_PPP: libc::c_uchar = 0x17;
+const IFT_BRIDGE: libc::c_uchar = 0xd1;
+const IFT_L2VLAN: libc::c_uchar = 0x87;
 
 const RTA_DST: u32 = 0x1;
 const RTA_GATEWAY: u32 = 0x2;
@@ -448,6 +458,98 @@ impl RouteProvider for DarwinBackend {
             }
             Ok(())
         })
+    }
+}
+
+/// Maps `IFT_*` link-layer types (carried in `sockaddr_dl::sdl_type`) to the
+/// cross-platform [`InterfaceKind`]. Anything not covered falls back to
+/// `Other`, carrying the raw type code for diagnostics.
+fn ift_type_to_kind(sdl_type: libc::c_uchar) -> InterfaceKind {
+    match sdl_type {
+        IFT_ETHER | IFT_L2VLAN => InterfaceKind::Ethernet,
+        IFT_LOOP => InterfaceKind::Loopback,
+        IFT_PPP => InterfaceKind::PointToPoint,
+        IFT_BRIDGE => InterfaceKind::Bridge,
+        other => InterfaceKind::Other(other as u32),
+    }
+}
+
+/// Reads the interface name, index, hardware type, and MAC address out of an
+/// `AF_LINK` `sockaddr_dl` — the only place `getifaddrs` exposes them on
+/// BSD/macOS. Returns `None` if the address is not actually `AF_LINK` (the
+/// same interface also appears once per configured IP address, with
+/// `AF_INET`/`AF_INET6` entries this function ignores).
+unsafe fn link_entry_to_interface(entry: &libc::ifaddrs) -> Option<Interface> {
+    let sa = entry.ifa_addr;
+    if sa.is_null() || (*sa).sa_family as i32 != libc::AF_LINK {
+        return None;
+    }
+    let sdl = &*(sa as *const libc::sockaddr_dl);
+
+    let name = if entry.ifa_name.is_null() {
+        String::new()
+    } else {
+        std::ffi::CStr::from_ptr(entry.ifa_name)
+            .to_string_lossy()
+            .into_owned()
+    };
+
+    let mac = if sdl.sdl_alen == 6 {
+        let start = sdl.sdl_nlen as usize;
+        let data = &sdl.sdl_data;
+        if start + 6 <= data.len() {
+            let mut octets = [0u8; 6];
+            for (i, octet) in octets.iter_mut().enumerate() {
+                *octet = data[start + i] as u8;
+            }
+            Some(MacAddress::new(octets))
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    let admin_state = if entry.ifa_flags & (libc::IFF_UP as u32) != 0 {
+        AdminState::Up
+    } else {
+        AdminState::Down
+    };
+
+    let index = sdl.sdl_index as u32;
+    let kind = ift_type_to_kind(sdl.sdl_type);
+
+    let mut interface = Interface::new(Id::new(index as u64), index, name, kind)
+        .with_admin_state(admin_state)
+        .with_operational_state(OperationalState::Unknown);
+    if let Some(mac) = mac {
+        interface = interface.with_mac(mac);
+    }
+    Some(interface)
+}
+
+impl InterfaceProvider for DarwinBackend {
+    type Interface = Interface;
+
+    fn interfaces(&self) -> Result<Vec<Self::Interface>> {
+        let mut head: *mut libc::ifaddrs = std::ptr::null_mut();
+        let interfaces = unsafe {
+            if libc::getifaddrs(&mut head) != 0 {
+                return Err(Error::Platform(io_error_code(&io::Error::last_os_error())));
+            }
+
+            let mut interfaces = Vec::new();
+            let mut cursor = head;
+            while !cursor.is_null() {
+                if let Some(interface) = link_entry_to_interface(&*cursor) {
+                    interfaces.push(interface);
+                }
+                cursor = (*cursor).ifa_next;
+            }
+            libc::freeifaddrs(head);
+            interfaces
+        };
+        Ok(interfaces)
     }
 }
 
