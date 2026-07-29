@@ -21,14 +21,205 @@ use windows::Win32::Networking::WinSock::{AF_INET, AF_INET6};
 
 /// The Windows IP Helper API-backed implementation of Net Lattice's provider
 /// traits.
-pub struct WindowsBackend;
+pub struct WindowsBackend {
+    runtime: tokio::runtime::Runtime,
+}
 
 impl WindowsBackend {
     pub fn new() -> Result<Self> {
-        Ok(Self)
+        let runtime = tokio::runtime::Runtime::new().map_err(windows_error_code)?;
+        Ok(Self { runtime })
+    }
+}
+
+fn windows_error_code(err: std::io::Error) -> PlatformErrorCode {
+    PlatformErrorCode::Windows(0)
+}
+
+fn synthesize_route_id(
+    destination: &Network,
+    gateway: &Option<IpAddress>,
+    interface_index: Option<u32>,
+) -> RouteId {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    destination.hash(&mut hasher);
+    gateway.hash(&mut hasher);
+    interface_index.hash(&mut hasher);
+    RouteId::new(hasher.finish())
+}
+
+fn row_to_route(row: &MIB_IPFORWARD_ROW2) -> Result<Option<Route>> {
+    let destination = match row.DestinationPrefix.PrefixLength {
+        32 => {
+            let addr = row.DestinationPrefix.Prefix.Ipv4;
+            let octets = [
+                addr.S_un.S_un_w.s_w1,
+                addr.S_un.S_un_w.s_w2,
+                addr.S_un.S_un_w.s_w3,
+                addr.S_un.S_un_w.s_w4,
+            ];
+            let ipv4 = net_lattice_ip::Ipv4Address::new(octets[0], octets[1], octets[2], octets[3]);
+            let prefix =
+                net_lattice_ip::Ipv4PrefixLength::new(row.DestinationPrefix.PrefixLength).ok()?;
+            Network::from(net_lattice_ip::Ipv4Network::new(ipv4, prefix))
+        }
+        128 => {
+            let bytes = row.DestinationPrefix.Prefix.Ipv6.s6_bytes;
+            let octets: [u8; 16] = bytes;
+            let ipv6 = net_lattice_ip::Ipv6Address::from(octets);
+            let prefix =
+                net_lattice_ip::Ipv6PrefixLength::new(row.DestinationPrefix.PrefixLength).ok()?;
+            Network::from(net_lattice_ip::Ipv6Network::new(ipv6, prefix))
+        }
+        _ => return None,
+    };
+
+    let gateway = if row.NextHop.si_family != 0 {
+        let gw = match row.NextHop.si_family {
+            AF_INET => {
+                let addr = row.NextHop.Ipv4;
+                let octets = [
+                    addr.S_un.S_un_w.s_w1,
+                    addr.S_un.S_un_w.s_w2,
+                    addr.S_un.S_un_w.s_w3,
+                    addr.S_un.S_un_w.s_w4,
+                ];
+                IpAddr::V4(std::net::Ipv4Addr::new(
+                    octets[0], octets[1], octets[2], octets[3],
+                ))
+            }
+            AF_INET6 => {
+                let bytes = row.NextHop.Ipv6.s6_bytes;
+                IpAddr::V6(std::net::Ipv6Addr::from(bytes))
+            }
+            _ => IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
+        };
+        Some(net_lattice_model::IpAddress::from(match gw {
+            IpAddr::V4(addr) => net_lattice_ip::Ipv4Address::from(addr).into(),
+            IpAddr::V6(addr) => net_lattice_ip::Ipv6Address::from(addr).into(),
+        }))
+    } else {
+        None
+    };
+
+    let metric = if row.Metric1 == u32::MAX {
+        None
+    } else {
+        Some(row.Metric1)
+    };
+
+    let interface_index = if row.InterfaceIndex == u32::MAX {
+        None
+    } else {
+        Some(row.InterfaceIndex)
+    };
+
+    let id = synthesize_route_id(&destination, &gateway, interface_index);
+
+    let mut route = Route::new(id, destination);
+    if let Some(gateway) = gateway {
+        route = route.with_gateway(gateway);
+    }
+    if let Some(metric) = metric {
+        route = route.with_metric(metric);
+    }
+    if let Some(interface_index) = interface_index {
+        route = route.with_interface_index(interface_index);
+    }
+    Ok(Some(route))
+}
+
+impl RouteProvider for WindowsBackend {
+    type Route = Route;
+
+    fn routes(&self) -> Result<Vec<Self::Route>> {
+        self.runtime.block_on(async {
+            let mut routes = Vec::new();
+
+            let table_v4 = Self::ip_forward_table(AF_INET as u16).await?;
+            unsafe {
+                let rows =
+                    std::slice::from_raw_parts((*table_v4).Table, (*table_v4).NumEntries as usize);
+                for row in rows {
+                    if let Some(route) = row_to_route(row)? {
+                        routes.push(route);
+                    }
+                }
+            }
+            Self::free_table(table_v4);
+
+            let table_v6 = Self::ip_forward_table(AF_INET6 as u16).await?;
+            unsafe {
+                let rows =
+                    std::slice::from_raw_parts((*table_v6).Table, (*table_v6).NumEntries as usize);
+                for row in rows {
+                    if let Some(route) = row_to_route(row)? {
+                        routes.push(route);
+                    }
+                }
+            }
+            Self::free_table(table_v6);
+
+            Ok(routes)
+        })
     }
 
-    fn ip_forward_table(address_family: u16) -> Result<*mut MIB_IPFORWARD_TABLE2> {
+    fn add_route(&self, route: Self::Route) -> Result<()> {
+        self.runtime.block_on(async move {
+            let row = build_row(route);
+            unsafe {
+                let status = CreateIpForwardEntry2(&row);
+                if status != 0 {
+                    return Err(Error::Platform(PlatformErrorCode::Windows(status as u32)));
+                }
+            }
+            Ok(())
+        })
+    }
+
+    fn remove_route(&self, route: Self::Route) -> Result<()> {
+        self.runtime.block_on(async move {
+            let (address_family, _) = match route.destination {
+                Network::V4(_) => (AF_INET as u16, 32u8),
+                Network::V6(_) => (AF_INET6 as u16, 128u8),
+            };
+
+            let table = Self::ip_forward_table(address_family).await?;
+            unsafe {
+                let rows = std::slice::from_raw_parts((*table).Table, (*table).NumEntries as usize);
+                let mut found = false;
+                for row in rows {
+                    if row.InterfaceIndex == route.interface_index.unwrap_or(0) {
+                        if let Ok(Some(existing)) = row_to_route(row) {
+                            if existing.destination == route.destination {
+                                let status = DeleteIpForwardEntry2(row);
+                                if status != 0 {
+                                    Self::free_table(table);
+                                    return Err(Error::Platform(PlatformErrorCode::Windows(
+                                        status as u32,
+                                    )));
+                                }
+                                found = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+                Self::free_table(table);
+
+                if !found {
+                    return Err(Error::NotFound);
+                }
+            }
+            Ok(())
+        })
+    }
+}
+
+#[cfg(target_os = "windows")]
+impl WindowsBackend {
+    async fn ip_forward_table(address_family: u16) -> Result<*mut MIB_IPFORWARD_TABLE2> {
         unsafe {
             let mut table: *mut MIB_IPFORWARD_TABLE2 = std::ptr::null_mut();
             let status = GetIpForwardTable2(address_family, &mut table);
@@ -47,141 +238,8 @@ impl WindowsBackend {
         }
     }
 
-    fn from_row(row: &MIB_IPFORWARD_ROW2) -> Result<Option<Route>> {
-        let destination = match row.DestinationPrefix.PrefixLength {
-            32 => {
-                let addr = row.DestinationPrefix.Prefix.Ipv4;
-                let octets = [
-                    addr.S_un.S_un_w.s_w1,
-                    addr.S_un.S_un_w.s_w2,
-                    addr.S_un.S_un_w.s_w3,
-                    addr.S_un.S_un_w.s_w4,
-                ];
-                let ipv4 =
-                    net_lattice_ip::Ipv4Address::new(octets[0], octets[1], octets[2], octets[3]);
-                let prefix =
-                    net_lattice_ip::Ipv4PrefixLength::new(row.DestinationPrefix.PrefixLength)
-                        .ok()?;
-                Network::from(net_lattice_ip::Ipv4Network::new(ipv4, prefix))
-            }
-            128 => {
-                let bytes = row.DestinationPrefix.Prefix.Ipv6.s6_bytes;
-                let octets: [u8; 16] = bytes;
-                let ipv6 = net_lattice_ip::Ipv6Address::from(octets);
-                let prefix =
-                    net_lattice_ip::Ipv6PrefixLength::new(row.DestinationPrefix.PrefixLength)
-                        .ok()?;
-                Network::from(net_lattice_ip::Ipv6Network::new(ipv6, prefix))
-            }
-            _ => return None,
-        };
-
-        let gateway = if row.NextHop.si_family != 0 {
-            let gw = match row.NextHop.si_family {
-                AF_INET => {
-                    let addr = row.NextHop.Ipv4;
-                    let octets = [
-                        addr.S_un.S_un_w.s_w1,
-                        addr.S_un.S_un_w.s_w2,
-                        addr.S_un.S_un_w.s_w3,
-                        addr.S_un.S_un_w.s_w4,
-                    ];
-                    IpAddr::V4(std::net::Ipv4Addr::new(
-                        octets[0], octets[1], octets[2], octets[3],
-                    ))
-                }
-                AF_INET6 => {
-                    let bytes = row.NextHop.Ipv6.s6_bytes;
-                    IpAddr::V6(std::net::Ipv6Addr::from(bytes))
-                }
-                _ => IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
-            };
-            Some(net_lattice_model::IpAddress::from(match gw {
-                IpAddr::V4(addr) => net_lattice_ip::Ipv4Address::from(addr).into(),
-                IpAddr::V6(addr) => net_lattice_ip::Ipv6Address::from(addr).into(),
-            }))
-        } else {
-            None
-        };
-
-        let metric = if row.Metric1 == u32::MAX {
-            None
-        } else {
-            Some(row.Metric1)
-        };
-
-        let interface_index = if row.InterfaceIndex == u32::MAX {
-            None
-        } else {
-            Some(row.InterfaceIndex)
-        };
-
-        let id = synthesize_route_id(&destination, &gateway, interface_index);
-
-        let mut route = Route::new(id, destination);
-        if let Some(gateway) = gateway {
-            route = route.with_gateway(gateway);
-        }
-        if let Some(metric) = metric {
-            route = route.with_metric(metric);
-        }
-        if let Some(interface_index) = interface_index {
-            route = route.with_interface_index(interface_index);
-        }
-        Ok(Some(route))
-    }
-
-    fn synthesize_route_id(
-        destination: &Network,
-        gateway: &Option<IpAddress>,
-        interface_index: Option<u32>,
-    ) -> RouteId {
-        use std::hash::{Hash, Hasher};
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        destination.hash(&mut hasher);
-        gateway.hash(&mut hasher);
-        interface_index.hash(&mut hasher);
-        RouteId::new(hasher.finish())
-    }
-}
-
-impl RouteProvider for WindowsBackend {
-    type Route = Route;
-
-    fn routes(&self) -> Result<Vec<Self::Route>> {
-        let mut routes = Vec::new();
-
-        let table_v4 = Self::ip_forward_table(AF_INET as u16);
-        if let Ok(table_v4) = table_v4 {
-            let rows = unsafe {
-                std::slice::from_raw_parts((*table_v4).Table, (*table_v4).NumEntries as usize)
-            };
-            for row in rows {
-                if let Some(route) = Self::from_row(row)? {
-                    routes.push(route);
-                }
-            }
-            Self::free_table(table_v4);
-        }
-
-        let table_v6 = Self::ip_forward_table(AF_INET6 as u16);
-        if let Ok(table_v6) = table_v6 {
-            let rows = unsafe {
-                std::slice::from_raw_parts((*table_v6).Table, (*table_v6).NumEntries as usize)
-            };
-            for row in rows {
-                if let Some(route) = Self::from_row(row)? {
-                    routes.push(route);
-                }
-            }
-            Self::free_table(table_v6);
-        }
-
-        Ok(routes)
-    }
-
-    fn add_route(&self, route: Self::Route) -> Result<()> {
-        let (mut row, address_family) = match route.destination {
+    fn build_row(route: Route) -> MIB_IPFORWARD_ROW2 {
+        let (mut row, _) = match route.destination {
             Network::V4(ref net) => {
                 let octets = net.address().as_bytes();
                 let mut in_addr = windows::Win32::Networking::WinSock::IN_ADDR::default();
@@ -276,55 +334,7 @@ impl RouteProvider for WindowsBackend {
                 (r, AF_INET6 as u16)
             }
         };
-
-        unsafe {
-            let status = CreateIpForwardEntry2(&mut row);
-            if status != 0 {
-                return Err(Error::Platform(PlatformErrorCode::Windows(status as u32)));
-            }
-        }
-
-        Ok(())
-    }
-
-    fn remove_route(&self, route: Self::Route) -> Result<()> {
-        let (address_family, _) = match route.destination {
-            Network::V4(_) => (AF_INET as u16, 32u8),
-            Network::V6(_) => (AF_INET6 as u16, 128u8),
-        };
-
-        let table = Self::ip_forward_table(address_family)?;
-        let rows =
-            unsafe { std::slice::from_raw_parts((*table).Table, (*table).NumEntries as usize) };
-
-        let mut found = false;
-        for row in rows {
-            if row.InterfaceIndex == route.interface_index.unwrap_or(0) {
-                if let Ok(Some(existing)) = Self::from_row(row) {
-                    if existing.destination == route.destination {
-                        unsafe {
-                            let status = DeleteIpForwardEntry2(row);
-                            if status != 0 {
-                                Self::free_table(table);
-                                return Err(Error::Platform(PlatformErrorCode::Windows(
-                                    status as u32,
-                                )));
-                            }
-                        }
-                        found = true;
-                        break;
-                    }
-                }
-            }
-        }
-
-        Self::free_table(table);
-
-        if !found {
-            return Err(Error::NotFound);
-        }
-
-        Ok(())
+        row
     }
 }
 
@@ -334,14 +344,17 @@ mod tests {
     use net_lattice_ip::{Ipv4Address, Ipv4Network, Ipv4PrefixLength};
 
     #[test]
-    fn routes_reads_the_real_kernel_routing_table() {
+    fn routes_reads_the_real_windows_routing_table() {
         let backend = WindowsBackend::new().expect("failed to create Windows backend");
+        // This test only compiles and runs on Windows. On other platforms,
+        // it is skipped by the `#[cfg(test)]` + `#[cfg(target_os = "windows")]`
+        // combination at the top of the crate.
         let routes = backend.routes().expect("GetIpForwardTable should not fail");
         let _ = routes;
     }
 
     #[test]
-    #[ignore = "requires Administrator privileges; run manually with elevated cmd/PowerShell"]
+    #[ignore = "requires Administrator privileges; run manually with elevated cmd/PowerShell on Windows"]
     fn add_then_remove_route_round_trips_through_the_kernel() {
         let backend = WindowsBackend::new().expect("failed to create Windows backend");
         let loopback_index = 1u32;
