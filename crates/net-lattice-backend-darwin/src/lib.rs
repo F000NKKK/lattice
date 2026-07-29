@@ -595,20 +595,65 @@ unsafe fn link_entry_to_interface(entry: &libc::ifaddrs) -> Option<Interface> {
     Some(interface)
 }
 
+// `<sys/sockio.h>`'s `SIOCGIFMTU` is `_IOWR('i', 51, struct ifreq)` — not
+// exposed as a named constant by the `libc` crate for `apple`. `_IOWR`'s
+// BSD ioctl-number encoding (`<sys/ioccom.h>`) bakes in `sizeof(struct
+// ifreq)`, computed here via `size_of` rather than a hand-copied literal so
+// it can't drift from the real, compiled layout of `libc::ifreq`.
+const IOCPARM_MASK: libc::c_ulong = 0x1fff;
+const IOC_IN: libc::c_ulong = 0x8000_0000;
+const IOC_OUT: libc::c_ulong = 0x4000_0000;
+const IOC_INOUT: libc::c_ulong = IOC_IN | IOC_OUT;
+
+fn siocgifmtu() -> libc::c_ulong {
+    let size = mem::size_of::<libc::ifreq>() as libc::c_ulong;
+    IOC_INOUT | ((size & IOCPARM_MASK) << 16) | ((b'i' as libc::c_ulong) << 8) | 51
+}
+
+/// Reads an interface's MTU via `ioctl(SIOCGIFMTU)` on `sock` — `getifaddrs`
+/// doesn't carry MTU itself, this is the standard BSD way to fetch it.
+/// `sock` only needs to be any open `AF_INET`/`SOCK_DGRAM` socket; it is
+/// never connected or written to.
+fn interface_mtu(sock: i32, name: &str) -> Option<u32> {
+    let mut req: libc::ifreq = unsafe { mem::zeroed() };
+    let name_bytes = name.as_bytes();
+    let len = name_bytes.len().min(req.ifr_name.len() - 1);
+    for (dst, &src) in req.ifr_name[..len].iter_mut().zip(&name_bytes[..len]) {
+        *dst = src as libc::c_char;
+    }
+
+    let status = unsafe { libc::ioctl(sock, siocgifmtu(), &mut req) };
+    if status != 0 {
+        return None;
+    }
+    let mtu = unsafe { req.ifr_ifru.ifru_mtu };
+    u32::try_from(mtu).ok()
+}
+
 impl InterfaceProvider for DarwinBackend {
     type Interface = Interface;
 
     fn interfaces(&self) -> Result<Vec<Self::Interface>> {
+        let mtu_sock = unsafe { libc::socket(libc::AF_INET, libc::SOCK_DGRAM, 0) };
+        if mtu_sock < 0 {
+            return Err(Error::Platform(io_error_code(&io::Error::last_os_error())));
+        }
+
         let mut head: *mut libc::ifaddrs = std::ptr::null_mut();
         let interfaces = unsafe {
             if libc::getifaddrs(&mut head) != 0 {
-                return Err(Error::Platform(io_error_code(&io::Error::last_os_error())));
+                let err = Error::Platform(io_error_code(&io::Error::last_os_error()));
+                libc::close(mtu_sock);
+                return Err(err);
             }
 
             let mut interfaces = Vec::new();
             let mut cursor = head;
             while !cursor.is_null() {
-                if let Some(interface) = link_entry_to_interface(&*cursor) {
+                if let Some(mut interface) = link_entry_to_interface(&*cursor) {
+                    if let Some(mtu) = interface_mtu(mtu_sock, &interface.name) {
+                        interface = interface.with_mtu(mtu);
+                    }
                     interfaces.push(interface);
                 }
                 cursor = (*cursor).ifa_next;
@@ -616,6 +661,7 @@ impl InterfaceProvider for DarwinBackend {
             libc::freeifaddrs(head);
             interfaces
         };
+        unsafe { libc::close(mtu_sock) };
         Ok(interfaces)
     }
 }
