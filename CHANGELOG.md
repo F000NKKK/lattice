@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.4.2] - TBD
+## [0.4.3] - TBD
 
 ### Added
 
@@ -58,6 +58,17 @@ BSD/macOS.
   Caught by CI's first real run on a macOS runner. Replaced with
   `sysctl(CTL_NET, PF_ROUTE, 0, AF_UNSPEC, NET_RT_DUMP, 0)`, the standard
   BSD mechanism for reading the entire routing table at once.
+- `net-lattice-backend-darwin`: `add_route` failed with `EINVAL` for any
+  route with an interface index but no IP gateway (the common case —
+  e.g. `route.with_interface_index(...)` alone). `RTM_ADD` requires an
+  address in the `RTA_GATEWAY` slot to determine the outgoing path;
+  `rtm_index` in the request header is not honored for `ADD` (the kernel
+  only fills it in on the reply). Caught by CI's privileged round-trip
+  test on a macOS runner. Fixed by supplying a link-layer (`AF_LINK`)
+  `sockaddr_dl` gateway naming the interface when there's no IP gateway —
+  the same shape `route add -interface` uses — without setting
+  `RTF_GATEWAY` (that flag means "real next hop", not "no next hop, just
+  this wire").
 
 ## [0.3.0] - TBD
 
