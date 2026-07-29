@@ -9,6 +9,7 @@ for the latest stable release series.
 | ------- | --------- |
 | 0.1.x | ✅ |
 | 0.2.x | ✅ |
+| 0.3.x | ✅ |
 
 ## Reporting a Vulnerability
 
