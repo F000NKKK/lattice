@@ -85,6 +85,20 @@ BSD/macOS.
   test added a route on the wrong interface and never found it in
   `routes()` afterward. Looked up `lo0`'s real index via `InterfaceProvider`
   instead, same as the Linux/Windows equivalents of this test already did.
+- `net-lattice-backend-darwin`: `add_route`/`remove_route` trusted a
+  successful `send()` on the `PF_ROUTE` socket as proof the kernel actually
+  performed the change. `send()` only confirms the message was accepted
+  into the socket buffer — routing sockets echo the processed request back
+  (with `rtm_errno` filled in) to every open routing socket on the system,
+  and a caller is expected to read that reply to learn the real outcome.
+  Diagnostics added for the previous two fixes proved this was live: the
+  route was entirely absent afterward (not merely misfiled under the wrong
+  interface or prefix), meaning `add_route` was reporting success for a
+  request the kernel had silently rejected. Added `send_route_request`,
+  which sends and then reads the socket until it sees the reply matching
+  this request's `rtm_pid`/`rtm_seq` (filtering out other processes'
+  traffic on the same shared socket), returning `Err` from a nonzero
+  `rtm_errno` instead of assuming success.
 
 ## [0.3.0] - TBD
 
