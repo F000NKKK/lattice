@@ -405,6 +405,31 @@ fn build_delete_message(route: &Route) -> Result<Vec<u8>> {
     Ok(buf)
 }
 
+/// Pushes an `AF_LINK` `sockaddr_dl` naming interface `interface_index`,
+/// with no hardware address of its own — this is the gateway-slot shape
+/// used for "send directly out this interface, no next hop" routes (see
+/// `build_add_message`'s `(None, Some(interface_index))` case).
+fn push_link_gateway(buf: &mut [u8], offset: usize, interface_index: u32) -> usize {
+    let sdl = libc::sockaddr_dl {
+        sdl_len: mem::size_of::<libc::sockaddr_dl>() as u8,
+        sdl_family: libc::AF_LINK as u8,
+        sdl_index: interface_index as u16,
+        sdl_type: 0,
+        sdl_nlen: 0,
+        sdl_alen: 0,
+        sdl_slen: 0,
+        sdl_data: [0; 12],
+    };
+    unsafe {
+        std::ptr::copy_nonoverlapping(
+            &sdl as *const _ as *const u8,
+            buf.as_mut_ptr().add(offset),
+            mem::size_of::<libc::sockaddr_dl>(),
+        );
+    }
+    mem::size_of::<libc::sockaddr_dl>()
+}
+
 fn push_sockaddr(buf: &mut [u8], offset: usize, addr: IpAddr) -> usize {
     match addr {
         IpAddr::V4(addr) => {
