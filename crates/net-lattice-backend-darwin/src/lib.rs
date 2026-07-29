@@ -829,11 +829,32 @@ mod tests {
             .iter()
             .any(|r| r.destination == destination && r.interface_index == Some(interface_index));
 
+        // Diagnostic-only: this exact assertion has failed twice in CI
+        // already for two different root causes (a bogus hardcoded
+        // interface index, then something still unidentified) without any
+        // visibility into what `routes()` actually returned. Rather than
+        // guess a third time, dump every entry that at least matches the
+        // destination network (ignoring interface) so a failure here shows
+        // real data — was the route not added at all, added under a
+        // different interface than expected, or added with an unexpected
+        // prefix length/gateway — instead of just "it wasn't found".
+        let near_matches: Vec<_> = routes
+            .iter()
+            .filter(|r| r.destination == destination)
+            .collect();
+
         // Clean up before asserting, so a failed assertion doesn't leave
         // the test route behind on the machine that ran this.
         let _ = backend.remove_route(route);
 
-        assert!(found, "added route was not present in routes() afterward");
+        assert!(
+            found,
+            "added route (destination={destination:?}, interface_index={interface_index}) \
+             was not present in routes() afterward.\n\
+             Entries matching the destination (any interface): {near_matches:#?}\n\
+             Full table ({} entries): {routes:#?}",
+            routes.len(),
+        );
 
         let routes_after_removal = backend
             .routes()
