@@ -11,15 +11,30 @@
 
 use std::net::IpAddr;
 
-use net_lattice_core::{Error, PlatformErrorCode, Result};
+use net_lattice_core::{Error, Id, PlatformErrorCode, Result};
+use net_lattice_model::interface::{AdminState, Interface, InterfaceKind, OperationalState};
+use net_lattice_model::mac::MacAddress;
 use net_lattice_model::route::{Route, RouteId};
 use net_lattice_model::{IpAddress, Network};
-use net_lattice_platform::RouteProvider;
+use net_lattice_platform::{InterfaceProvider, RouteProvider};
 use windows::Win32::NetworkManagement::IpHelper::{
-    CreateIpForwardEntry2, DeleteIpForwardEntry2, FreeMibTable, GetIpForwardTable2,
-    InitializeIpForwardEntry, MIB_IPFORWARD_ROW2, MIB_IPFORWARD_TABLE2,
+    CreateIpForwardEntry2, DeleteIpForwardEntry2, FreeMibTable, GetIfTable2, GetIpForwardTable2,
+    InitializeIpForwardEntry, MIB_IF_ROW2, MIB_IF_TABLE2, MIB_IPFORWARD_ROW2, MIB_IPFORWARD_TABLE2,
+};
+use windows::Win32::NetworkManagement::Ndis::{
+    IfOperStatusDormant, IfOperStatusDown, IfOperStatusLowerLayerDown, IfOperStatusUp,
+    NET_IF_ADMIN_STATUS_UP,
 };
 use windows::Win32::Networking::WinSock::{AF_INET, AF_INET6};
+
+// IANA `ifType` values (RFC 2863), not exposed as named constants by the
+// `windows` crate's `MIB_IF_ROW2::Type` binding.
+const IF_TYPE_ETHERNET_CSMACD: u32 = 6;
+const IF_TYPE_PPP: u32 = 23;
+const IF_TYPE_SOFTWARE_LOOPBACK: u32 = 24;
+const IF_TYPE_IEEE80211: u32 = 71;
+const IF_TYPE_L2_VLAN: u32 = 135;
+const IF_TYPE_BRIDGE: u32 = 209;
 
 /// The Windows IP Helper API-backed implementation of Net Lattice's provider
 /// traits.
