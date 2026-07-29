@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - TBD
+
+### Added
+
+- `net-lattice-backend-darwin`: scaffolded BSD/macOS route socket backend
+  (`DarwinBackend`), gated to `target_os = "macos"`. Provider methods are
+  currently unimplemented placeholders.
+- macOS platform support in the `net-lattice` facade (`Lattice::connect()`
+  on `cfg(target_os = "macos")`), wired to `DarwinBackend`.
+
+This is Stage 0.3 of [ARCHITECTURE.md](ARCHITECTURE.md)'s Incremental
+Delivery Plan: initial Darwin backend crate and wiring.
+
+
 ## [0.2.0] - TBD
 
 ### Added

@@ -64,3 +64,13 @@ impl Lattice<net_lattice_backend_windows::WindowsBackend> {
         })
     }
 }
+
+#[cfg(target_os = "macos")]
+impl Lattice<net_lattice_backend_darwin::DarwinBackend> {
+    /// Connects using the default backend for the current platform.
+    pub fn connect() -> Result<Self> {
+        Ok(Self {
+            backend: net_lattice_backend_darwin::DarwinBackend::new()?,
+        })
+    }
+}
