@@ -7,7 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - TBD
+
+### Added
+
+- `net-lattice-backend-windows`: `RouteProvider` implementation via the
+  Windows IP Helper API (`GetIpForwardTable2`, `CreateIpForwardEntry2`,
+  `DeleteIpForwardEntry2`), gated to `target_os = "windows"`.
+- Windows platform support in the `net-lattice` facade (`Lattice::connect()`
+  on `cfg(target_os = "windows")`), wired to `WindowsBackend`.
+
+This is Stage 0.2 of [ARCHITECTURE.md](ARCHITECTURE.md)'s Incremental
+Delivery Plan: listing, adding, and removing IPv4/IPv6 routes on Windows.
+
+
 ## [0.1.0] - 2026-07-28
+
 
 ### Added
 
