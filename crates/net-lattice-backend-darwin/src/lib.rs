@@ -878,18 +878,26 @@ mod tests {
             .iter()
             .any(|r| r.destination == destination && r.interface_index == Some(interface_index));
 
-        // Diagnostic-only: this exact assertion has failed twice in CI
-        // already for two different root causes (a bogus hardcoded
-        // interface index, then something still unidentified) without any
-        // visibility into what `routes()` actually returned. Rather than
-        // guess a third time, dump every entry that at least matches the
-        // destination network (ignoring interface) so a failure here shows
-        // real data — was the route not added at all, added under a
-        // different interface than expected, or added with an unexpected
-        // prefix length/gateway — instead of just "it wasn't found".
+        // Diagnostic-only: this exact assertion has already failed in CI
+        // for multiple different root causes without enough visibility
+        // into what `routes()` actually returned to tell them apart.
+        // Matching on the destination *address alone* (not the full
+        // `Network`, which also compares prefix length) is deliberate: the
+        // previous round of this diagnostic filtered on exact `Network`
+        // equality, which can't distinguish "genuinely not added" from
+        // "added but with an unexpected prefix length" — both look like an
+        // empty list. This one can.
         let near_matches: Vec<_> = routes
             .iter()
-            .filter(|r| r.destination == destination)
+            .filter(|r| match (&r.destination, &destination) {
+                (Network::V4(actual), Network::V4(expected)) => {
+                    actual.address() == expected.address()
+                }
+                (Network::V6(actual), Network::V6(expected)) => {
+                    actual.address() == expected.address()
+                }
+                _ => false,
+            })
             .collect();
 
         // Clean up before asserting, so a failed assertion doesn't leave
