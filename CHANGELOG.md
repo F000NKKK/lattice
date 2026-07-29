@@ -30,9 +30,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI: `.github/workflows/ci.yml` runs fmt/clippy/test/doc on native Linux,
   Windows, and macOS GitHub-hosted runners (not cross-compiled), so each
   platform's backend crate is actually built and clippy-checked on its own
-  OS instead of only ever compiling on Linux. `dependabot.yml` gained a
-  `github-actions` ecosystem entry now that a workflow exists for it to
-  scan; both ecosystems' PRs run through this same CI.
+  OS instead of only ever compiling on Linux, plus a follow-up step per OS
+  running each backend's `#[ignore]`d privileged round-trip test (`sudo` for
+  `CAP_NET_ADMIN`/root on Linux/macOS; Windows runners are Administrator
+  already). `dependabot.yml` gained a `github-actions` ecosystem entry now
+  that a workflow exists for it to scan; both ecosystems' PRs run through
+  this same CI.
 
 This is Stage 0.4 of [ARCHITECTURE.md](ARCHITECTURE.md)'s Incremental
 Delivery Plan: listing network interfaces on Linux, Windows, and
@@ -48,6 +51,13 @@ BSD/macOS.
   don't exist on the real `windows` crate bindings (`MIB_IPADDRESS_STRING`,
   `Metric1`, raw `u16`/`u32` casts of `WIN32_ERROR`/`ADDRESS_FAMILY`) and
   never actually compiled for `target_os = "windows"`.
+- `net-lattice-backend-darwin`: `routes()` sent `RTM_GET` with no
+  destination over the `PF_ROUTE` socket to try to dump the whole table —
+  the kernel rejects that with `EINVAL` (`RTM_GET` looks up one specific
+  destination's route; it isn't Netlink's dump-via-empty-request idiom).
+  Caught by CI's first real run on a macOS runner. Replaced with
+  `sysctl(CTL_NET, PF_ROUTE, 0, AF_UNSPEC, NET_RT_DUMP, 0)`, the standard
+  BSD mechanism for reading the entire routing table at once.
 
 ## [0.3.0] - TBD
 

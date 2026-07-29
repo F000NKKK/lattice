@@ -58,15 +58,11 @@ jobs:
       # routing table.
       - name: cargo test --ignored (privileged, Linux — sudo for CAP_NET_ADMIN)
         if: matrix.os == 'ubuntu-latest'
-        run: |
-          sudo env "PATH=$PATH" "RUSTUP_TOOLCHAIN=$RUSTUP_TOOLCHAIN" \
-            cargo test -p net-lattice-backend-linux -- --ignored
+        run: sudo env "PATH=$PATH" "HOME=$HOME" cargo test -p net-lattice-backend-linux -- --ignored
 
       - name: cargo test --ignored (privileged, macOS — sudo for root)
         if: matrix.os == 'macos-latest'
-        run: |
-          sudo env "PATH=$PATH" "RUSTUP_TOOLCHAIN=$RUSTUP_TOOLCHAIN" \
-            cargo test -p net-lattice-backend-darwin -- --ignored
+        run: sudo env "PATH=$PATH" "HOME=$HOME" cargo test -p net-lattice-backend-darwin -- --ignored
 
       # GitHub-hosted Windows runners already execute as Administrator, so
       # no elevation step is needed here — unlike the sudo re-exec above.
