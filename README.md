@@ -17,7 +17,7 @@
 
 **Net Lattice** is a modern, cross-platform Rust library for configuring and inspecting operating system networking through a single, strongly typed API.
 
-> **Status:** Net Lattice has shipped Stage 0.1, 0.2, and 0.3 of its architecture plan. The repository now contains multiple crates with real implementations for listing, adding, and removing IPv4/IPv6 routes on Linux, Windows, and BSD/macOS. This is still a minimal vertical slice, not a complete library — see Current Status below.
+> **Status:** Net Lattice has shipped through Stage 0.4 of its architecture plan. The repository now contains multiple crates with real implementations for listing, adding, and removing IPv4/IPv6 routes, and for listing network interfaces, on Linux, Windows, and BSD/macOS. This is still a minimal vertical slice, not a complete library — see Current Status below.
 
 ## Overview
 
@@ -67,25 +67,25 @@ Net Lattice intends to eventually provide support for:
 
 ## Current Status
 
-Stage 0.1, 0.2, and 0.3 of the [architecture](ARCHITECTURE.md)'s Incremental Delivery Plan have landed:
+Stage 0.4 of the [architecture](ARCHITECTURE.md)'s Incremental Delivery Plan has landed:
 
 - `net-lattice-core`, `net-lattice-ip`
-- `net-lattice-model`'s `route` module
-- `net-lattice-platform`'s `RouteProvider`
-- `net-lattice-backend-linux` (routes via Netlink)
-- `net-lattice-backend-windows` (routes via the Windows IP Helper API)
-- `net-lattice-backend-darwin` (routes via BSD/macOS route sockets)
+- `net-lattice-model`'s `route`, `mac`, and `interface` modules
+- `net-lattice-platform`'s `RouteProvider` and `InterfaceProvider`
+- `net-lattice-backend-linux` (routes and interfaces via Netlink)
+- `net-lattice-backend-windows` (routes and interfaces via the Windows IP Helper API)
+- `net-lattice-backend-darwin` (routes via BSD/macOS route sockets, interfaces via `getifaddrs`)
 - the `net-lattice` facade
 
-This gives real, published route management on Linux, Windows, and BSD/macOS. This is still not a complete library: interfaces, DNS, neighbors, and every other item in the Long-Term Goals above are still ahead; see [ARCHITECTURE.md](ARCHITECTURE.md)'s Incremental Delivery Plan for the staged roadmap and [CHANGELOG.md](CHANGELOG.md) for what has actually shipped.
+This gives real, published route management and interface listing on Linux, Windows, and BSD/macOS. This is still not a complete library: DNS, neighbors, and every other item in the Long-Term Goals above are still ahead; see [ARCHITECTURE.md](ARCHITECTURE.md)'s Incremental Delivery Plan for the staged roadmap and [CHANGELOG.md](CHANGELOG.md) for what has actually shipped.
 
 ## Roadmap
 
 1. **Bootstrap** *(completed)* — repository infrastructure, licensing, community health files, and tooling configuration.
 2. **Design** *(completed)* — define the crate layout, core abstractions, and platform abstraction strategy. See [ARCHITECTURE.md](ARCHITECTURE.md) for the planned workspace structure.
-3. **Foundations** *(completed for routes)* — core IP/route types and Linux/Windows backends shipped. Interface/DNS/neighbor foundations remain.
-4. **Platform parity** *(completed for routes)* — Linux, Windows, and BSD/macOS route backends shipped.
-5. **Advanced features** — monitoring, notifications, transactional configuration, and declarative networking.
+3. **Foundations** *(completed)* — core IP/route/interface types and all three platform backends shipped.
+4. **Platform parity** *(completed)* — Linux, Windows, and BSD/macOS route and interface backends shipped.
+5. **Advanced features** — DNS, neighbors, monitoring, notifications, transactional configuration, and declarative networking.
 
 ## Contributing
 

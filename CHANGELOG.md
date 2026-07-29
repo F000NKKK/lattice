@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - TBD
+
+### Added
+
+- `net-lattice-model`: the `mac` module (`MacAddress`) and the `interface`
+  module (`Interface`, `InterfaceId`, `InterfaceKind`, `AdminState`,
+  `OperationalState`).
+- `net-lattice-platform`: `InterfaceProvider`, with no dependency on
+  `net-lattice-model`.
+- `net-lattice-backend-linux`: `InterfaceProvider` implementation via
+  Netlink (`RTM_GETLINK`), covered by a real, unprivileged `interfaces()`
+  test asserting the `lo` interface is present and classified as
+  `Loopback`.
+- `net-lattice-backend-windows`: `InterfaceProvider` implementation via the
+  Windows IP Helper API (`GetIfTable2`).
+- `net-lattice-backend-darwin`: `InterfaceProvider` implementation via
+  `getifaddrs`, reading `AF_LINK` entries for name, index, hardware type,
+  and MAC address.
+- `net-lattice` facade: `Lattice::interfaces()`, and `LatticeBackend` now
+  additionally requires `InterfaceProvider<Interface = Interface>`.
+
+This is Stage 0.4 of [ARCHITECTURE.md](ARCHITECTURE.md)'s Incremental
+Delivery Plan: listing network interfaces on Linux, Windows, and
+BSD/macOS.
+
 ## [0.3.0] - TBD
 
 ### Added
