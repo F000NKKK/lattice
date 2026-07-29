@@ -25,7 +25,12 @@ use windows::Win32::NetworkManagement::Ndis::{
     IfOperStatusDormant, IfOperStatusDown, IfOperStatusLowerLayerDown, IfOperStatusUp,
     NET_IF_ADMIN_STATUS_UP,
 };
-use windows::Win32::Networking::WinSock::{AF_INET, AF_INET6};
+use windows::Win32::Networking::WinSock::{
+    ADDRESS_FAMILY, AF_INET, AF_INET6, IN_ADDR, IN_ADDR_0, IN_ADDR_0_0, IN6_ADDR, IN6_ADDR_0,
+    SOCKADDR_IN, SOCKADDR_IN6, SOCKADDR_IN6_0, SOCKADDR_INET,
+};
+
+const AF_UNSPEC: ADDRESS_FAMILY = ADDRESS_FAMILY(0);
 
 // IANA `ifType` values (RFC 2863), not exposed as named constants by the
 // `windows` crate's `MIB_IF_ROW2::Type` binding.
@@ -97,83 +102,111 @@ fn network_to_std(network: Network) -> (IpAddr, u8) {
     }
 }
 
+/// Reads the address out of a `SOCKADDR_INET` union, dispatching on its
+/// `si_family` tag. Returns `None` for `AF_UNSPEC` (used by `NextHop` to mean
+/// "no gateway, on-link route").
+///
+/// # Safety
+/// `addr` must be a validly initialized `SOCKADDR_INET` (true for anything
+/// returned by `GetIpForwardTable2`/`GetIfTable2`).
+unsafe fn sockaddr_inet_to_ip(addr: &SOCKADDR_INET) -> Option<IpAddr> {
+    match unsafe { addr.si_family } {
+        AF_INET => {
+            let sin = unsafe { addr.Ipv4 };
+            let b = unsafe { sin.sin_addr.S_un.S_un_b };
+            Some(IpAddr::V4(std::net::Ipv4Addr::new(
+                b.s_b1, b.s_b2, b.s_b3, b.s_b4,
+            )))
+        }
+        AF_INET6 => {
+            let sin6 = unsafe { addr.Ipv6 };
+            let bytes = unsafe { sin6.sin6_addr.u.Byte };
+            Some(IpAddr::V6(std::net::Ipv6Addr::from(bytes)))
+        }
+        _ => None,
+    }
+}
+
+/// Builds a `SOCKADDR_INET` for `addr`, tagged with the matching address
+/// family. All other fields (port, flow info, scope) are zeroed — routing
+/// tables don't use them.
+fn ip_to_sockaddr_inet(addr: IpAddr) -> SOCKADDR_INET {
+    match addr {
+        IpAddr::V4(addr) => {
+            let [b1, b2, b3, b4] = addr.octets();
+            let in_addr = IN_ADDR {
+                S_un: IN_ADDR_0 {
+                    S_un_b: IN_ADDR_0_0 {
+                        s_b1: b1,
+                        s_b2: b2,
+                        s_b3: b3,
+                        s_b4: b4,
+                    },
+                },
+            };
+            SOCKADDR_INET {
+                Ipv4: SOCKADDR_IN {
+                    sin_family: AF_INET,
+                    sin_port: 0,
+                    sin_addr: in_addr,
+                    sin_zero: [0; 8],
+                },
+            }
+        }
+        IpAddr::V6(addr) => {
+            let in6_addr = IN6_ADDR {
+                u: IN6_ADDR_0 {
+                    Byte: addr.octets(),
+                },
+            };
+            SOCKADDR_INET {
+                Ipv6: SOCKADDR_IN6 {
+                    sin6_family: AF_INET6,
+                    sin6_port: 0,
+                    sin6_flowinfo: 0,
+                    sin6_addr: in6_addr,
+                    Anonymous: SOCKADDR_IN6_0 { sin6_scope_id: 0 },
+                },
+            }
+        }
+    }
+}
+
 fn row_to_route(row: &MIB_IPFORWARD_ROW2) -> Result<Option<Route>> {
-    let destination = match row.DestinationPrefix.PrefixLength {
-        32 => {
-            let addr = row.DestinationPrefix.Prefix.Ipv4;
-            let octets = [
-                addr.S_un.S_un_w.s_w1,
-                addr.S_un.S_un_w.s_w2,
-                addr.S_un.S_un_w.s_w3,
-                addr.S_un.S_un_w.s_w4,
-            ];
-            let ipv4 = net_lattice_ip::Ipv4Address::new(octets[0], octets[1], octets[2], octets[3]);
-            let Some(prefix) =
-                net_lattice_ip::Ipv4PrefixLength::new(row.DestinationPrefix.PrefixLength)
-            else {
+    let Some(destination_addr) = (unsafe { sockaddr_inet_to_ip(&row.DestinationPrefix.Prefix) })
+    else {
+        return Ok(None);
+    };
+    let prefix_len = row.DestinationPrefix.PrefixLength;
+
+    let destination = match destination_addr {
+        IpAddr::V4(addr) => {
+            let Some(prefix) = net_lattice_ip::Ipv4PrefixLength::new(prefix_len) else {
                 return Ok(None);
             };
-            Network::from(net_lattice_ip::Ipv4Network::new(ipv4, prefix))
+            Network::from(net_lattice_ip::Ipv4Network::new(addr.into(), prefix))
         }
-        128 => {
-            let bytes = row.DestinationPrefix.Prefix.Ipv6.s6_bytes;
-            let octets: [u8; 16] = bytes;
-            let ipv6 = net_lattice_ip::Ipv6Address::from(octets);
-            let Some(prefix) =
-                net_lattice_ip::Ipv6PrefixLength::new(row.DestinationPrefix.PrefixLength)
-            else {
+        IpAddr::V6(addr) => {
+            let Some(prefix) = net_lattice_ip::Ipv6PrefixLength::new(prefix_len) else {
                 return Ok(None);
             };
-            Network::from(net_lattice_ip::Ipv6Network::new(ipv6, prefix))
+            Network::from(net_lattice_ip::Ipv6Network::new(addr.into(), prefix))
         }
-        _ => return Ok(None),
     };
 
-    let gateway = if row.NextHop.si_family != 0 {
-        let gw = match row.NextHop.si_family {
-            AF_INET => {
-                let addr = row.NextHop.Ipv4;
-                let octets = [
-                    addr.S_un.S_un_w.s_w1,
-                    addr.S_un.S_un_w.s_w2,
-                    addr.S_un.S_un_w.s_w3,
-                    addr.S_un.S_un_w.s_w4,
-                ];
-                IpAddr::V4(std::net::Ipv4Addr::new(
-                    octets[0], octets[1], octets[2], octets[3],
-                ))
-            }
-            AF_INET6 => {
-                let bytes = row.NextHop.Ipv6.s6_bytes;
-                IpAddr::V6(std::net::Ipv6Addr::from(bytes))
-            }
-            _ => IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
-        };
-        Some(std_ip_to_ip_address(gw))
-    } else {
-        None
-    };
+    let gateway = unsafe { sockaddr_inet_to_ip(&row.NextHop) }.map(std_ip_to_ip_address);
 
-    let metric = if row.Metric1 == u32::MAX {
-        None
-    } else {
-        Some(row.Metric1)
-    };
-
-    let interface_index = if row.InterfaceIndex == u32::MAX {
-        None
-    } else {
+    let interface_index = if row.InterfaceIndex != 0 {
         Some(row.InterfaceIndex)
+    } else {
+        None
     };
 
     let id = synthesize_route_id(&destination, &gateway, interface_index);
 
-    let mut route = Route::new(id, destination);
+    let mut route = Route::new(id, destination).with_metric(row.Metric);
     if let Some(gateway) = gateway {
         route = route.with_gateway(gateway);
-    }
-    if let Some(metric) = metric {
-        route = route.with_metric(metric);
     }
     if let Some(interface_index) = interface_index {
         route = route.with_interface_index(interface_index);
@@ -188,10 +221,12 @@ impl RouteProvider for WindowsBackend {
         self.runtime.block_on(async {
             let mut routes = Vec::new();
 
-            let table_v4 = ip_forward_table(AF_INET as u16).await?;
+            let table_v4 = ip_forward_table(AF_INET).await?;
             unsafe {
-                let rows =
-                    std::slice::from_raw_parts((*table_v4).Table, (*table_v4).NumEntries as usize);
+                let rows = std::slice::from_raw_parts(
+                    (*table_v4).Table.as_ptr(),
+                    (*table_v4).NumEntries as usize,
+                );
                 for row in rows {
                     if let Some(route) = row_to_route(row)? {
                         routes.push(route);
@@ -200,10 +235,12 @@ impl RouteProvider for WindowsBackend {
             }
             free_table(table_v4);
 
-            let table_v6 = ip_forward_table(AF_INET6 as u16).await?;
+            let table_v6 = ip_forward_table(AF_INET6).await?;
             unsafe {
-                let rows =
-                    std::slice::from_raw_parts((*table_v6).Table, (*table_v6).NumEntries as usize);
+                let rows = std::slice::from_raw_parts(
+                    (*table_v6).Table.as_ptr(),
+                    (*table_v6).NumEntries as usize,
+                );
                 for row in rows {
                     if let Some(route) = row_to_route(row)? {
                         routes.push(route);
@@ -221,8 +258,8 @@ impl RouteProvider for WindowsBackend {
             let row = build_row(route);
             unsafe {
                 let status = CreateIpForwardEntry2(&row);
-                if status != 0 {
-                    return Err(Error::Platform(PlatformErrorCode::Windows(status as u32)));
+                if status.0 != 0 {
+                    return Err(Error::Platform(PlatformErrorCode::Windows(status.0)));
                 }
             }
             Ok(())
@@ -231,24 +268,27 @@ impl RouteProvider for WindowsBackend {
 
     fn remove_route(&self, route: Self::Route) -> Result<()> {
         self.runtime.block_on(async move {
-            let (address_family, _) = match route.destination {
-                Network::V4(_) => (AF_INET as u16, 32u8),
-                Network::V6(_) => (AF_INET6 as u16, 128u8),
+            let address_family = match route.destination {
+                Network::V4(_) => AF_INET,
+                Network::V6(_) => AF_INET6,
             };
 
             let table = ip_forward_table(address_family).await?;
             unsafe {
-                let rows = std::slice::from_raw_parts((*table).Table, (*table).NumEntries as usize);
+                let rows = std::slice::from_raw_parts(
+                    (*table).Table.as_ptr(),
+                    (*table).NumEntries as usize,
+                );
                 let mut found = false;
                 for row in rows {
                     if row.InterfaceIndex == route.interface_index.unwrap_or(0) {
                         if let Ok(Some(existing)) = row_to_route(row) {
                             if existing.destination == route.destination {
                                 let status = DeleteIpForwardEntry2(row);
-                                if status != 0 {
+                                if status.0 != 0 {
                                     free_table(table);
                                     return Err(Error::Platform(PlatformErrorCode::Windows(
-                                        status as u32,
+                                        status.0,
                                     )));
                                 }
                                 found = true;
