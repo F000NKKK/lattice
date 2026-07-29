@@ -6,9 +6,14 @@
 
 [![License: MPL 2.0](https://img.shields.io/badge/license-MPL--2.0-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/language-Rust-orange.svg)](https://www.rust-lang.org)
-[![crates.io](https://img.shields.io/badge/crates.io-not%20yet%20published-lightgrey.svg)](https://crates.io)
-[![docs.rs](https://img.shields.io/badge/docs.rs-not%20yet%20published-lightgrey.svg)](https://docs.rs)
+[![crates.io](https://img.shields.io/crates/v/net-lattice.svg)](https://crates.io/crates/net-lattice)
+[![docs.rs](https://img.shields.io/docsrs/net-lattice)](https://docs.rs/net-lattice)
+[![Downloads](https://img.shields.io/crates/d/net-lattice.svg)](https://crates.io/crates/net-lattice)
 [![MSRV](https://img.shields.io/badge/MSRV-1.93-lightgrey.svg)](Cargo.toml)
+
+![Linux](https://img.shields.io/badge/Linux-supported-success)
+![Windows](https://img.shields.io/badge/Windows-planned-lightgrey)
+![macOS](https://img.shields.io/badge/macOS-planned-lightgrey)
 
 **Net Lattice** — это современная кроссплатформенная библиотека для Rust, предназначенная для настройки и анализа сетевой конфигурации операционной системы через единый строго типизированный API.
 
