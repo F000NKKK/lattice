@@ -31,11 +31,12 @@ informed as the issue is investigated and resolved.
 
 ## Scope
 
-Net Lattice has landed Stage 0.1, 0.2, and 0.3 of its [architecture](ARCHITECTURE.md)'s
-Incremental Delivery Plan: route providers for Linux (`net-lattice-backend-linux`,
-via Netlink), Windows (`net-lattice-backend-windows`, via the IP Helper API),
-and BSD/macOS (`net-lattice-backend-darwin`, via route sockets). These are
+Net Lattice has landed Stage 0.4 of its [architecture](ARCHITECTURE.md)'s
+Incremental Delivery Plan: route and interface providers for Linux
+(`net-lattice-backend-linux`, via Netlink), Windows
+(`net-lattice-backend-windows`, via the IP Helper API), and BSD/macOS
+(`net-lattice-backend-darwin`, via route sockets and `getifaddrs`). These are
 privileged operations (see ARCHITECTURE.md's Privilege Model) — vulnerability
 reports involving unintended route manipulation, privilege confusion, or
-memory-safety issues in route message handling are in scope. No
-other backend or domain (DNS, firewall, ...) exists yet.
+memory-safety issues in route or interface message handling are in scope. No
+other domain (DNS, neighbors, firewall, ...) exists yet.
