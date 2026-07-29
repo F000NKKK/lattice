@@ -75,7 +75,7 @@ struct RtMsghdr {
     index: i16,
     count: i32,
     seq: i32,
-    pid: libc::pid_t,
+    pid: i32,
     errno: i32,
     r#use: i32,
     flags: u32,

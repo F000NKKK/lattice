@@ -13,7 +13,7 @@
 
 ![Linux](https://img.shields.io/badge/Linux-supported-success)
 ![Windows](https://img.shields.io/badge/Windows-supported-success)
-![macOS](https://img.shields.io/badge/macOS-planned-lightgrey)
+![macOS](https://img.shields.io/badge/macOS-scaffold-lightgrey)
 
 **Net Lattice** — это современная кроссплатформенная библиотека для Rust, предназначенная для настройки и анализа сетевой конфигурации операционной системы через единый строго типизированный API.
 

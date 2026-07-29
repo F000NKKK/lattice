@@ -13,7 +13,7 @@
 
 ![Linux](https://img.shields.io/badge/Linux-supported-success)
 ![Windows](https://img.shields.io/badge/Windows-supported-success)
-![macOS](https://img.shields.io/badge/macOS-planned-lightgrey)
+![macOS](https://img.shields.io/badge/macOS-scaffold-lightgrey)
 
 **Net Lattice** is a modern, cross-platform Rust library for configuring and inspecting operating system networking through a single, strongly typed API.
 
