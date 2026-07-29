@@ -283,17 +283,15 @@ impl RouteProvider for WindowsBackend {
                 for row in rows {
                     if row.InterfaceIndex == route.interface_index.unwrap_or(0)
                         && let Ok(Some(existing)) = row_to_route(row)
+                        && existing.destination == route.destination
                     {
-                        if existing.destination == route.destination {
-                            let status = DeleteIpForwardEntry2(row);
-                            if status.0 != 0 {
-                                free_table(table);
-                                return Err(Error::Platform(PlatformErrorCode::Windows(status.0)));
-                            }
-                            found = true;
-                            break;
-                            }
+                        let status = DeleteIpForwardEntry2(row);
+                        if status.0 != 0 {
+                            free_table(table);
+                            return Err(Error::Platform(PlatformErrorCode::Windows(status.0)));
                         }
+                        found = true;
+                        break;
                     }
                 }
                 free_table(table);
