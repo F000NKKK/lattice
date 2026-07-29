@@ -17,7 +17,7 @@
 
 **Net Lattice** is a modern, cross-platform Rust library for configuring and inspecting operating system networking through a single, strongly typed API.
 
-> **Status:** This repository is currently bootstrapped only. It contains no implementation, no crates, and no source code. Development has not yet begun.
+> **Status:** Net Lattice has shipped Stage 0.1 of its architecture plan. The repository now contains multiple crates with real implementations, focused on listing, adding, and removing IPv4/IPv6 routes on Linux. This is a minimal end-to-end vertical slice, not a complete library — see Current Status below.
 
 ## Overview
 
@@ -79,9 +79,9 @@ This is the smallest end-to-end vertical slice — listing, adding, and removing
 
 ## Roadmap
 
-1. **Bootstrap** *(current stage)* — repository infrastructure, licensing, community health files, and tooling configuration.
-2. **Design** — define the crate layout, core abstractions, and platform abstraction strategy. See [ARCHITECTURE.md](ARCHITECTURE.md) for the planned workspace structure.
-3. **Foundations** — implement core types (addresses, prefixes, interfaces) and the first platform backend.
+1. **Bootstrap** *(completed)* — repository infrastructure, licensing, community health files, and tooling configuration.
+2. **Design** *(completed)* — define the crate layout, core abstractions, and platform abstraction strategy. See [ARCHITECTURE.md](ARCHITECTURE.md) for the planned workspace structure.
+3. **Foundations** *(current stage)* — implement core types (addresses, prefixes, interfaces) and the first platform backend.
 4. **Platform parity** — extend support across Linux, Windows, and BSD/macOS.
 5. **Advanced features** — monitoring, notifications, transactional configuration, and declarative networking.
 
