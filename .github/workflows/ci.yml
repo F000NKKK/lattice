@@ -1,0 +1,49 @@
+name: CI
+
+# Runs on each of the three platforms this project actually ships backends
+# for (net-lattice-backend-linux/-windows/-darwin), on GitHub's native
+# runners for each OS — not cross-compiled — so platform-specific code
+# (raw FFI structs, ioctl/Netlink/IP-Helper calls) is compiled *and*
+# clippy-linted on the real target instead of only ever building on Linux.
+# Each backend crate is `#![cfg(target_os = "...")]`-gated, so a workspace
+# build/clippy/test run on a given OS naturally only touches that OS's
+# backend plus the OS-agnostic crates — no extra target selection needed.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (MSRV)
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.93"
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: cargo fmt --check
+        run: cargo fmt --check
+
+      - name: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: cargo test --workspace
+        run: cargo test --workspace
+
+      - name: cargo doc --no-deps --workspace
+        run: cargo doc --no-deps --workspace

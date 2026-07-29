@@ -9,10 +9,15 @@ updates:
         patterns:
           - "*"
 
-# A "github-actions" ecosystem entry is intentionally not configured here.
-# Dependabot's github-actions updater requires at least one workflow file
-# (/action.yml or /.github/workflows/*.yml) to have anything to scan, and
-# this project deliberately has none yet (see ARCHITECTURE.md / README.md's
-# non-goals: no CI workflows have been added). Add the entry back — the
-# original block, mirroring the "cargo" one above with
-# package-ecosystem: "github-actions" — once a workflow file exists.
+  # Dependabot PRs for both ecosystems above are validated by the CI
+  # workflow (.github/workflows/ci.yml), which runs on `pull_request` for
+  # every PR including Dependabot's — fmt/clippy/test/doc on real Linux,
+  # Windows, and macOS runners.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      github-actions-dependencies:
+        patterns:
+          - "*"
