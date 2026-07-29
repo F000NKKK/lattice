@@ -21,7 +21,6 @@ use net_lattice_model::{IpAddress, Network};
 use net_lattice_platform::{InterfaceProvider, RouteProvider};
 
 const RTM_VERSION: u8 = 5;
-const RTM_GET: u8 = 4;
 const RTM_ADD: u8 = 1;
 const RTM_DELETE: u8 = 2;
 
@@ -260,18 +259,60 @@ unsafe fn message_to_route(hdr: &libc::rt_msghdr) -> Option<Route> {
     Some(route)
 }
 
-fn build_get_request() -> Vec<u8> {
-    let mut buf = vec![0u8; mem::size_of::<libc::rt_msghdr>()];
-    let hdr = unsafe { &mut *(buf.as_mut_ptr() as *mut libc::rt_msghdr) };
-    hdr.rtm_msglen = mem::size_of::<libc::rt_msghdr>() as u16;
-    hdr.rtm_version = RTM_VERSION;
-    hdr.rtm_type = RTM_GET;
-    hdr.rtm_flags = RTF_UP;
-    hdr.rtm_addrs = 0;
-    hdr.rtm_pid = unsafe { libc::getpid() };
-    hdr.rtm_seq = 1;
-    hdr.rtm_index = 0;
-    buf
+/// Dumps the entire routing table via `sysctl(CTL_NET, PF_ROUTE, 0,
+/// AF_UNSPEC, NET_RT_DUMP, 0)` — the standard BSD mechanism for reading
+/// every route at once. `RTM_GET` sent over a `PF_ROUTE` socket, by
+/// contrast, looks up the route to one specific destination (it requires an
+/// `RTA_DST`); sending it with no destination — as one might expect from
+/// Netlink's dump-via-empty-request idiom — is rejected by the kernel with
+/// `EINVAL` rather than returning every route.
+///
+/// The returned buffer is a back-to-back sequence of `rt_msghdr`-prefixed
+/// messages, the same wire format `message_to_route` already parses.
+fn dump_routing_table() -> Result<Vec<u8>> {
+    let mut mib: [libc::c_int; 6] = [
+        libc::CTL_NET,
+        libc::PF_ROUTE,
+        0,
+        libc::AF_UNSPEC,
+        libc::NET_RT_DUMP,
+        0,
+    ];
+
+    let mut needed: usize = 0;
+    unsafe {
+        if libc::sysctl(
+            mib.as_mut_ptr(),
+            mib.len() as libc::c_uint,
+            std::ptr::null_mut(),
+            &mut needed,
+            std::ptr::null_mut(),
+            0,
+        ) != 0
+        {
+            return Err(Error::Platform(io_error_code(&io::Error::last_os_error())));
+        }
+    }
+    if needed == 0 {
+        return Ok(Vec::new());
+    }
+
+    let mut buf = vec![0u8; needed];
+    unsafe {
+        if libc::sysctl(
+            mib.as_mut_ptr(),
+            mib.len() as libc::c_uint,
+            buf.as_mut_ptr().cast(),
+            &mut needed,
+            std::ptr::null_mut(),
+            0,
+        ) != 0
+        {
+            return Err(Error::Platform(io_error_code(&io::Error::last_os_error())));
+        }
+    }
+    buf.truncate(needed);
+    Ok(buf)
 }
 
 fn build_add_message(route: &Route) -> Result<Vec<u8>> {
@@ -453,40 +494,20 @@ impl RouteProvider for DarwinBackend {
 
     fn routes(&self) -> Result<Vec<Self::Route>> {
         self.runtime.block_on(async {
-            let request = build_get_request();
-            let n = unsafe { libc::send(self.fd, request.as_ptr() as *const _, request.len(), 0) };
-            if n < 0 {
-                return Err(Error::Platform(io_error_code(&io::Error::last_os_error())));
-            }
+            let buf = dump_routing_table()?;
 
             let mut routes = Vec::new();
-            let mut buf = [0u8; 65536];
-            loop {
-                let n = unsafe { libc::recv(self.fd, buf.as_mut_ptr() as *mut _, buf.len(), 0) };
-                if n < 0 {
-                    return Err(Error::Platform(io_error_code(&io::Error::last_os_error())));
-                }
-                if n == 0 {
+            let mut offset = 0usize;
+            while offset + mem::size_of::<libc::rt_msghdr>() <= buf.len() {
+                let hdr = unsafe { &*(buf.as_ptr().add(offset) as *const libc::rt_msghdr) };
+                let step = hdr.rtm_msglen as usize;
+                if step == 0 {
                     break;
                 }
-
-                let mut offset = 0usize;
-                while offset < n as usize {
-                    let hdr = unsafe { &*(buf.as_ptr().add(offset) as *const libc::rt_msghdr) };
-                    if hdr.rtm_version != RTM_VERSION {
-                        break;
-                    }
-                    if hdr.rtm_type == RTM_GET
-                        && let Some(route) = unsafe { message_to_route(hdr) }
-                    {
-                        routes.push(route);
-                    }
-                    let step = hdr.rtm_msglen as usize;
-                    if step == 0 {
-                        break;
-                    }
-                    offset += step;
+                if let Some(route) = unsafe { message_to_route(hdr) } {
+                    routes.push(route);
                 }
+                offset += step;
             }
             Ok(routes)
         })
