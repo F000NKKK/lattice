@@ -29,13 +29,14 @@ pub struct WindowsBackend {
 
 impl WindowsBackend {
     pub fn new() -> Result<Self> {
-        let runtime = tokio::runtime::Runtime::new().map_err(windows_error_code)?;
+        let runtime =
+            tokio::runtime::Runtime::new().map_err(|err| Error::Platform(io_error_code(&err)))?;
         Ok(Self { runtime })
     }
 }
 
-fn windows_error_code(err: std::io::Error) -> PlatformErrorCode {
-    PlatformErrorCode::Windows(0)
+fn io_error_code(err: &std::io::Error) -> PlatformErrorCode {
+    PlatformErrorCode::Windows(err.raw_os_error().unwrap_or(0) as u32)
 }
 
 /// Placeholder identity scheme: a route has no kernel-assigned numeric ID,
@@ -58,6 +59,27 @@ fn synthesize_route_id(
     gateway.hash(&mut hasher);
     interface_index.hash(&mut hasher);
     RouteId::new(hasher.finish())
+}
+
+fn std_ip_to_ip_address(addr: IpAddr) -> IpAddress {
+    match addr {
+        IpAddr::V4(addr) => IpAddress::from(net_lattice_ip::Ipv4Address::from(addr)),
+        IpAddr::V6(addr) => IpAddress::from(net_lattice_ip::Ipv6Address::from(addr)),
+    }
+}
+
+fn ip_address_to_std(address: IpAddress) -> IpAddr {
+    match address {
+        IpAddress::V4(addr) => IpAddr::V4(addr.into()),
+        IpAddress::V6(addr) => IpAddr::V6(addr.into()),
+    }
+}
+
+fn network_to_std(network: Network) -> (IpAddr, u8) {
+    match network {
+        Network::V4(net) => (IpAddr::V4(net.address().into()), net.prefix().value()),
+        Network::V6(net) => (IpAddr::V6(net.address().into()), net.prefix().value()),
+    }
 }
 
 fn row_to_route(row: &MIB_IPFORWARD_ROW2) -> Result<Option<Route>> {
@@ -106,10 +128,7 @@ fn row_to_route(row: &MIB_IPFORWARD_ROW2) -> Result<Option<Route>> {
             }
             _ => IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
         };
-        Some(net_lattice_model::IpAddress::from(match gw {
-            IpAddr::V4(addr) => net_lattice_ip::Ipv4Address::from(addr).into(),
-            IpAddr::V6(addr) => net_lattice_ip::Ipv6Address::from(addr).into(),
-        }))
+        Some(std_ip_to_ip_address(gw))
     } else {
         None
     };
@@ -248,18 +267,19 @@ fn free_table(table: *mut MIB_IPFORWARD_TABLE2) {
 }
 
 fn build_row(route: Route) -> MIB_IPFORWARD_ROW2 {
-    let (mut row, _) = match route.destination {
-        Network::V4(ref net) => {
-            let octets = net.address().as_bytes();
+    let (destination, _prefix_len) = network_to_std(route.destination);
+    let (mut row, _) = match destination {
+        IpAddr::V4(addr) => {
+            let octets = addr.octets();
             let mut in_addr = windows::Win32::Networking::WinSock::IN_ADDR::default();
             in_addr.S_un.S_un_w.s_w1 = octets[0] as u16;
             in_addr.S_un.S_un_w.s_w2 = octets[1] as u16;
             in_addr.S_un.S_un_w.s_w3 = octets[2] as u16;
             in_addr.S_un.S_un_w.s_w4 = octets[3] as u16;
 
-            let gateway = route.gateway.map(|gw| match gw {
-                IpAddress::V4(ref addr) => {
-                    let octets = addr.as_bytes();
+            let gateway = route.gateway.map(ip_address_to_std).map(|gw| match gw {
+                IpAddr::V4(addr) => {
+                    let octets = addr.octets();
                     let mut gw_in = windows::Win32::Networking::WinSock::IN_ADDR::default();
                     gw_in.S_un.S_un_w.s_w1 = octets[0] as u16;
                     gw_in.S_un.S_un_w.s_w2 = octets[1] as u16;
@@ -270,8 +290,8 @@ fn build_row(route: Route) -> MIB_IPFORWARD_ROW2 {
                         Ipv4: gw_in,
                     }
                 }
-                IpAddress::V6(ref addr) => {
-                    let bytes = addr.as_bytes();
+                IpAddr::V6(addr) => {
+                    let bytes = addr.octets();
                     let mut gw_in6 = windows::Win32::Networking::WinSock::IN6_ADDR::default();
                     gw_in6.u.Byte = bytes;
                     windows::Win32::NetworkManagement::IpHelper::MIB_IPADDRESS_STRING {
@@ -283,7 +303,7 @@ fn build_row(route: Route) -> MIB_IPFORWARD_ROW2 {
 
             let mut r = MIB_IPFORWARD_ROW2::default();
             unsafe { InitializeIpForwardEntry(&mut r) };
-            r.DestinationPrefix.PrefixLength = net.prefix().value() as u8;
+            r.DestinationPrefix.PrefixLength = _prefix_len;
             r.DestinationPrefix.Prefix.Ipv4 = in_addr;
             r.NextHop = gateway.unwrap_or(
                 windows::Win32::NetworkManagement::IpHelper::MIB_IPADDRESS_STRING {
@@ -297,14 +317,14 @@ fn build_row(route: Route) -> MIB_IPFORWARD_ROW2 {
             }
             (r, AF_INET as u16)
         }
-        Network::V6(ref net) => {
-            let bytes = net.address().as_bytes();
+        IpAddr::V6(addr) => {
+            let bytes = addr.octets();
             let mut in6_addr = windows::Win32::Networking::WinSock::IN6_ADDR::default();
             in6_addr.u.Byte = bytes;
 
-            let gateway = route.gateway.map(|gw| match gw {
-                IpAddress::V4(ref addr) => {
-                    let octets = addr.as_bytes();
+            let gateway = route.gateway.map(ip_address_to_std).map(|gw| match gw {
+                IpAddr::V4(addr) => {
+                    let octets = addr.octets();
                     let mut gw_in = windows::Win32::Networking::WinSock::IN_ADDR::default();
                     gw_in.S_un.S_un_w.s_w1 = octets[0] as u16;
                     gw_in.S_un.S_un_w.s_w2 = octets[1] as u16;
@@ -315,8 +335,8 @@ fn build_row(route: Route) -> MIB_IPFORWARD_ROW2 {
                         Ipv4: gw_in,
                     }
                 }
-                IpAddress::V6(ref addr) => {
-                    let bytes = addr.as_bytes();
+                IpAddr::V6(addr) => {
+                    let bytes = addr.octets();
                     let mut gw_in6 = windows::Win32::Networking::WinSock::IN6_ADDR::default();
                     gw_in6.u.Byte = bytes;
                     windows::Win32::NetworkManagement::IpHelper::MIB_IPADDRESS_STRING {
@@ -328,7 +348,7 @@ fn build_row(route: Route) -> MIB_IPFORWARD_ROW2 {
 
             let mut r = MIB_IPFORWARD_ROW2::default();
             unsafe { InitializeIpForwardEntry(&mut r) };
-            r.DestinationPrefix.PrefixLength = net.prefix().value() as u8;
+            r.DestinationPrefix.PrefixLength = _prefix_len;
             r.DestinationPrefix.Prefix.Ipv6 = in6_addr;
             r.NextHop = gateway.unwrap_or(
                 windows::Win32::NetworkManagement::IpHelper::MIB_IPADDRESS_STRING {
@@ -357,7 +377,7 @@ mod tests {
     /// backend talks to the kernel, rather than only exercising conversion
     /// logic.
     #[test]
-    fn routes_reads_the_real_windows_routing_table() {
+    fn routes_reads_the_real_kernel_routing_table() {
         let backend = WindowsBackend::new().expect("failed to create Windows backend");
         let routes = backend
             .routes()
@@ -368,9 +388,11 @@ mod tests {
         let _ = routes;
     }
 
-    /// Requires `Administrator` privileges. Not run by default because most
-    /// development and CI environments don't grant it, and this test would
-    /// otherwise fail with `PermissionDenied` rather than being skipped.
+    /// Requires `Administrator` privileges (root, or `sudo -E cargo test -- --ignored`
+    /// in this crate). Not run by default because most development and CI
+    /// environments — including the one this crate was originally written
+    /// in — don't grant it, and this test would otherwise fail with
+    /// `PermissionDenied` rather than being skipped.
     ///
     /// Uses a documentation-only prefix (RFC 5737 `203.0.113.0/24`,
     /// TEST-NET-3) on `lo` so it can't collide with or disrupt real
@@ -379,19 +401,22 @@ mod tests {
     #[ignore = "requires Administrator; run manually from elevated cmd/PowerShell on Windows"]
     fn add_then_remove_route_round_trips_through_the_kernel() {
         let backend = WindowsBackend::new().expect("failed to create Windows backend");
-        let loopback_index = 1u32;
+        let interface_index = 1u32;
 
         let destination = Network::from(Ipv4Network::new(
             Ipv4Address::new(203, 0, 113, 0),
             Ipv4PrefixLength::new(24).unwrap(),
         ));
-        let route = Route::new(RouteId::new(0), destination).with_interface_index(loopback_index);
+        let route = Route::new(RouteId::new(0), destination).with_interface_index(interface_index);
 
         let add_result = backend.add_route(route.clone());
         if matches!(
             add_result,
             Err(Error::PermissionDenied) | Err(Error::Platform(_))
         ) {
+            // Best effort even under #[ignore]: if it's run without the
+            // capability after all, fail loudly rather than silently
+            // passing on a no-op.
             add_result.expect("add_route failed - are you running as Administrator?");
         }
 
@@ -400,7 +425,7 @@ mod tests {
             .expect("routes() failed after add_route succeeded");
         let found = routes
             .iter()
-            .any(|r| r.destination == destination && r.interface_index == Some(loopback_index));
+            .any(|r| r.destination == destination && r.interface_index == Some(interface_index));
 
         // Clean up before asserting, so a failed assertion doesn't leave
         // the test route behind on the machine that ran this.
@@ -414,7 +439,7 @@ mod tests {
         assert!(
             !routes_after_removal
                 .iter()
-                .any(|r| r.destination == destination && r.interface_index == Some(loopback_index)),
+                .any(|r| r.destination == destination && r.interface_index == Some(interface_index)),
             "removed route was still present in routes() afterward"
         );
     }
