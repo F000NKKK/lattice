@@ -11,20 +11,31 @@ pub use net_lattice_core::{Error, Id, PlatformErrorCode, Result};
 pub use net_lattice_ip::{
     Ipv4Address, Ipv4Network, Ipv4PrefixLength, Ipv6Address, Ipv6Network, Ipv6PrefixLength,
 };
+pub use net_lattice_model::interface::{
+    AdminState, Interface, InterfaceId, InterfaceKind, OperationalState,
+};
+pub use net_lattice_model::mac::MacAddress;
 pub use net_lattice_model::route::{Route, RouteId};
 pub use net_lattice_model::{IpAddress, Network};
-pub use net_lattice_platform::{Capability, RouteProvider};
+pub use net_lattice_platform::{Capability, InterfaceProvider, RouteProvider};
 
 /// Bound satisfied by any backend usable with [`Lattice`].
 ///
 /// This is where model convergence is enforced: a backend whose
-/// `RouteProvider::Route` is not literally `net_lattice_model::route::Route`
-/// fails to satisfy this trait and cannot be used with [`Lattice`] — a
-/// compile error at the point the backend is wired in, not a runtime
-/// surprise. See ARCHITECTURE.md's `net-lattice` section.
-pub trait LatticeBackend: RouteProvider<Route = Route> {}
+/// `RouteProvider::Route` (or `InterfaceProvider::Interface`) is not
+/// literally `net_lattice_model`'s corresponding type fails to satisfy this
+/// trait and cannot be used with [`Lattice`] — a compile error at the point
+/// the backend is wired in, not a runtime surprise. See ARCHITECTURE.md's
+/// `net-lattice` section.
+pub trait LatticeBackend:
+    RouteProvider<Route = Route> + InterfaceProvider<Interface = Interface>
+{
+}
 
-impl<B> LatticeBackend for B where B: RouteProvider<Route = Route> {}
+impl<B> LatticeBackend for B where
+    B: RouteProvider<Route = Route> + InterfaceProvider<Interface = Interface>
+{
+}
 
 /// The top-level entry point: a connected backend for the current system.
 pub struct Lattice<B: LatticeBackend> {
@@ -42,6 +53,10 @@ impl<B: LatticeBackend> Lattice<B> {
 
     pub fn remove_route(&self, route: Route) -> Result<()> {
         self.backend.remove_route(route)
+    }
+
+    pub fn interfaces(&self) -> Result<Vec<Interface>> {
+        self.backend.interfaces()
     }
 }
 
