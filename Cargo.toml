@@ -27,9 +27,9 @@ net-lattice-platform = { path = "crates/net-lattice-platform", version = "0.2.0"
 
 net-lattice-backend-linux = { path = "crates/net-lattice-backend-linux", version = "0.2.0" }
 net-lattice-backend-windows = { path = "crates/net-lattice-backend-windows", version = "0.2.1" }
-net-lattice-backend-darwin = { path = "crates/net-lattice-backend-darwin", version = "0.2.1" }
+net-lattice-backend-darwin = { path = "crates/net-lattice-backend-darwin", version = "0.2.3" }
 
-net-lattice = { path = "crates/net-lattice", version = "0.4.0" }
+net-lattice = { path = "crates/net-lattice", version = "0.4.4" }
 
 bitflags = "2"
 tokio = { version = "1", features = ["rt"] }
