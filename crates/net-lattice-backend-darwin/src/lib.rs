@@ -187,8 +187,7 @@ unsafe fn message_to_route(hdr: &libc::rt_msghdr) -> Option<Route> {
                 destination_addr = sockaddr_to_ip(ptr as *const libc::sockaddr);
             }
             RTA_GATEWAY => {
-                gateway =
-                    sockaddr_to_ip(ptr as *const libc::sockaddr).map(std_ip_to_ip_address);
+                gateway = sockaddr_to_ip(ptr as *const libc::sockaddr).map(std_ip_to_ip_address);
             }
             RTA_NETMASK => {
                 // The mask's address bytes start at the same offset a real
