@@ -8,11 +8,13 @@
 дизайна, лежащие в её основе. Он отражает предполагаемое направление, а не
 текущее состояние: см. [CHANGELOG.md](CHANGELOG.md) и [README.md](README.md)
 для того, что реально существует в репозитории на данный момент. На момент
-написания реализован этап 0.1 плана поэтапной поставки ниже (`net-lattice-core`,
-`net-lattice-ip`, модуль `route` в `net-lattice-model`, `RouteProvider` в
-`net-lattice-platform`, `net-lattice-backend-linux` и фасад `net-lattice`) —
-всё, что описано дальше этого этапа, по-прежнему только цель, а не текущее
-состояние.
+написания реализован этап 0.4 плана поэтапной поставки ниже: `net-lattice-core`,
+`net-lattice-ip`, модули `route` и `interface` в `net-lattice-model`,
+`RouteProvider` и `InterfaceProvider` в `net-lattice-platform`, поддержка
+маршрутов и интерфейсов в `net-lattice-backend-linux`,
+`net-lattice-backend-windows` и `net-lattice-backend-darwin`, а также фасад
+`net-lattice` — всё, что описано дальше этого этапа, по-прежнему только цель,
+а не текущее состояние.
 
 ## Руководящий принцип
 
@@ -593,10 +595,10 @@ provider-traits, а не другой контракт backend'а. Дорабо�
 
 | Этап | Объём |
 |-------|-------|
-| 0.1 | `net-lattice-core`, `net-lattice-ip`, `net-lattice-model` (только модуль `route`), `net-lattice-platform` (`RouteProvider`), `net-lattice-backend-linux` (маршруты через Netlink), `net-lattice` |
-| 0.2 | `net-lattice-backend-windows` (`RouteProvider`) |
-| 0.3 | `net-lattice-backend-darwin` (`RouteProvider`) |
-| 0.4 | модуль `interface` + `InterfaceProvider` на всех backend'ах |
+| 0.1 ✅ | `net-lattice-core`, `net-lattice-ip`, `net-lattice-model` (только модуль `route`), `net-lattice-platform` (`RouteProvider`), `net-lattice-backend-linux` (маршруты через Netlink), `net-lattice` |
+| 0.2 ✅ | `net-lattice-backend-windows` (`RouteProvider`) |
+| 0.3 ✅ | `net-lattice-backend-darwin` (`RouteProvider`) |
+| 0.4 ✅ | модуль `interface` + `InterfaceProvider` на всех backend'ах |
 | 0.5 | модуль `dns` + `DnsProvider` |
 | 0.6 | модуль `neighbor` + `NeighborProvider` (ARP/NDP) |
 | 0.7+ | Домены под Capability: VLAN, VRF, интеграция firewall, туннели; модуль `event` + `EventProvider`; декларативная конфигурация `CurrentState`/`DesiredState`/`Diff`/`ApplyPlan` |
