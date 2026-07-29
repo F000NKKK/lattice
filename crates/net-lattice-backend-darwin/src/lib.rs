@@ -838,6 +838,67 @@ mod tests {
             .expect("this test environment has no `lo0` interface")
     }
 
+    /// Raw `rt_msghdr` fields (bypassing `message_to_route` entirely) for
+    /// every dumped entry whose `RTA_DST` decodes to `target`, regardless
+    /// of `rtm_index`.
+    ///
+    /// Diagnostic-only. The `interface_index`-filtered raw scan
+    /// (`raw_headers_for_interface`) came back with 13 entries, none
+    /// carrying the exact flags `build_add_message` sets (`RTF_UP |
+    /// RTF_STATIC`, no `RTF_CLONING`) — meaning either the route was
+    /// filed under a different `rtm_index` than expected, or genuinely
+    /// wasn't created. Matching on the destination address directly,
+    /// ignoring `rtm_index`, tells them apart.
+    unsafe fn dst_from_message(hdr: &libc::rt_msghdr) -> Option<IpAddr> {
+        let mut ptr = unsafe { (hdr as *const libc::rt_msghdr).add(1) as *const u8 };
+        let mut remaining = hdr.rtm_msglen as usize - mem::size_of::<libc::rt_msghdr>();
+        let mut bit: libc::c_int = 1;
+        while bit <= hdr.rtm_addrs && remaining >= 1 {
+            if hdr.rtm_addrs & bit == 0 {
+                bit <<= 1;
+                continue;
+            }
+            let sa_len = unsafe { *ptr } as usize;
+            let aligned_len = if sa_len == 0 { 4 } else { (sa_len + 3) & !3 };
+            if aligned_len > remaining {
+                break;
+            }
+            if bit == RTA_DST {
+                return unsafe { sockaddr_to_ip(ptr as *const libc::sockaddr) };
+            }
+            ptr = unsafe { ptr.add(aligned_len) };
+            remaining -= aligned_len;
+            bit <<= 1;
+        }
+        None
+    }
+
+    fn raw_headers_matching_destination(target: IpAddr) -> Vec<String> {
+        let buf = dump_routing_table().expect("dump_routing_table failed");
+        let mut entries = Vec::new();
+        let mut offset = 0usize;
+        while offset + mem::size_of::<libc::rt_msghdr>() <= buf.len() {
+            let hdr = unsafe { &*(buf.as_ptr().add(offset) as *const libc::rt_msghdr) };
+            let step = hdr.rtm_msglen as usize;
+            if step == 0 {
+                break;
+            }
+            if unsafe { dst_from_message(hdr) } == Some(target) {
+                entries.push(format!(
+                    "type={} flags={:#x} addrs={:#x} msglen={} index={} errno={}",
+                    hdr.rtm_type,
+                    hdr.rtm_flags,
+                    hdr.rtm_addrs,
+                    hdr.rtm_msglen,
+                    hdr.rtm_index,
+                    hdr.rtm_errno,
+                ));
+            }
+            offset += step;
+        }
+        entries
+    }
+
     /// Raw `rt_msghdr` fields for every dumped entry tagged with
     /// `interface_index`, bypassing `message_to_route` entirely.
     ///
@@ -940,6 +1001,8 @@ mod tests {
             .collect();
 
         let raw_headers = raw_headers_for_interface(interface_index);
+        let raw_headers_by_dst =
+            raw_headers_matching_destination(IpAddr::V4(std::net::Ipv4Addr::new(203, 0, 113, 0)));
 
         // Clean up before asserting, so a failed assertion doesn't leave
         // the test route behind on the machine that ran this.
@@ -951,6 +1014,7 @@ mod tests {
              was not present in routes() afterward.\n\
              Entries matching the destination (any interface): {near_matches:#?}\n\
              Raw rt_msghdr entries tagged with interface_index={interface_index}: {raw_headers:#?}\n\
+             Raw rt_msghdr entries with RTA_DST=203.0.113.0 (any index): {raw_headers_by_dst:#?}\n\
              Full table ({} entries): {routes:#?}",
             routes.len(),
         );
