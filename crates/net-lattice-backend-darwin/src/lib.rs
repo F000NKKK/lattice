@@ -34,14 +34,16 @@ const IFT_PPP: libc::c_uchar = 0x17;
 const IFT_BRIDGE: libc::c_uchar = 0xd1;
 const IFT_L2VLAN: libc::c_uchar = 0x87;
 
-const RTA_DST: u32 = 0x1;
-const RTA_GATEWAY: u32 = 0x2;
-const RTA_NETMASK: u32 = 0x4;
+// `rt_msghdr::rtm_addrs`/`rtm_flags` are `c_int` (`i32`) on BSD/macOS, unlike
+// Netlink's `u32` bitmasks — these are typed to match.
+const RTA_DST: libc::c_int = 0x1;
+const RTA_GATEWAY: libc::c_int = 0x2;
+const RTA_NETMASK: libc::c_int = 0x4;
 
-const RTF_UP: u32 = 0x0001;
-const RTF_GATEWAY: u32 = 0x0002;
-const RTF_HOST: u32 = 0x0004;
-const RTF_STATIC: u32 = 0x0800;
+const RTF_UP: libc::c_int = 0x0001;
+const RTF_GATEWAY: libc::c_int = 0x0002;
+const RTF_HOST: libc::c_int = 0x0004;
+const RTF_STATIC: libc::c_int = 0x0800;
 
 const RTM_MAXSIZE: usize = 2048;
 
@@ -146,7 +148,7 @@ unsafe fn message_to_route(hdr: &libc::rt_msghdr) -> Option<Route> {
 
     let mut ptr = (hdr as *const libc::rt_msghdr).add(1) as *const u8;
     let mut remaining = hdr.rtm_msglen as usize - mem::size_of::<libc::rt_msghdr>();
-    let mut bit = 1u32;
+    let mut bit: libc::c_int = 1;
     while bit <= hdr.rtm_addrs && remaining >= mem::size_of::<libc::sockaddr>() {
         if hdr.rtm_addrs & bit == 0 {
             bit <<= 1;
@@ -481,15 +483,15 @@ fn ift_type_to_kind(sdl_type: libc::c_uchar) -> InterfaceKind {
 /// `AF_INET`/`AF_INET6` entries this function ignores).
 unsafe fn link_entry_to_interface(entry: &libc::ifaddrs) -> Option<Interface> {
     let sa = entry.ifa_addr;
-    if sa.is_null() || (*sa).sa_family as i32 != libc::AF_LINK {
+    if sa.is_null() || unsafe { (*sa).sa_family } as i32 != libc::AF_LINK {
         return None;
     }
-    let sdl = &*(sa as *const libc::sockaddr_dl);
+    let sdl = unsafe { &*(sa as *const libc::sockaddr_dl) };
 
     let name = if entry.ifa_name.is_null() {
         String::new()
     } else {
-        std::ffi::CStr::from_ptr(entry.ifa_name)
+        unsafe { std::ffi::CStr::from_ptr(entry.ifa_name) }
             .to_string_lossy()
             .into_owned()
     };
