@@ -971,12 +971,29 @@ mod tests {
             add_result.expect("add_route failed - are you running as root?");
         }
 
-        let routes = backend
+        // Retry with a short delay before concluding the route is really
+        // absent: `rtm_errno == 0` confirms the kernel accepted the
+        // request, but it's cheap to rule out any propagation delay
+        // between that reply and the route becoming visible in a fresh
+        // `NET_RT_DUMP` before trusting a single immediate read.
+        let mut routes = backend
             .routes()
             .expect("routes() failed after add_route succeeded");
-        let found = routes
+        let mut found = routes
             .iter()
             .any(|r| r.destination == destination && r.interface_index == Some(interface_index));
+        for _ in 0..4 {
+            if found {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            routes = backend
+                .routes()
+                .expect("routes() failed after add_route succeeded (retry)");
+            found = routes.iter().any(|r| {
+                r.destination == destination && r.interface_index == Some(interface_index)
+            });
+        }
 
         // Diagnostic-only: this exact assertion has already failed in CI
         // for multiple different root causes without enough visibility
