@@ -13,10 +13,13 @@ use std::hash::{Hash, Hasher};
 use std::net::IpAddr;
 
 use futures::TryStreamExt;
-use net_lattice_core::{Error, PlatformErrorCode, Result};
+use net_lattice_core::{Error, Id, PlatformErrorCode, Result};
+use net_lattice_model::interface::{AdminState, Interface, InterfaceKind, OperationalState};
+use net_lattice_model::mac::MacAddress;
 use net_lattice_model::route::{Route, RouteId};
 use net_lattice_model::{IpAddress, Network};
-use net_lattice_platform::RouteProvider;
+use net_lattice_platform::{InterfaceProvider, RouteProvider};
+use rtnetlink::packet_route::link::{LinkAttribute, LinkLayerType, LinkMessage, State};
 use rtnetlink::packet_route::route::{RouteAddress, RouteAttribute, RouteMessage};
 use rtnetlink::{Handle, RouteMessageBuilder};
 
@@ -272,6 +275,94 @@ impl RouteProvider for LinuxBackend {
     }
 }
 
+/// Maps Linux `ARPHRD_*` link-layer types (`LinkLayerType`) to the
+/// cross-platform [`InterfaceKind`]. Anything not covered falls back to
+/// `Other`, carrying the raw type code for diagnostics.
+fn link_layer_type_to_kind(link_layer_type: LinkLayerType) -> InterfaceKind {
+    match link_layer_type {
+        LinkLayerType::Ether => InterfaceKind::Ethernet,
+        LinkLayerType::Loopback => InterfaceKind::Loopback,
+        LinkLayerType::Ppp => InterfaceKind::PointToPoint,
+        LinkLayerType::Ieee80211
+        | LinkLayerType::Ieee80211Prism
+        | LinkLayerType::Ieee80211Radiotap => InterfaceKind::Wireless,
+        other => InterfaceKind::Other(u16::from(other) as u32),
+    }
+}
+
+fn message_to_interface(message: &LinkMessage) -> Interface {
+    let index = message.header.index;
+    let mut name = String::new();
+    let mut mac = None;
+    let mut mtu = None;
+    let mut operational_state = OperationalState::Unknown;
+
+    for attribute in &message.attributes {
+        match attribute {
+            LinkAttribute::IfName(value) => name = value.clone(),
+            LinkAttribute::Address(bytes) if bytes.len() == 6 => {
+                let mut octets = [0u8; 6];
+                octets.copy_from_slice(bytes);
+                mac = Some(MacAddress::new(octets));
+            }
+            LinkAttribute::Mtu(value) => mtu = Some(*value),
+            LinkAttribute::OperState(state) => {
+                operational_state = match state {
+                    State::Up => OperationalState::Up,
+                    State::Down | State::LowerLayerDown | State::NotPresent => {
+                        OperationalState::Down
+                    }
+                    State::Dormant => OperationalState::NoCarrier,
+                    _ => OperationalState::Unknown,
+                };
+            }
+            _ => {}
+        }
+    }
+
+    let admin_state = if message
+        .header
+        .flags
+        .contains(rtnetlink::packet_route::link::LinkFlags::Up)
+    {
+        AdminState::Up
+    } else {
+        AdminState::Down
+    };
+
+    let kind = link_layer_type_to_kind(message.header.link_layer_type);
+
+    let mut interface = Interface::new(Id::new(index as u64), index, name, kind)
+        .with_admin_state(admin_state)
+        .with_operational_state(operational_state);
+    if let Some(mac) = mac {
+        interface = interface.with_mac(mac);
+    }
+    if let Some(mtu) = mtu {
+        interface = interface.with_mtu(mtu);
+    }
+    interface
+}
+
+impl InterfaceProvider for LinuxBackend {
+    type Interface = Interface;
+
+    fn interfaces(&self) -> Result<Vec<Self::Interface>> {
+        self.runtime.block_on(async {
+            let mut links = self.handle.link().get().execute();
+            let mut interfaces = Vec::new();
+            while let Some(message) = links
+                .try_next()
+                .await
+                .map_err(|err| Error::Platform(rtnetlink_error_code(&err)))?
+            {
+                interfaces.push(message_to_interface(&message));
+            }
+            Ok(interfaces)
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -291,6 +382,23 @@ mod tests {
         // running this test is arbitrary (may even be empty in a minimal
         // container). Reaching here without an error is the assertion.
         let _ = routes;
+    }
+
+    /// Exercises a real round trip through Netlink, no privilege required:
+    /// `RTM_GETLINK` dumps are readable by any user, and every Linux system
+    /// has at least `lo`.
+    #[test]
+    fn interfaces_includes_the_loopback_interface() {
+        let backend = LinuxBackend::new().expect("failed to open a Netlink connection");
+        let interfaces = backend
+            .interfaces()
+            .expect("RTM_GETLINK dump should not require privilege");
+        assert!(
+            interfaces
+                .iter()
+                .any(|iface| iface.name == "lo" && iface.kind == InterfaceKind::Loopback),
+            "expected a `lo` interface classified as Loopback, got: {interfaces:?}"
+        );
     }
 
     fn loopback_interface_index(backend: &LinuxBackend) -> u32 {
