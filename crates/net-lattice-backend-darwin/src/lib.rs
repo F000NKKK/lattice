@@ -1,21 +1,23 @@
 //! BSD/macOS backend for Net Lattice: implements `net-lattice-platform`'s provider
 //! traits via route sockets.
 //!
-//! Only ever compiled for `target_os = "macos"`. See ARCHITECTURE.md for how
-//! this crate binds `net-lattice-platform`'s generic `RouteProvider::Route`
-//! associated type to the concrete `net_lattice_model::route::Route`.
+//! Only ever compiled for `target_os = "macos"` — its dependencies
+//! (`libc`, macOS-only) are gated the same way in `Cargo.toml`. See
+//! ARCHITECTURE.md for how this crate binds `net-lattice-platform`'s generic
+//! `RouteProvider::Route` associated type to the concrete
+//! `net_lattice_model::route::Route`.
 
 #![cfg(target_os = "macos")]
 
+use std::hash::{Hash, Hasher};
 use std::net::IpAddr;
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::unix::io::AsRawFd;
 use std::{io, mem};
 
 use net_lattice_core::{Error, PlatformErrorCode, Result};
 use net_lattice_model::route::{Route, RouteId};
 use net_lattice_model::{IpAddress, Network};
 use net_lattice_platform::RouteProvider;
-use tokio::io::unix::AsyncFd;
 
 const RTM_VERSION: u8 = 5;
 const RTM_GET: u8 = 4;
@@ -25,7 +27,6 @@ const RTM_DELETE: u8 = 2;
 const RTA_DST: u32 = 0x1;
 const RTA_GATEWAY: u32 = 0x2;
 const RTA_NETMASK: u32 = 0x4;
-const RTA_IFP: u32 = 0x10;
 
 const RTF_UP: u32 = 0x0001;
 const RTF_GATEWAY: u32 = 0x0002;
@@ -38,106 +39,29 @@ const RTM_MAXSIZE: usize = 2048;
 /// traits.
 pub struct DarwinBackend {
     runtime: tokio::runtime::Runtime,
-    fd: AsyncFd<RawFd>,
+    fd: i32,
 }
 
 impl DarwinBackend {
     pub fn new() -> Result<Self> {
-        let runtime = tokio::runtime::Runtime::new().map_err(darwin_error_code)?;
+        let runtime =
+            tokio::runtime::Runtime::new().map_err(|err| Error::Platform(io_error_code(&err)))?;
         let _guard = runtime.enter();
         let fd = unsafe { libc::socket(libc::PF_ROUTE, libc::SOCK_RAW, libc::AF_UNSPEC) };
         if fd < 0 {
-            return Err(Error::Platform(PlatformErrorCode::Darwin(
-                io::Error::last_os_error().raw_os_error().unwrap_or(0),
-            )));
+            return Err(Error::Platform(io_error_code(&io::Error::last_os_error())));
         }
-        let async_fd = AsyncFd::new(fd).map_err(darwin_error_code)?;
-        Ok(Self {
-            runtime,
-            fd: async_fd,
-        })
-    }
-
-    async fn read_routes(&self) -> Result<Vec<Route>> {
-        let request = build_get_request();
-        self.send_message(&request)?;
-
-        let mut routes = Vec::new();
-        let mut buf = [0u8; 65536];
-        loop {
-            let mut guard = self.fd.readable().await.map_err(darwin_error_code)?;
-            match guard.try_io(|inner| unsafe {
-                let n = libc::recv(inner.as_raw_fd(), buf.as_mut_ptr() as *mut _, buf.len(), 0);
-                if n < 0 {
-                    Err(Error::Platform(PlatformErrorCode::Darwin(
-                        io::Error::last_os_error().raw_os_error().unwrap_or(0),
-                    )))
-                } else {
-                    Ok(n as usize)
-                }
-            }) {
-                Ok(Ok(0)) => break,
-                Ok(Ok(n)) => {
-                    let mut offset = 0usize;
-                    while offset < n {
-                        let hdr = unsafe { &*(buf.as_ptr().add(offset) as *const libc::rt_msghdr) };
-                        if hdr.rtm_version != RTM_VERSION {
-                            break;
-                        }
-                        if hdr.rtm_type == RTM_GET {
-                            if let Some(route) = unsafe { message_to_route(hdr) } {
-                                routes.push(route);
-                            }
-                        }
-                        let step = hdr.rtm_msglen as usize;
-                        if step == 0 {
-                            break;
-                        }
-                        offset += step;
-                    }
-                }
-                Ok(Err(err)) => return Err(err),
-                Err(_) => continue,
-            }
-        }
-        Ok(routes)
-    }
-
-    async fn add_route_impl(&self, route: Route) -> Result<()> {
-        let message = build_add_message(&route)?;
-        self.send_message(&message)
-    }
-
-    async fn remove_route_impl(&self, route: Route) -> Result<()> {
-        let message = build_delete_message(&route)?;
-        self.send_message(&message)
-    }
-
-    fn send_message(&self, message: &[u8]) -> Result<()> {
-        let n = unsafe {
-            libc::send(
-                self.fd.as_raw_fd(),
-                message.as_ptr() as *const _,
-                message.len(),
-                0,
-            )
-        };
-        if n < 0 {
-            return Err(Error::Platform(PlatformErrorCode::Darwin(
-                io::Error::last_os_error().raw_os_error().unwrap_or(0),
-            )));
-        }
-        Ok(())
+        Ok(Self { runtime, fd })
     }
 }
 
 impl Drop for DarwinBackend {
     fn drop(&mut self) {
-        unsafe { libc::close(self.fd.as_raw_fd()) };
+        unsafe { libc::close(self.fd) };
     }
 }
 
-fn darwin_error_code(err: std::io::Error) -> PlatformErrorCode {
+fn io_error_code(err: &std::io::Error) -> PlatformErrorCode {
     PlatformErrorCode::Darwin(err.raw_os_error().unwrap_or(0))
 }
 
@@ -155,7 +79,6 @@ fn synthesize_route_id(
     gateway: &Option<IpAddress>,
     interface_index: Option<u32>,
 ) -> RouteId {
-    use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     destination.hash(&mut hasher);
     gateway.hash(&mut hasher);
@@ -163,77 +86,25 @@ fn synthesize_route_id(
     RouteId::new(hasher.finish())
 }
 
-unsafe fn message_to_route(hdr: &libc::rt_msghdr) -> Option<Route> {
-    let mut destination = None;
-    let mut gateway = None;
-    let interface_index = if hdr.rtm_index != 0 {
-        Some(hdr.rtm_index as u32)
-    } else {
-        None
-    };
-
-    let mut ptr = (hdr as *const libc::rt_msghdr).add(1) as *const u8;
-    let mut remaining = hdr.rtm_msglen as usize - mem::size_of::<libc::rt_msghdr>();
-    let mut bit = 1u32;
-    let mut count = 0u32;
-    while count < 32 && remaining >= mem::size_of::<libc::sockaddr>() {
-        if hdr.rtm_addrs & bit == 0 {
-            bit <<= 1;
-            count += 1;
-            continue;
-        }
-        let sa = ptr as *const libc::sockaddr;
-        let len = (*sa).sa_len as usize;
-        let aligned_len = (len + 3) & !3;
-        if aligned_len == 0 || aligned_len > remaining {
-            break;
-        }
-        match bit {
-            RTA_DST => {
-                destination = sockaddr_to_ip(sa);
-            }
-            RTA_GATEWAY => {
-                gateway = sockaddr_to_ip(sa);
-            }
-            _ => {}
-        }
-        ptr = ptr.add(aligned_len);
-        remaining -= aligned_len;
-        bit <<= 1;
-        count += 1;
-    }
-
-    let destination = destination?;
-    let prefix_len = if (hdr.rtm_flags & RTF_HOST) != 0 {
-        32u8
-    } else {
-        32u8
-    };
-    let destination = match destination {
-        IpAddr::V4(addr) => {
-            let ipv4 = net_lattice_ip::Ipv4Address::from(addr);
-            let prefix = net_lattice_ip::Ipv4PrefixLength::new(prefix_len).ok()?;
-            Network::from(net_lattice_ip::Ipv4Network::new(ipv4, prefix))
-        }
-        IpAddr::V6(addr) => {
-            let ipv6 = net_lattice_ip::Ipv6Address::from(addr);
-            let prefix = net_lattice_ip::Ipv6PrefixLength::new(128).ok()?;
-            Network::from(net_lattice_ip::Ipv6Network::new(ipv6, prefix))
-        }
-    };
-    let gateway = gateway.map(|ip| match ip {
+fn std_ip_to_ip_address(addr: IpAddr) -> IpAddress {
+    match addr {
         IpAddr::V4(addr) => IpAddress::from(net_lattice_ip::Ipv4Address::from(addr)),
         IpAddr::V6(addr) => IpAddress::from(net_lattice_ip::Ipv6Address::from(addr)),
-    });
-    let id = synthesize_route_id(&destination, &gateway, interface_index);
-    let mut route = Route::new(id, destination);
-    if let Some(gateway) = gateway {
-        route = route.with_gateway(gateway);
     }
-    if let Some(interface_index) = interface_index {
-        route = route.with_interface_index(interface_index);
+}
+
+fn ip_address_to_std(address: IpAddress) -> IpAddr {
+    match address {
+        IpAddress::V4(addr) => IpAddr::V4(addr.into()),
+        IpAddress::V6(addr) => IpAddr::V6(addr.into()),
     }
-    Some(route)
+}
+
+fn network_to_std(network: Network) -> (IpAddr, u8) {
+    match network {
+        Network::V4(net) => (IpAddr::V4(net.address().into()), net.prefix().value()),
+        Network::V6(net) => (IpAddr::V6(net.address().into()), net.prefix().value()),
+    }
 }
 
 unsafe fn sockaddr_to_ip(sa: *const libc::sockaddr) -> Option<IpAddr> {
@@ -258,13 +129,80 @@ unsafe fn sockaddr_to_ip(sa: *const libc::sockaddr) -> Option<IpAddr> {
     }
 }
 
+unsafe fn message_to_route(hdr: &libc::rt_msghdr) -> Option<Route> {
+    let mut destination_addr = None;
+    let mut gateway = None;
+    let mut interface_index = None;
+
+    let mut ptr = (hdr as *const libc::rt_msghdr).add(1) as *const u8;
+    let mut remaining = hdr.rtm_msglen as usize - mem::size_of::<libc::rt_msghdr>();
+    let mut bit = 1u32;
+    while bit <= hdr.rtm_addrs && remaining >= mem::size_of::<libc::sockaddr>() {
+        if hdr.rtm_addrs & bit == 0 {
+            bit <<= 1;
+            continue;
+        }
+        let sa = ptr as *const libc::sockaddr;
+        let len = (*sa).sa_len as usize;
+        let aligned_len = (len + 3) & !3;
+        if aligned_len == 0 || aligned_len > remaining {
+            break;
+        }
+        match bit {
+            RTA_DST => {
+                destination_addr = sockaddr_to_ip(sa);
+            }
+            RTA_GATEWAY => {
+                gateway = sockaddr_to_ip(sa).map(std_ip_to_ip_address);
+            }
+            _ => {}
+        }
+        ptr = ptr.add(aligned_len);
+        remaining -= aligned_len;
+        bit <<= 1;
+    }
+
+    if hdr.rtm_index != 0 {
+        interface_index = Some(hdr.rtm_index as u32);
+    }
+
+    let destination_addr = destination_addr?;
+    let prefix_len = if (hdr.rtm_flags & RTF_HOST) != 0 {
+        32u8
+    } else {
+        32u8
+    };
+    let destination = match destination_addr {
+        IpAddr::V4(addr) => {
+            let prefix = net_lattice_ip::Ipv4PrefixLength::new(prefix_len)?;
+            Network::from(net_lattice_ip::Ipv4Network::new(addr.into(), prefix))
+        }
+        IpAddr::V6(addr) => {
+            let prefix = net_lattice_ip::Ipv6PrefixLength::new(128)?;
+            Network::from(net_lattice_ip::Ipv6Network::new(addr.into(), prefix))
+        }
+    };
+
+    let mut route = Route::new(
+        synthesize_route_id(&destination, &gateway, interface_index),
+        destination,
+    );
+    if let Some(gateway) = gateway {
+        route = route.with_gateway(gateway);
+    }
+    if let Some(interface_index) = interface_index {
+        route = route.with_interface_index(interface_index);
+    }
+    Some(route)
+}
+
 fn build_get_request() -> Vec<u8> {
     let mut buf = vec![0u8; mem::size_of::<libc::rt_msghdr>()];
     let hdr = unsafe { &mut *(buf.as_mut_ptr() as *mut libc::rt_msghdr) };
     hdr.rtm_msglen = mem::size_of::<libc::rt_msghdr>() as u16;
     hdr.rtm_version = RTM_VERSION;
     hdr.rtm_type = RTM_GET;
-    hdr.rtm_flags = RTF_UP as u32;
+    hdr.rtm_flags = RTF_UP;
     hdr.rtm_addrs = 0;
     hdr.rtm_pid = unsafe { libc::getpid() };
     hdr.rtm_seq = 1;
@@ -273,6 +211,7 @@ fn build_get_request() -> Vec<u8> {
 }
 
 fn build_add_message(route: &Route) -> Result<Vec<u8>> {
+    let (destination, prefix_len) = network_to_std(route.destination);
     let mut buf = vec![0u8; RTM_MAXSIZE];
     let hdr = unsafe { &mut *(buf.as_mut_ptr() as *mut libc::rt_msghdr) };
     hdr.rtm_version = RTM_VERSION;
@@ -283,155 +222,19 @@ fn build_add_message(route: &Route) -> Result<Vec<u8>> {
     hdr.rtm_addrs = RTA_DST;
     let mut offset = mem::size_of::<libc::rt_msghdr>();
 
-    let (dst_addr, prefix_len) = match route.destination {
-        Network::V4(ref net) => {
-            let addr = net.address();
-            let octets: [u8; 4] = addr.octets();
-            let sin = libc::sockaddr_in {
-                sin_family: libc::AF_INET as u8,
-                sin_len: mem::size_of::<libc::sockaddr_in>() as u8,
-                sin_port: 0,
-                sin_addr: libc::in_addr {
-                    s_addr: u32::from_be_bytes(octets).to_be(),
-                },
-                sin_zero: [0; 8],
-            };
-            unsafe {
-                std::ptr::copy_nonoverlapping(
-                    &sin as *const _ as *const u8,
-                    buf.as_mut_ptr().add(offset),
-                    mem::size_of::<libc::sockaddr_in>(),
-                );
-            }
-            offset += mem::size_of::<libc::sockaddr_in>();
-            (net.address(), net.prefix().value())
-        }
-        Network::V6(ref net) => {
-            let addr = net.address();
-            let octets: [u8; 16] = addr.octets();
-            let sin6 = libc::sockaddr_in6 {
-                sin6_family: libc::AF_INET6 as u8,
-                sin6_len: mem::size_of::<libc::sockaddr_in6>() as u8,
-                sin6_port: 0,
-                sin6_flowinfo: 0,
-                sin6_addr: libc::in6_addr { s6_addr: octets },
-                sin6_scope_id: 0,
-            };
-            unsafe {
-                std::ptr::copy_nonoverlapping(
-                    &sin6 as *const _ as *const u8,
-                    buf.as_mut_ptr().add(offset),
-                    mem::size_of::<libc::sockaddr_in6>(),
-                );
-            }
-            offset += mem::size_of::<libc::sockaddr_in6>();
-            (net.address(), net.prefix().value())
-        }
-    };
-    let _ = dst_addr;
+    offset += push_sockaddr(&mut buf, offset, destination);
 
     if prefix_len == 32 || prefix_len == 128 {
         hdr.rtm_flags |= RTF_HOST;
     } else {
         hdr.rtm_addrs |= RTA_NETMASK;
-        let mask = if prefix_len <= 32 {
-            let mask = if prefix_len == 0 {
-                0u32
-            } else {
-                !0u32 << (32 - prefix_len)
-            };
-            let sin = libc::sockaddr_in {
-                sin_family: libc::AF_INET as u8,
-                sin_len: mem::size_of::<libc::sockaddr_in>() as u8,
-                sin_port: 0,
-                sin_addr: libc::in_addr {
-                    s_addr: mask.to_be(),
-                },
-                sin_zero: [0; 8],
-            };
-            unsafe {
-                std::ptr::copy_nonoverlapping(
-                    &sin as *const _ as *const u8,
-                    buf.as_mut_ptr().add(offset),
-                    mem::size_of::<libc::sockaddr_in>(),
-                );
-            }
-            offset += mem::size_of::<libc::sockaddr_in>();
-        } else {
-            let mut mask_bytes = [0u8; 16];
-            let full_bytes = (prefix_len / 8) as usize;
-            let remainder = prefix_len % 8;
-            for i in 0..full_bytes {
-                mask_bytes[i] = 0xff;
-            }
-            if remainder > 0 && full_bytes < 16 {
-                mask_bytes[full_bytes] = !0u8 << (8 - remainder);
-            }
-            let sin6 = libc::sockaddr_in6 {
-                sin6_family: libc::AF_INET6 as u8,
-                sin6_len: mem::size_of::<libc::sockaddr_in6>() as u8,
-                sin6_port: 0,
-                sin6_flowinfo: 0,
-                sin6_addr: libc::in6_addr {
-                    s6_addr: mask_bytes,
-                },
-                sin6_scope_id: 0,
-            };
-            unsafe {
-                std::ptr::copy_nonoverlapping(
-                    &sin6 as *const _ as *const u8,
-                    buf.as_mut_ptr().add(offset),
-                    mem::size_of::<libc::sockaddr_in6>(),
-                );
-            }
-            offset += mem::size_of::<libc::sockaddr_in6>();
-        };
+        offset += push_netmask(&mut buf, offset, destination, prefix_len);
     }
 
-    if let Some(ref gateway) = route.gateway {
+    if let Some(gateway) = route.gateway.map(ip_address_to_std) {
         hdr.rtm_flags |= RTF_GATEWAY;
         hdr.rtm_addrs |= RTA_GATEWAY;
-        match gateway {
-            IpAddress::V4(ref addr) => {
-                let octets: [u8; 4] = addr.octets();
-                let sin = libc::sockaddr_in {
-                    sin_family: libc::AF_INET as u8,
-                    sin_len: mem::size_of::<libc::sockaddr_in>() as u8,
-                    sin_port: 0,
-                    sin_addr: libc::in_addr {
-                        s_addr: u32::from_be_bytes(octets).to_be(),
-                    },
-                    sin_zero: [0; 8],
-                };
-                unsafe {
-                    std::ptr::copy_nonoverlapping(
-                        &sin as *const _ as *const u8,
-                        buf.as_mut_ptr().add(offset),
-                        mem::size_of::<libc::sockaddr_in>(),
-                    );
-                }
-                offset += mem::size_of::<libc::sockaddr_in>();
-            }
-            IpAddress::V6(ref addr) => {
-                let octets: [u8; 16] = addr.octets();
-                let sin6 = libc::sockaddr_in6 {
-                    sin6_family: libc::AF_INET6 as u8,
-                    sin6_len: mem::size_of::<libc::sockaddr_in6>() as u8,
-                    sin6_port: 0,
-                    sin6_flowinfo: 0,
-                    sin6_addr: libc::in6_addr { s6_addr: octets },
-                    sin6_scope_id: 0,
-                };
-                unsafe {
-                    std::ptr::copy_nonoverlapping(
-                        &sin6 as *const _ as *const u8,
-                        buf.as_mut_ptr().add(offset),
-                        mem::size_of::<libc::sockaddr_in6>(),
-                    );
-                }
-                offset += mem::size_of::<libc::sockaddr_in6>();
-            }
-        }
+        offset += push_sockaddr(&mut buf, offset, gateway);
     }
 
     if let Some(interface_index) = route.interface_index {
@@ -444,6 +247,7 @@ fn build_add_message(route: &Route) -> Result<Vec<u8>> {
 }
 
 fn build_delete_message(route: &Route) -> Result<Vec<u8>> {
+    let (destination, prefix_len) = network_to_std(route.destination);
     let mut buf = vec![0u8; RTM_MAXSIZE];
     let hdr = unsafe { &mut *(buf.as_mut_ptr() as *mut libc::rt_msghdr) };
     hdr.rtm_version = RTM_VERSION;
@@ -454,10 +258,34 @@ fn build_delete_message(route: &Route) -> Result<Vec<u8>> {
     hdr.rtm_addrs = RTA_DST;
     let mut offset = mem::size_of::<libc::rt_msghdr>();
 
-    let prefix_len = match route.destination {
-        Network::V4(ref net) => {
-            let addr = net.address();
-            let octets: [u8; 4] = addr.octets();
+    offset += push_sockaddr(&mut buf, offset, destination);
+
+    if prefix_len == 32 || prefix_len == 128 {
+        hdr.rtm_flags |= RTF_HOST;
+    } else {
+        hdr.rtm_addrs |= RTA_NETMASK;
+        offset += push_netmask(&mut buf, offset, destination, prefix_len);
+    }
+
+    if let Some(gateway) = route.gateway.map(ip_address_to_std) {
+        hdr.rtm_flags |= RTF_GATEWAY;
+        hdr.rtm_addrs |= RTA_GATEWAY;
+        offset += push_sockaddr(&mut buf, offset, gateway);
+    }
+
+    if let Some(interface_index) = route.interface_index {
+        hdr.rtm_index = interface_index as u16;
+    }
+
+    hdr.rtm_msglen = offset as u16;
+    buf.truncate(offset);
+    Ok(buf)
+}
+
+fn push_sockaddr(buf: &mut [u8], offset: usize, addr: IpAddr) -> usize {
+    match addr {
+        IpAddr::V4(addr) => {
+            let octets = addr.octets();
             let sin = libc::sockaddr_in {
                 sin_family: libc::AF_INET as u8,
                 sin_len: mem::size_of::<libc::sockaddr_in>() as u8,
@@ -474,12 +302,10 @@ fn build_delete_message(route: &Route) -> Result<Vec<u8>> {
                     mem::size_of::<libc::sockaddr_in>(),
                 );
             }
-            offset += mem::size_of::<libc::sockaddr_in>();
-            net.prefix().value()
+            mem::size_of::<libc::sockaddr_in>()
         }
-        Network::V6(ref net) => {
-            let addr = net.address();
-            let octets: [u8; 16] = addr.octets();
+        IpAddr::V6(addr) => {
+            let octets = addr.octets();
             let sin6 = libc::sockaddr_in6 {
                 sin6_family: libc::AF_INET6 as u8,
                 sin6_len: mem::size_of::<libc::sockaddr_in6>() as u8,
@@ -495,16 +321,14 @@ fn build_delete_message(route: &Route) -> Result<Vec<u8>> {
                     mem::size_of::<libc::sockaddr_in6>(),
                 );
             }
-            offset += mem::size_of::<libc::sockaddr_in6>();
-            net.prefix().value()
+            mem::size_of::<libc::sockaddr_in6>()
         }
-    };
+    }
+}
 
-    if prefix_len == 32 || prefix_len == 128 {
-        hdr.rtm_flags |= RTF_HOST;
-    } else {
-        hdr.rtm_addrs |= RTA_NETMASK;
-        if prefix_len <= 32 {
+fn push_netmask(buf: &mut [u8], offset: usize, addr: IpAddr, prefix_len: u8) -> usize {
+    match addr {
+        IpAddr::V4(_) => {
             let mask = if prefix_len == 0 {
                 0u32
             } else {
@@ -526,8 +350,9 @@ fn build_delete_message(route: &Route) -> Result<Vec<u8>> {
                     mem::size_of::<libc::sockaddr_in>(),
                 );
             }
-            offset += mem::size_of::<libc::sockaddr_in>();
-        } else {
+            mem::size_of::<libc::sockaddr_in>()
+        }
+        IpAddr::V6(_) => {
             let mut mask_bytes = [0u8; 16];
             let full_bytes = (prefix_len / 8) as usize;
             let remainder = prefix_len % 8;
@@ -554,78 +379,75 @@ fn build_delete_message(route: &Route) -> Result<Vec<u8>> {
                     mem::size_of::<libc::sockaddr_in6>(),
                 );
             }
-            offset += mem::size_of::<libc::sockaddr_in6>();
+            mem::size_of::<libc::sockaddr_in6>()
         }
     }
-
-    if let Some(ref gateway) = route.gateway {
-        hdr.rtm_flags |= RTF_GATEWAY;
-        hdr.rtm_addrs |= RTA_GATEWAY;
-        match gateway {
-            IpAddress::V4(ref addr) => {
-                let octets: [u8; 4] = addr.octets();
-                let sin = libc::sockaddr_in {
-                    sin_family: libc::AF_INET as u8,
-                    sin_len: mem::size_of::<libc::sockaddr_in>() as u8,
-                    sin_port: 0,
-                    sin_addr: libc::in_addr {
-                        s_addr: u32::from_be_bytes(octets).to_be(),
-                    },
-                    sin_zero: [0; 8],
-                };
-                unsafe {
-                    std::ptr::copy_nonoverlapping(
-                        &sin as *const _ as *const u8,
-                        buf.as_mut_ptr().add(offset),
-                        mem::size_of::<libc::sockaddr_in>(),
-                    );
-                }
-                offset += mem::size_of::<libc::sockaddr_in>();
-            }
-            IpAddress::V6(ref addr) => {
-                let octets: [u8; 16] = addr.octets();
-                let sin6 = libc::sockaddr_in6 {
-                    sin6_family: libc::AF_INET6 as u8,
-                    sin6_len: mem::size_of::<libc::sockaddr_in6>() as u8,
-                    sin6_port: 0,
-                    sin6_flowinfo: 0,
-                    sin6_addr: libc::in6_addr { s6_addr: octets },
-                    sin6_scope_id: 0,
-                };
-                unsafe {
-                    std::ptr::copy_nonoverlapping(
-                        &sin6 as *const _ as *const u8,
-                        buf.as_mut_ptr().add(offset),
-                        mem::size_of::<libc::sockaddr_in6>(),
-                    );
-                }
-                offset += mem::size_of::<libc::sockaddr_in6>();
-            }
-        }
-    }
-
-    if let Some(interface_index) = route.interface_index {
-        hdr.rtm_index = interface_index as u16;
-    }
-
-    hdr.rtm_msglen = offset as u16;
-    buf.truncate(offset);
-    Ok(buf)
 }
 
 impl RouteProvider for DarwinBackend {
     type Route = Route;
 
     fn routes(&self) -> Result<Vec<Self::Route>> {
-        self.runtime.block_on(self.read_routes())
+        self.runtime.block_on(async {
+            let request = build_get_request();
+            let n = unsafe { libc::send(self.fd, request.as_ptr() as *const _, request.len(), 0) };
+            if n < 0 {
+                return Err(Error::Platform(io_error_code(&io::Error::last_os_error())));
+            }
+
+            let mut routes = Vec::new();
+            let mut buf = [0u8; 65536];
+            loop {
+                let n = unsafe { libc::recv(self.fd, buf.as_mut_ptr() as *mut _, buf.len(), 0) };
+                if n < 0 {
+                    return Err(Error::Platform(io_error_code(&io::Error::last_os_error())));
+                }
+                if n == 0 {
+                    break;
+                }
+
+                let mut offset = 0usize;
+                while offset < n as usize {
+                    let hdr = unsafe { &*(buf.as_ptr().add(offset) as *const libc::rt_msghdr) };
+                    if hdr.rtm_version != RTM_VERSION {
+                        break;
+                    }
+                    if hdr.rtm_type == RTM_GET {
+                        if let Some(route) = unsafe { message_to_route(hdr) } {
+                            routes.push(route);
+                        }
+                    }
+                    let step = hdr.rtm_msglen as usize;
+                    if step == 0 {
+                        break;
+                    }
+                    offset += step;
+                }
+            }
+            Ok(routes)
+        })
     }
 
     fn add_route(&self, route: Self::Route) -> Result<()> {
-        self.runtime.block_on(self.add_route_impl(route))
+        self.runtime.block_on(async {
+            let message = build_add_message(&route)?;
+            let n = unsafe { libc::send(self.fd, message.as_ptr() as *const _, message.len(), 0) };
+            if n < 0 {
+                return Err(Error::Platform(io_error_code(&io::Error::last_os_error())));
+            }
+            Ok(())
+        })
     }
 
     fn remove_route(&self, route: Self::Route) -> Result<()> {
-        self.runtime.block_on(self.remove_route_impl(route))
+        self.runtime.block_on(async {
+            let message = build_delete_message(&route)?;
+            let n = unsafe { libc::send(self.fd, message.as_ptr() as *const _, message.len(), 0) };
+            if n < 0 {
+                return Err(Error::Platform(io_error_code(&io::Error::last_os_error())));
+            }
+            Ok(())
+        })
     }
 }
 
@@ -645,12 +467,17 @@ mod tests {
         let routes = backend
             .routes()
             .expect("RTM_GET dump should not require privilege");
+        // Not asserting on contents: the routing table of the machine
+        // running this test is arbitrary (may even be empty in a minimal
+        // container). Reaching here without an error is the assertion.
         let _ = routes;
     }
 
-    /// Requires `root` privileges. Not run by default because most
-    /// development and CI environments don't grant it, and this test would
-    /// otherwise fail with `PermissionDenied` rather than being skipped.
+    /// Requires `root` privileges (root, or `sudo -E cargo test -- --ignored`
+    /// in this crate). Not run by default because most development and CI
+    /// environments — including the one this crate was originally written
+    /// in — don't grant it, and this test would otherwise fail with
+    /// `PermissionDenied` rather than being skipped.
     ///
     /// Uses a documentation-only prefix (RFC 5737 `203.0.113.0/24`,
     /// TEST-NET-3) on `lo0` so it can't collide with or disrupt real
@@ -659,19 +486,22 @@ mod tests {
     #[ignore = "requires root; run with `sudo -E cargo test -p net-lattice-backend-darwin -- --ignored`"]
     fn add_then_remove_route_round_trips_through_the_kernel() {
         let backend = DarwinBackend::new().expect("failed to open a route socket");
-        let loopback_index = 1u32;
+        let interface_index = 1u32;
 
         let destination = Network::from(Ipv4Network::new(
             Ipv4Address::new(203, 0, 113, 0),
             Ipv4PrefixLength::new(24).unwrap(),
         ));
-        let route = Route::new(RouteId::new(0), destination).with_interface_index(loopback_index);
+        let route = Route::new(RouteId::new(0), destination).with_interface_index(interface_index);
 
         let add_result = backend.add_route(route.clone());
         if matches!(
             add_result,
             Err(Error::PermissionDenied) | Err(Error::Platform(_))
         ) {
+            // Best effort even under #[ignore]: if it's run without the
+            // capability after all, fail loudly rather than silently
+            // passing on a no-op.
             add_result.expect("add_route failed - are you running as root?");
         }
 
@@ -680,8 +510,10 @@ mod tests {
             .expect("routes() failed after add_route succeeded");
         let found = routes
             .iter()
-            .any(|r| r.destination == destination && r.interface_index == Some(loopback_index));
+            .any(|r| r.destination == destination && r.interface_index == Some(interface_index));
 
+        // Clean up before asserting, so a failed assertion doesn't leave
+        // the test route behind on the machine that ran this.
         let _ = backend.remove_route(route);
 
         assert!(found, "added route was not present in routes() afterward");
@@ -692,7 +524,7 @@ mod tests {
         assert!(
             !routes_after_removal
                 .iter()
-                .any(|r| r.destination == destination && r.interface_index == Some(loopback_index)),
+                .any(|r| r.destination == destination && r.interface_index == Some(interface_index)),
             "removed route was still present in routes() afterward"
         );
     }
