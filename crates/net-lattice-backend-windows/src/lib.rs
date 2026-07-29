@@ -381,6 +381,86 @@ fn build_row(route: Route) -> MIB_IPFORWARD_ROW2 {
     row
 }
 
+/// Maps an IANA `ifType` (RFC 2863, `MIB_IF_ROW2::Type`) to the
+/// cross-platform [`InterfaceKind`]. Anything not covered falls back to
+/// `Other`, carrying the raw type code for diagnostics.
+fn if_type_to_kind(if_type: u32) -> InterfaceKind {
+    match if_type {
+        IF_TYPE_ETHERNET_CSMACD | IF_TYPE_L2_VLAN => InterfaceKind::Ethernet,
+        IF_TYPE_SOFTWARE_LOOPBACK => InterfaceKind::Loopback,
+        IF_TYPE_PPP => InterfaceKind::PointToPoint,
+        IF_TYPE_IEEE80211 => InterfaceKind::Wireless,
+        IF_TYPE_BRIDGE => InterfaceKind::Bridge,
+        other => InterfaceKind::Other(other),
+    }
+}
+
+fn row_to_interface(row: &MIB_IF_ROW2) -> Interface {
+    let index = row.InterfaceIndex;
+    let name = String::from_utf16_lossy(&row.Alias)
+        .trim_end_matches('\0')
+        .to_string();
+
+    let mac = if row.PhysicalAddressLength == 6 {
+        let mut octets = [0u8; 6];
+        octets.copy_from_slice(&row.PhysicalAddress[..6]);
+        Some(MacAddress::new(octets))
+    } else {
+        None
+    };
+
+    let admin_state = if row.AdminStatus == NET_IF_ADMIN_STATUS_UP {
+        AdminState::Up
+    } else {
+        AdminState::Down
+    };
+
+    let operational_state = match row.OperStatus {
+        s if s == IfOperStatusUp => OperationalState::Up,
+        s if s == IfOperStatusDown => OperationalState::Down,
+        s if s == IfOperStatusLowerLayerDown => OperationalState::Down,
+        s if s == IfOperStatusDormant => OperationalState::NoCarrier,
+        _ => OperationalState::Unknown,
+    };
+
+    let kind = if_type_to_kind(row.Type);
+
+    let mut interface = Interface::new(Id::new(index as u64), index, name, kind)
+        .with_admin_state(admin_state)
+        .with_operational_state(operational_state)
+        .with_mtu(row.Mtu);
+    if let Some(mac) = mac {
+        interface = interface.with_mac(mac);
+    }
+    interface
+}
+
+impl InterfaceProvider for WindowsBackend {
+    type Interface = Interface;
+
+    fn interfaces(&self) -> Result<Vec<Self::Interface>> {
+        self.runtime.block_on(async {
+            let mut interfaces = Vec::new();
+            unsafe {
+                let mut table: *mut MIB_IF_TABLE2 = std::ptr::null_mut();
+                let status = GetIfTable2(&mut table);
+                if status != 0 {
+                    return Err(Error::Platform(PlatformErrorCode::Windows(status as u32)));
+                }
+                let rows = std::slice::from_raw_parts(
+                    (*table).Table.as_ptr(),
+                    (*table).NumEntries as usize,
+                );
+                for row in rows {
+                    interfaces.push(row_to_interface(row));
+                }
+                FreeMibTable(table.cast());
+            }
+            Ok(interfaces)
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
