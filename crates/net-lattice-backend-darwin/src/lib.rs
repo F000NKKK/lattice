@@ -774,6 +774,21 @@ mod tests {
     /// in — don't grant it, and this test would otherwise fail with
     /// `PermissionDenied` rather than being skipped.
     ///
+    /// `lo0`'s ifindex is not reliably `1` — GitHub-hosted macOS runners in
+    /// particular carry enough virtual interfaces (Docker, VPN, `utun*`,
+    /// ...) ahead of it that assuming so failed CI outright. Looked up
+    /// dynamically via `InterfaceProvider` instead, same as the Linux and
+    /// Windows equivalents of this test.
+    fn loopback_interface_index(backend: &DarwinBackend) -> u32 {
+        backend
+            .interfaces()
+            .expect("interfaces() failed")
+            .into_iter()
+            .find(|iface| iface.name == "lo0")
+            .map(|iface| iface.index)
+            .expect("this test environment has no `lo0` interface")
+    }
+
     /// Uses a documentation-only prefix (RFC 5737 `203.0.113.0/24`,
     /// TEST-NET-3) on `lo0` so it can't collide with or disrupt real
     /// routing, and removes what it added regardless of assertion outcome.
@@ -781,7 +796,7 @@ mod tests {
     #[ignore = "requires root; run with `sudo -E cargo test -p net-lattice-backend-darwin -- --ignored`"]
     fn add_then_remove_route_round_trips_through_the_kernel() {
         let backend = DarwinBackend::new().expect("failed to open a route socket");
-        let interface_index = 1u32;
+        let interface_index = loopback_interface_index(&backend);
 
         let destination = Network::from(Ipv4Network::new(
             Ipv4Address::new(203, 0, 113, 0),
