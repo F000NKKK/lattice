@@ -838,6 +838,45 @@ mod tests {
             .expect("this test environment has no `lo0` interface")
     }
 
+    /// Raw `rt_msghdr` fields for every dumped entry tagged with
+    /// `interface_index`, bypassing `message_to_route` entirely.
+    ///
+    /// Diagnostic-only, for telling apart "the kernel never actually
+    /// created the route" from "it's in the dump but our own parsing drops
+    /// it" — the two remaining explanations for `near_matches` (which
+    /// already rules out "added with a different address" or "different
+    /// prefix") coming back empty. If this is also empty, the kernel
+    /// genuinely didn't create anything on this interface despite
+    /// `rtm_errno == 0`; if it's non-empty, `message_to_route` is silently
+    /// dropping an entry that's really there (e.g. destination parsing
+    /// returning `None`, or the loop misplacing its length-`stepped` offset
+    /// after this entry).
+    fn raw_headers_for_interface(interface_index: u32) -> Vec<String> {
+        let buf = dump_routing_table().expect("dump_routing_table failed");
+        let mut entries = Vec::new();
+        let mut offset = 0usize;
+        while offset + mem::size_of::<libc::rt_msghdr>() <= buf.len() {
+            let hdr = unsafe { &*(buf.as_ptr().add(offset) as *const libc::rt_msghdr) };
+            let step = hdr.rtm_msglen as usize;
+            if step == 0 {
+                break;
+            }
+            if hdr.rtm_index as u32 == interface_index {
+                entries.push(format!(
+                    "type={} flags={:#x} addrs={:#x} msglen={} index={} errno={}",
+                    hdr.rtm_type,
+                    hdr.rtm_flags,
+                    hdr.rtm_addrs,
+                    hdr.rtm_msglen,
+                    hdr.rtm_index,
+                    hdr.rtm_errno,
+                ));
+            }
+            offset += step;
+        }
+        entries
+    }
+
     /// Uses a documentation-only prefix (RFC 5737 `203.0.113.0/24`,
     /// TEST-NET-3) on `lo0` so it can't collide with or disrupt real
     /// routing, and removes what it added regardless of assertion outcome.
@@ -900,6 +939,8 @@ mod tests {
             })
             .collect();
 
+        let raw_headers = raw_headers_for_interface(interface_index);
+
         // Clean up before asserting, so a failed assertion doesn't leave
         // the test route behind on the machine that ran this.
         let _ = backend.remove_route(route);
@@ -909,6 +950,7 @@ mod tests {
             "added route (destination={destination:?}, interface_index={interface_index}) \
              was not present in routes() afterward.\n\
              Entries matching the destination (any interface): {near_matches:#?}\n\
+             Raw rt_msghdr entries tagged with interface_index={interface_index}: {raw_headers:#?}\n\
              Full table ({} entries): {routes:#?}",
             routes.len(),
         );
