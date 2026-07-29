@@ -42,6 +42,12 @@ impl DarwinBackend {
         }
         Ok(Self { runtime, fd })
     }
+
+    fn read_routes(&self) -> Result<Vec<Route>> {
+        let _ = self.fd;
+        let _ = self.runtime;
+        unimplemented!("Darwin route socket reading is not implemented yet")
+    }
 }
 
 impl Drop for DarwinBackend {
@@ -67,28 +73,11 @@ fn synthesize_route_id(
     RouteId::new(hasher.finish())
 }
 
-#[repr(C)]
-struct RtMsghdr {
-    msgn: i16,
-    ver: u8,
-    typ: u8,
-    index: i16,
-    count: i32,
-    seq: i32,
-    pid: i32,
-    errno: i32,
-    r#use: i32,
-    flags: u32,
-}
-
 impl RouteProvider for DarwinBackend {
     type Route = Route;
 
     fn routes(&self) -> Result<Vec<Self::Route>> {
-        self.runtime.block_on(async {
-            let _ = self.fd;
-            unimplemented!("Darwin route socket reading is not implemented yet")
-        })
+        self.runtime.block_on(async { self.read_routes() })
     }
 
     fn add_route(&self, _route: Self::Route) -> Result<()> {
