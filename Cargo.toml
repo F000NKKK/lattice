@@ -24,7 +24,7 @@ net-lattice-ip = { path = "crates/net-lattice-ip", version = "0.1.0" }
 net-lattice-model = { path = "crates/net-lattice-model", version = "0.1.0" }
 net-lattice-platform = { path = "crates/net-lattice-platform", version = "0.1.0" }
 net-lattice-backend-linux = { path = "crates/net-lattice-backend-linux", version = "0.1.0" }
-net-lattice = { path = "crates/net-lattice", version = "0.1.0" }
+net-lattice = { path = "crates/net-lattice", version = "0.3.0" }
 net-lattice-backend-windows = { path = "crates/net-lattice-backend-windows", version = "0.1.0" }
 net-lattice-backend-darwin = { path = "crates/net-lattice-backend-darwin", version = "0.1.0" }
 
