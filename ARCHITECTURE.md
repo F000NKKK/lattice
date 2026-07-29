@@ -7,12 +7,14 @@
 This document describes the planned workspace structure for Net Lattice and the
 design principles behind it. It reflects intended direction, not current
 state: see [CHANGELOG.md](CHANGELOG.md) and [README.md](README.md) for what
-actually exists in the repository today. As of this writing, Stage 0.1 of
-the Incremental Delivery Plan below has landed (`net-lattice-core`,
-`net-lattice-ip`, `net-lattice-model`'s `route` module,
-`net-lattice-platform`'s `RouteProvider`, `net-lattice-backend-linux`, and
-the `net-lattice` facade) — everything past that stage is still a target,
-not current state.
+actually exists in the repository today. As of this writing, Stage 0.4 of
+the Incremental Delivery Plan below has landed: `net-lattice-core`,
+`net-lattice-ip`, `net-lattice-model`'s `route` and `interface` modules,
+`net-lattice-platform`'s `RouteProvider` and `InterfaceProvider`, route and
+interface support in `net-lattice-backend-linux`,
+`net-lattice-backend-windows`, and `net-lattice-backend-darwin`, and the
+`net-lattice` facade — everything past that stage is still a target, not
+current state.
 
 ## Guiding Principle
 
@@ -581,10 +583,10 @@ are introduced only when there is real implementation work for them:
 
 | Stage | Scope |
 |-------|-------|
-| 0.1 | `net-lattice-core`, `net-lattice-ip`, `net-lattice-model` (`route` module only), `net-lattice-platform` (`RouteProvider`), `net-lattice-backend-linux` (routes via Netlink), `net-lattice` |
-| 0.2 | `net-lattice-backend-windows` (`RouteProvider`) |
-| 0.3 | `net-lattice-backend-darwin` (`RouteProvider`) |
-| 0.4 | `interface` module + `InterfaceProvider` across all backends |
+| 0.1 ✅ | `net-lattice-core`, `net-lattice-ip`, `net-lattice-model` (`route` module only), `net-lattice-platform` (`RouteProvider`), `net-lattice-backend-linux` (routes via Netlink), `net-lattice` |
+| 0.2 ✅ | `net-lattice-backend-windows` (`RouteProvider`) |
+| 0.3 ✅ | `net-lattice-backend-darwin` (`RouteProvider`) |
+| 0.4 ✅ | `interface` module + `InterfaceProvider` across all backends |
 | 0.5 | `dns` module + `DnsProvider` |
 | 0.6 | `neighbor` module + `NeighborProvider` (ARP/NDP) |
 | 0.7+ | Capability-gated domains: VLAN, VRF, firewall integration, tunnels; `event` module + `EventProvider`; `CurrentState`/`DesiredState`/`Diff`/`ApplyPlan` declarative configuration |
