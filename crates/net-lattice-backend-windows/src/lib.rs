@@ -97,7 +97,7 @@ fn network_to_std(network: Network) -> (IpAddr, u8) {
     }
 }
 
-fn row_to_route(row: &MIB_IPFORWARD_ROW2) -> Option<Route> {
+fn row_to_route(row: &MIB_IPFORWARD_ROW2) -> Result<Option<Route>> {
     let destination = match row.DestinationPrefix.PrefixLength {
         32 => {
             let addr = row.DestinationPrefix.Prefix.Ipv4;
@@ -108,17 +108,25 @@ fn row_to_route(row: &MIB_IPFORWARD_ROW2) -> Option<Route> {
                 addr.S_un.S_un_w.s_w4,
             ];
             let ipv4 = net_lattice_ip::Ipv4Address::new(octets[0], octets[1], octets[2], octets[3]);
-            let prefix = net_lattice_ip::Ipv4PrefixLength::new(row.DestinationPrefix.PrefixLength)?;
+            let Some(prefix) =
+                net_lattice_ip::Ipv4PrefixLength::new(row.DestinationPrefix.PrefixLength)
+            else {
+                return Ok(None);
+            };
             Network::from(net_lattice_ip::Ipv4Network::new(ipv4, prefix))
         }
         128 => {
             let bytes = row.DestinationPrefix.Prefix.Ipv6.s6_bytes;
             let octets: [u8; 16] = bytes;
             let ipv6 = net_lattice_ip::Ipv6Address::from(octets);
-            let prefix = net_lattice_ip::Ipv6PrefixLength::new(row.DestinationPrefix.PrefixLength)?;
+            let Some(prefix) =
+                net_lattice_ip::Ipv6PrefixLength::new(row.DestinationPrefix.PrefixLength)
+            else {
+                return Ok(None);
+            };
             Network::from(net_lattice_ip::Ipv6Network::new(ipv6, prefix))
         }
-        _ => return None,
+        _ => return Ok(None),
     };
 
     let gateway = if row.NextHop.si_family != 0 {
@@ -170,7 +178,7 @@ fn row_to_route(row: &MIB_IPFORWARD_ROW2) -> Option<Route> {
     if let Some(interface_index) = interface_index {
         route = route.with_interface_index(interface_index);
     }
-    Some(route)
+    Ok(Some(route))
 }
 
 impl RouteProvider for WindowsBackend {

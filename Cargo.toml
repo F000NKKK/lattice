@@ -37,5 +37,6 @@ windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_NetworkManagement_IpHelper",
     "Win32_NetworkManagement_Ndis",
+    "Win32_Networking_WinSock",
 ] }
 libc = { version = "0.2", features = ["extra_traits"] }
