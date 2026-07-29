@@ -476,10 +476,10 @@ impl RouteProvider for DarwinBackend {
                     if hdr.rtm_version != RTM_VERSION {
                         break;
                     }
-                    if hdr.rtm_type == RTM_GET {
-                        if let Some(route) = unsafe { message_to_route(hdr) } {
-                            routes.push(route);
-                        }
+                    if hdr.rtm_type == RTM_GET
+                        && let Some(route) = unsafe { message_to_route(hdr) }
+                    {
+                        routes.push(route);
                     }
                     let step = hdr.rtm_msglen as usize;
                     if step == 0 {
