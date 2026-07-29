@@ -121,7 +121,7 @@ unsafe fn sockaddr_to_ip(sa: *const libc::sockaddr) -> Option<IpAddr> {
     if sa.is_null() {
         return None;
     }
-    let family = (*sa).sa_family;
+    let family = (*sa).sa_family as libc::c_int;
     match family {
         libc::AF_INET => {
             let sin = &*(sa as *const libc::sockaddr_in);
