@@ -24,6 +24,14 @@ const RTM_VERSION: u8 = 5;
 const RTM_ADD: u8 = 1;
 const RTM_DELETE: u8 = 2;
 
+// `rtm_seq` values this backend tags its own `RTM_ADD`/`RTM_DELETE`
+// requests with, so the reply-matching loop in `send_route_request` can
+// tell "the kernel's answer to *our* request" apart from another process's
+// traffic on the same shared routing socket (every open `PF_ROUTE` socket
+// receives every message written to any of them).
+const RTM_SEQ_ADD: libc::c_int = 2;
+const RTM_SEQ_DELETE: libc::c_int = 3;
+
 // `IFT_*` constants from `<net/if_types.h>`, not exposed by the `libc` crate
 // for `apple`.
 const IFT_ETHER: libc::c_uchar = 0x06;
@@ -338,7 +346,7 @@ fn build_add_message(route: &Route) -> Result<Vec<u8>> {
     hdr.rtm_version = RTM_VERSION;
     hdr.rtm_type = RTM_ADD;
     hdr.rtm_pid = unsafe { libc::getpid() };
-    hdr.rtm_seq = 2;
+    hdr.rtm_seq = RTM_SEQ_ADD;
     hdr.rtm_flags = RTF_UP | RTF_STATIC;
     hdr.rtm_addrs = RTA_DST;
     let mut offset = mem::size_of::<libc::rt_msghdr>();
@@ -392,7 +400,7 @@ fn build_delete_message(route: &Route) -> Result<Vec<u8>> {
     hdr.rtm_version = RTM_VERSION;
     hdr.rtm_type = RTM_DELETE;
     hdr.rtm_pid = unsafe { libc::getpid() };
-    hdr.rtm_seq = 3;
+    hdr.rtm_seq = RTM_SEQ_DELETE;
     hdr.rtm_flags = RTF_UP;
     hdr.rtm_addrs = RTA_DST;
     let mut offset = mem::size_of::<libc::rt_msghdr>();
@@ -575,23 +583,64 @@ impl RouteProvider for DarwinBackend {
     fn add_route(&self, route: Self::Route) -> Result<()> {
         self.runtime.block_on(async {
             let message = build_add_message(&route)?;
-            let n = unsafe { libc::send(self.fd, message.as_ptr() as *const _, message.len(), 0) };
-            if n < 0 {
-                return Err(route_socket_error(&io::Error::last_os_error()));
-            }
-            Ok(())
+            send_route_request(self.fd, &message, RTM_SEQ_ADD)
         })
     }
 
     fn remove_route(&self, route: Self::Route) -> Result<()> {
         self.runtime.block_on(async {
             let message = build_delete_message(&route)?;
-            let n = unsafe { libc::send(self.fd, message.as_ptr() as *const _, message.len(), 0) };
-            if n < 0 {
-                return Err(route_socket_error(&io::Error::last_os_error()));
-            }
-            Ok(())
+            send_route_request(self.fd, &message, RTM_SEQ_DELETE)
         })
+    }
+}
+
+/// Sends an `RTM_ADD`/`RTM_DELETE` request and waits for the kernel's own
+/// reply to confirm the outcome.
+///
+/// A `PF_ROUTE` socket is not request/response in the way a syscall return
+/// value implies: `send()` succeeding only means the message was accepted
+/// into the socket's write buffer, not that the kernel actually performed
+/// the requested change. After processing a request, the kernel echoes the
+/// *same* message back — with `rtm_errno` filled in — to every open routing
+/// socket on the system (not just the one that sent it, since routing
+/// sockets are a broadcast domain). Skipping this reply and trusting
+/// `send()`'s return value silently drops real failures: an `add_route`
+/// the kernel actually rejected still reports `Ok(())`.
+///
+/// `expected_seq` filters the broadcast stream down to the reply for this
+/// specific request — matching on `rtm_pid` (this process) and `rtm_seq`
+/// (this call) rather than just `rtm_type`, since other processes' routing
+/// changes arrive on the same socket interleaved with our own reply.
+fn send_route_request(fd: i32, message: &[u8], expected_seq: libc::c_int) -> Result<()> {
+    let n = unsafe { libc::send(fd, message.as_ptr() as *const _, message.len(), 0) };
+    if n < 0 {
+        return Err(route_socket_error(&io::Error::last_os_error()));
+    }
+
+    let pid = unsafe { libc::getpid() };
+    let mut buf = [0u8; RTM_MAXSIZE];
+    loop {
+        let n = unsafe { libc::recv(fd, buf.as_mut_ptr() as *mut _, buf.len(), 0) };
+        if n < 0 {
+            return Err(route_socket_error(&io::Error::last_os_error()));
+        }
+        if (n as usize) < mem::size_of::<libc::rt_msghdr>() {
+            continue;
+        }
+        let hdr = unsafe { &*(buf.as_ptr() as *const libc::rt_msghdr) };
+        if hdr.rtm_pid != pid || hdr.rtm_seq != expected_seq {
+            // Someone else's request or reply, broadcast to every routing
+            // socket — not the answer to what we just sent.
+            continue;
+        }
+        return if hdr.rtm_errno == 0 {
+            Ok(())
+        } else {
+            Err(route_socket_error(&io::Error::from_raw_os_error(
+                hdr.rtm_errno,
+            )))
+        };
     }
 }
 
