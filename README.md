@@ -17,7 +17,7 @@
 
 **Net Lattice** is a modern, cross-platform Rust library for configuring and inspecting operating system networking through a single, strongly typed API.
 
-> **Status:** Net Lattice has shipped Stage 0.1 and Stage 0.2 of its architecture plan. The repository now contains multiple crates with real implementations, focused on listing, adding, and removing IPv4/IPv6 routes on Linux and Windows. This is a minimal end-to-end vertical slice, not a complete library — see Current Status below.
+> **Status:** Net Lattice has shipped Stage 0.1 and Stage 0.2 of its architecture plan. The repository now contains multiple crates with real implementations for listing, adding, and removing IPv4/IPv6 routes on Linux and Windows. This is a minimal end-to-end vertical slice, not a complete library — see Current Status below.
 
 ## Overview
 
@@ -76,7 +76,7 @@ Stage 0.1 and Stage 0.2 of the [architecture](ARCHITECTURE.md)'s Incremental Del
 - `net-lattice-backend-windows` (routes via the Windows IP Helper API)
 - the `net-lattice` facade
 
-This gives real, published route management on Linux and Windows — still not a complete library. Interfaces, DNS, neighbors, BSD/macOS, and every other item in the Long-Term Goals above are still ahead; see [ARCHITECTURE.md](ARCHITECTURE.md)'s Incremental Delivery Plan for the staged roadmap and [CHANGELOG.md](CHANGELOG.md) for what has actually shipped.
+This gives real, published route management on Linux and Windows. This is still not a complete library: interfaces, DNS, neighbors, BSD/macOS, and every other item in the Long-Term Goals above are still ahead; see [ARCHITECTURE.md](ARCHITECTURE.md)'s Incremental Delivery Plan for the staged roadmap and [CHANGELOG.md](CHANGELOG.md) for what has actually shipped.
 
 ## Roadmap
 

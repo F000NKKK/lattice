@@ -23,8 +23,8 @@ Delivery Plan: listing, adding, and removing IPv4/IPv6 routes on Windows.
 
 ## [0.1.0] - 2026-07-28
 
-
 ### Added
+
 
 - Repository bootstrap: workspace `Cargo.toml`, licensing, community health
   files, and GitHub configuration.
