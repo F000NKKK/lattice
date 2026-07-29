@@ -2,12 +2,12 @@
 
 ## Supported Versions
 
-Net Lattice has not yet published any releases. Once versioned releases begin, this
-section will be updated to reflect which versions receive security fixes.
+Net Lattice follows a rolling support policy. Security fixes are provided only
+for the latest stable release series.
 
 | Version | Supported |
 | ------- | --------- |
-| N/A (pre-release) | N/A |
+| 0.1.x | ✅ |
 
 ## Reporting a Vulnerability
 
@@ -29,10 +29,10 @@ informed as the issue is investigated and resolved.
 
 ## Scope
 
-Net Lattice has landed Stage 0.1 of its [architecture](ARCHITECTURE.md)'s
-Incremental Delivery Plan: a Linux route provider (`net-lattice-backend-linux`)
-that reads and writes the kernel routing table via Netlink. This is a
-privileged operation (see ARCHITECTURE.md's Privilege Model) — vulnerability
+Net Lattice has landed Stage 0.1 and Stage 0.2 of its [architecture](ARCHITECTURE.md)'s
+Incremental Delivery Plan: route providers for Linux (`net-lattice-backend-linux`,
+via Netlink) and Windows (`net-lattice-backend-windows`, via the IP Helper API).
+These are privileged operations (see ARCHITECTURE.md's Privilege Model) — vulnerability
 reports involving unintended route manipulation, privilege confusion, or
-memory-safety issues in the Netlink message handling are in scope. No
-other backend or domain (Windows, macOS, DNS, firewall, ...) exists yet.
+memory-safety issues in route message handling are in scope. No
+other backend or domain (macOS, DNS, firewall, ...) exists yet.
