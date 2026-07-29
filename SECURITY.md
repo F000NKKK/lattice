@@ -3,13 +3,13 @@
 ## Supported Versions
 
 Net Lattice follows a rolling support policy. Security fixes are provided only
-for the latest stable release series.
+for the latest stable release series. With the release of Stage 0.4, support
+for the 0.1.x-0.3.x series has ended — upgrade to 0.4.x to receive fixes.
 
 | Version | Supported |
 | ------- | --------- |
-| 0.1.x | ✅ |
-| 0.2.x | ✅ |
-| 0.3.x | ✅ |
+| 0.4.x | ✅ |
+| 0.1.x - 0.3.x | ❌ |
 
 ## Reporting a Vulnerability
 
