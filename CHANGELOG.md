@@ -11,14 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `net-lattice-backend-darwin`: scaffolded BSD/macOS route socket backend
-  (`DarwinBackend`), gated to `target_os = "macos"`. Provider methods are
-  currently unimplemented placeholders.
+- `net-lattice-backend-darwin`: `RouteProvider` implementation via BSD/macOS
+  route sockets (`RTM_GET`/`RTM_ADD`/`RTM_DELETE`), gated to
+  `target_os = "macos"`. Covered by a real, unprivileged `routes()` test
+  and a root-gated add/remove round-trip test (`#[ignore]`, run manually
+  with elevated privileges).
 - macOS platform support in the `net-lattice` facade (`Lattice::connect()`
   on `cfg(target_os = "macos")`), wired to `DarwinBackend`.
 
 This is Stage 0.3 of [ARCHITECTURE.md](ARCHITECTURE.md)'s Incremental
-Delivery Plan: initial Darwin backend crate and wiring.
+Delivery Plan: listing, adding, and removing IPv4/IPv6 routes on BSD/macOS.
 
 
 ## [0.2.0] - TBD
