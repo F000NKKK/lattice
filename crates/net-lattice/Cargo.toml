@@ -22,3 +22,6 @@ net-lattice-backend-linux = { workspace = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 net-lattice-backend-windows = { workspace = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+net-lattice-backend-darwin = { workspace = true }

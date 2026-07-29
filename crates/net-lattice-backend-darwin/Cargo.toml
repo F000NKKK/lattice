@@ -1,6 +1,6 @@
 [package]
-name = "net-lattice-backend-linux"
-version = "0.1.0"
+name = "net-lattice-backend-darwin"
+version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -9,9 +9,9 @@ homepage.workspace = true
 documentation.workspace = true
 categories.workspace = true
 keywords.workspace = true
-description = "Linux backend for Net Lattice: implements net-lattice-platform's provider traits via Netlink."
+description = "BSD/macOS backend for Net Lattice: implements platform provider traits via route sockets."
 
-[target.'cfg(target_os = "linux")'.dependencies]
+[target.'cfg(target_os = "macos")'.dependencies]
 net-lattice-core = { workspace = true }
 net-lattice-ip = { workspace = true }
 net-lattice-model = { workspace = true }
@@ -20,4 +20,4 @@ net-lattice-platform = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 futures = { workspace = true }
 
-rtnetlink = { workspace = true }
+libc = { workspace = true }
