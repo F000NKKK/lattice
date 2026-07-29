@@ -79,6 +79,12 @@ BSD/macOS.
   privileged round-trip test also now cleans up any route left over from a
   prior interrupted run before adding, rather than surfacing that stale
   state as a fresh `AlreadyExists` failure.
+- `net-lattice-backend-darwin`'s privileged round-trip test assumed `lo0`
+  is always ifindex `1`; GitHub-hosted macOS runners carry enough virtual
+  interfaces (Docker, VPN, `utun*`, ...) that this doesn't hold, so the
+  test added a route on the wrong interface and never found it in
+  `routes()` afterward. Looked up `lo0`'s real index via `InterfaceProvider`
+  instead, same as the Linux/Windows equivalents of this test already did.
 
 ## [0.3.0] - TBD
 
