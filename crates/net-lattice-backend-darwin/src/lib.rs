@@ -16,8 +16,6 @@ use net_lattice_model::route::{Route, RouteId};
 use net_lattice_model::{IpAddress, Network};
 use net_lattice_platform::RouteProvider;
 
-const RTM_VERSION: i32 = 5;
-
 bitflags::bitflags! {
     struct Flags: i32 {
         const RTF_UP = 0x0001;
@@ -70,31 +68,17 @@ fn synthesize_route_id(
 }
 
 #[repr(C)]
-struct RtMsg {
-    header: libc::rt_msghdr,
-    data: [u8; 1024],
-}
-
-impl RtMsg {
-    fn for_route(
-        destination: Network,
-        gateway: Option<IpAddress>,
-        interface_index: Option<u32>,
-        add: bool,
-    ) -> Self {
-        let mut msg = Self {
-            header: unsafe { mem::zeroed() },
-            data: [0u8; 1024],
-        };
-        // This is a simplified placeholder: real implementation would
-        // serialize sockaddr structs into `data` and set header fields
-        // accordingly.
-        let _ = destination;
-        let _ = gateway;
-        let _ = interface_index;
-        let _ = add;
-        msg
-    }
+struct RtMsghdr {
+    msgn: i16,
+    ver: u8,
+    typ: u8,
+    index: i16,
+    count: i32,
+    seq: i32,
+    pid: libc::pid_t,
+    errno: i32,
+    r#use: i32,
+    flags: u32,
 }
 
 impl RouteProvider for DarwinBackend {

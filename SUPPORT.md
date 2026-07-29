@@ -10,4 +10,4 @@ Thank you for your interest in Net Lattice.
 
 ## Project Status
 
-Net Lattice has landed Stage 0.1 and Stage 0.2 of its [architecture](ARCHITECTURE.md)'s Incremental Delivery Plan (minimal Linux and Windows route providers). Usage support is limited to that surface for now — see [README.md](README.md)'s Current Status — but questions about usage, direction, and design are all welcome.
+Net Lattice has landed Stage 0.1, 0.2, and 0.3 of its [architecture](ARCHITECTURE.md)'s Incremental Delivery Plan (minimal Linux and Windows route providers, plus a scaffolded BSD/macOS backend). Usage support is limited to that surface for now — see [README.md](README.md)'s Current Status — but questions about usage, direction, and design are all welcome.

@@ -21,3 +21,4 @@ tokio = { workspace = true, features = ["rt-multi-thread"] }
 futures = { workspace = true }
 
 libc = { workspace = true }
+bitflags = { workspace = true }
