@@ -308,12 +308,12 @@ impl RouteProvider for WindowsBackend {
     }
 }
 
-async fn ip_forward_table(address_family: u16) -> Result<*mut MIB_IPFORWARD_TABLE2> {
+async fn ip_forward_table(address_family: ADDRESS_FAMILY) -> Result<*mut MIB_IPFORWARD_TABLE2> {
     unsafe {
         let mut table: *mut MIB_IPFORWARD_TABLE2 = std::ptr::null_mut();
         let status = GetIpForwardTable2(address_family, &mut table);
-        if status != 0 {
-            return Err(Error::Platform(PlatformErrorCode::Windows(status as u32)));
+        if status.0 != 0 {
+            return Err(Error::Platform(PlatformErrorCode::Windows(status.0)));
         }
         Ok(table)
     }
@@ -328,102 +328,22 @@ fn free_table(table: *mut MIB_IPFORWARD_TABLE2) {
 }
 
 fn build_row(route: Route) -> MIB_IPFORWARD_ROW2 {
-    let (destination, _prefix_len) = network_to_std(route.destination);
-    let (mut row, _) = match destination {
-        IpAddr::V4(addr) => {
-            let octets = addr.octets();
-            let mut in_addr = windows::Win32::Networking::WinSock::IN_ADDR::default();
-            in_addr.S_un.S_un_w.s_w1 = octets[0] as u16;
-            in_addr.S_un.S_un_w.s_w2 = octets[1] as u16;
-            in_addr.S_un.S_un_w.s_w3 = octets[2] as u16;
-            in_addr.S_un.S_un_w.s_w4 = octets[3] as u16;
+    let (destination, prefix_len) = network_to_std(route.destination);
 
-            let gateway = route.gateway.map(ip_address_to_std).map(|gw| match gw {
-                IpAddr::V4(addr) => {
-                    let octets = addr.octets();
-                    let mut gw_in = windows::Win32::Networking::WinSock::IN_ADDR::default();
-                    gw_in.S_un.S_un_w.s_w1 = octets[0] as u16;
-                    gw_in.S_un.S_un_w.s_w2 = octets[1] as u16;
-                    gw_in.S_un.S_un_w.s_w3 = octets[2] as u16;
-                    gw_in.S_un.S_un_w.s_w4 = octets[3] as u16;
-                    windows::Win32::NetworkManagement::IpHelper::MIB_IPADDRESS_STRING {
-                        si_family: AF_INET as u16,
-                        Ipv4: gw_in,
-                    }
-                }
-                IpAddr::V6(addr) => {
-                    let bytes = addr.octets();
-                    let mut gw_in6 = windows::Win32::Networking::WinSock::IN6_ADDR::default();
-                    gw_in6.u.Byte = bytes;
-                    windows::Win32::NetworkManagement::IpHelper::MIB_IPADDRESS_STRING {
-                        si_family: AF_INET6 as u16,
-                        Ipv6: gw_in6,
-                    }
-                }
-            });
+    let mut row = MIB_IPFORWARD_ROW2::default();
+    unsafe { InitializeIpForwardEntry(&mut row) };
 
-            let mut r = MIB_IPFORWARD_ROW2::default();
-            unsafe { InitializeIpForwardEntry(&mut r) };
-            r.DestinationPrefix.PrefixLength = _prefix_len;
-            r.DestinationPrefix.Prefix.Ipv4 = in_addr;
-            r.NextHop = gateway.unwrap_or(
-                windows::Win32::NetworkManagement::IpHelper::MIB_IPADDRESS_STRING {
-                    si_family: 0,
-                    Ipv4: windows::Win32::Networking::WinSock::IN_ADDR::default(),
-                },
-            );
-            r.InterfaceIndex = route.interface_index.unwrap_or(0);
-            if let Some(metric) = route.metric {
-                r.Metric1 = metric;
-            }
-            (r, AF_INET as u16)
-        }
-        IpAddr::V6(addr) => {
-            let bytes = addr.octets();
-            let mut in6_addr = windows::Win32::Networking::WinSock::IN6_ADDR::default();
-            in6_addr.u.Byte = bytes;
-
-            let gateway = route.gateway.map(ip_address_to_std).map(|gw| match gw {
-                IpAddr::V4(addr) => {
-                    let octets = addr.octets();
-                    let mut gw_in = windows::Win32::Networking::WinSock::IN_ADDR::default();
-                    gw_in.S_un.S_un_w.s_w1 = octets[0] as u16;
-                    gw_in.S_un.S_un_w.s_w2 = octets[1] as u16;
-                    gw_in.S_un.S_un_w.s_w3 = octets[2] as u16;
-                    gw_in.S_un.S_un_w.s_w4 = octets[3] as u16;
-                    windows::Win32::NetworkManagement::IpHelper::MIB_IPADDRESS_STRING {
-                        si_family: AF_INET as u16,
-                        Ipv4: gw_in,
-                    }
-                }
-                IpAddr::V6(addr) => {
-                    let bytes = addr.octets();
-                    let mut gw_in6 = windows::Win32::Networking::WinSock::IN6_ADDR::default();
-                    gw_in6.u.Byte = bytes;
-                    windows::Win32::NetworkManagement::IpHelper::MIB_IPADDRESS_STRING {
-                        si_family: AF_INET6 as u16,
-                        Ipv6: gw_in6,
-                    }
-                }
-            });
-
-            let mut r = MIB_IPFORWARD_ROW2::default();
-            unsafe { InitializeIpForwardEntry(&mut r) };
-            r.DestinationPrefix.PrefixLength = _prefix_len;
-            r.DestinationPrefix.Prefix.Ipv6 = in6_addr;
-            r.NextHop = gateway.unwrap_or(
-                windows::Win32::NetworkManagement::IpHelper::MIB_IPADDRESS_STRING {
-                    si_family: 0,
-                    Ipv4: windows::Win32::Networking::WinSock::IN_ADDR::default(),
-                },
-            );
-            r.InterfaceIndex = route.interface_index.unwrap_or(0);
-            if let Some(metric) = route.metric {
-                r.Metric1 = metric;
-            }
-            (r, AF_INET6 as u16)
-        }
+    row.DestinationPrefix.PrefixLength = prefix_len;
+    row.DestinationPrefix.Prefix = ip_to_sockaddr_inet(destination);
+    row.NextHop = match route.gateway.map(ip_address_to_std) {
+        Some(gateway) => ip_to_sockaddr_inet(gateway),
+        None => SOCKADDR_INET {
+            si_family: AF_UNSPEC,
+        },
     };
+    row.InterfaceIndex = route.interface_index.unwrap_or(0);
+    row.Metric = route.metric.unwrap_or(0);
+
     row
 }
 
