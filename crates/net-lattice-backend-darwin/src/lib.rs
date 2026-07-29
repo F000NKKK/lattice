@@ -336,10 +336,28 @@ fn build_add_message(route: &Route) -> Result<Vec<u8>> {
         offset += push_netmask(&mut buf, offset, destination, prefix_len);
     }
 
-    if let Some(gateway) = route.gateway.map(ip_address_to_std) {
-        hdr.rtm_flags |= RTF_GATEWAY;
-        hdr.rtm_addrs |= RTA_GATEWAY;
-        offset += push_sockaddr(&mut buf, offset, gateway);
+    match (route.gateway.map(ip_address_to_std), route.interface_index) {
+        (Some(gateway), _) => {
+            hdr.rtm_flags |= RTF_GATEWAY;
+            hdr.rtm_addrs |= RTA_GATEWAY;
+            offset += push_sockaddr(&mut buf, offset, gateway);
+        }
+        (None, Some(interface_index)) => {
+            // No IP gateway: bind the route directly to an outgoing
+            // interface instead, the way `route add -interface` does.
+            // BSD's `RTM_ADD` needs *some* address in the `RTA_GATEWAY`
+            // slot to determine the outgoing path — `rtm_index` in the
+            // header alone is not honored for `ADD` (the kernel only
+            // fills it in on the reply, describing what it picked); it
+            // rejects a bare `rtm_index` with no gateway as `EINVAL`. A
+            // link-layer (`AF_LINK`) `sockaddr_dl` naming the interface,
+            // without `RTF_GATEWAY` (that flag specifically means "a real
+            // next hop", not "no next hop, just this wire"), is how a
+            // direct/on-link route is expressed.
+            hdr.rtm_addrs |= RTA_GATEWAY;
+            offset += push_link_gateway(&mut buf, offset, interface_index);
+        }
+        (None, None) => return Err(Error::InvalidState),
     }
 
     if let Some(interface_index) = route.interface_index {
