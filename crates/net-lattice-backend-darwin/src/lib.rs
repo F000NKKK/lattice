@@ -75,6 +75,22 @@ fn io_error_code(err: &std::io::Error) -> PlatformErrorCode {
     PlatformErrorCode::Darwin(err.raw_os_error().unwrap_or(0))
 }
 
+/// Maps a `PF_ROUTE` `send()` failure's errno to Net Lattice's error
+/// taxonomy where BSD's routing-socket semantics line up with a named
+/// variant, per ARCHITECTURE.md's Error Model — `EEXIST` for `RTM_ADD`
+/// (a route to that destination already exists) and `ESRCH`/`ENOENT` for
+/// `RTM_DELETE` (no matching route to remove) are exactly `AlreadyExists`
+/// and `NotFound`, not generic platform noise callers would otherwise have
+/// to pattern-match an OS-specific errno to recognize.
+fn route_socket_error(err: &io::Error) -> Error {
+    match err.raw_os_error() {
+        Some(libc::EPERM) | Some(libc::EACCES) => Error::PermissionDenied,
+        Some(libc::ESRCH) | Some(libc::ENOENT) => Error::NotFound,
+        Some(libc::EEXIST) => Error::AlreadyExists,
+        _ => Error::Platform(io_error_code(err)),
+    }
+}
+
 /// Placeholder identity scheme: a route has no kernel-assigned numeric ID,
 /// so this hashes its defining fields. See ARCHITECTURE.md's open Object
 /// Identity question — this is not a long-term answer, only enough to give
@@ -561,7 +577,7 @@ impl RouteProvider for DarwinBackend {
             let message = build_add_message(&route)?;
             let n = unsafe { libc::send(self.fd, message.as_ptr() as *const _, message.len(), 0) };
             if n < 0 {
-                return Err(Error::Platform(io_error_code(&io::Error::last_os_error())));
+                return Err(route_socket_error(&io::Error::last_os_error()));
             }
             Ok(())
         })
@@ -572,7 +588,7 @@ impl RouteProvider for DarwinBackend {
             let message = build_delete_message(&route)?;
             let n = unsafe { libc::send(self.fd, message.as_ptr() as *const _, message.len(), 0) };
             if n < 0 {
-                return Err(Error::Platform(io_error_code(&io::Error::last_os_error())));
+                return Err(route_socket_error(&io::Error::last_os_error()));
             }
             Ok(())
         })
@@ -772,6 +788,13 @@ mod tests {
             Ipv4PrefixLength::new(24).unwrap(),
         ));
         let route = Route::new(RouteId::new(0), destination).with_interface_index(interface_index);
+
+        // Best-effort cleanup of a leftover route from a prior run of this
+        // same test (e.g. a run that panicked between add and remove) —
+        // guarantees a clean starting state regardless of why one might
+        // already be there, rather than the add below spuriously failing
+        // with `AlreadyExists`.
+        let _ = backend.remove_route(route.clone());
 
         let add_result = backend.add_route(route.clone());
         if matches!(
