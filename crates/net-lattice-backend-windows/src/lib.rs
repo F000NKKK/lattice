@@ -1,9 +1,11 @@
 //! Windows backend for Net Lattice: implements `net-lattice-platform`'s provider
 //! traits via the Windows IP Helper API.
 //!
-//! Only ever compiled for `target_os = "windows"`. See ARCHITECTURE.md for how
-//! this crate binds `net-lattice-platform`'s generic `RouteProvider::Route`
-//! associated type to the concrete `net_lattice_model::route::Route`.
+//! Only ever compiled for `target_os = "windows"` — its dependencies
+//! (`windows`, Windows-only) are gated the same way in `Cargo.toml`. See
+//! ARCHITECTURE.md for how this crate binds `net-lattice-platform`'s generic
+//! `RouteProvider::Route` associated type to the concrete
+//! `net_lattice_model::route::Route`.
 
 #![cfg(target_os = "windows")]
 
@@ -36,6 +38,15 @@ fn windows_error_code(err: std::io::Error) -> PlatformErrorCode {
     PlatformErrorCode::Windows(0)
 }
 
+/// Placeholder identity scheme: a route has no kernel-assigned numeric ID,
+/// so this hashes its defining fields. See ARCHITECTURE.md's open Object
+/// Identity question — this is not a long-term answer, only enough to give
+/// `Stage 0.2` a `RouteId` to work with.
+///
+/// Hashes destination, gateway, and outgoing interface together so that
+/// two routes to the same destination that differ only in gateway or
+/// interface (a common case with multiple default routes, or ECMP-like
+/// setups) don't collide on the same `RouteId`.
 fn synthesize_route_id(
     destination: &Network,
     gateway: &Option<IpAddress>,
@@ -340,15 +351,32 @@ mod tests {
     use super::*;
     use net_lattice_ip::{Ipv4Address, Ipv4Network, Ipv4PrefixLength};
 
+    /// Exercises a real round trip through the IP Helper API, no privilege
+    /// required: routing table dumps are readable by any user. This is the
+    /// one test in this module that runs by default and actually proves the
+    /// backend talks to the kernel, rather than only exercising conversion
+    /// logic.
     #[test]
     fn routes_reads_the_real_windows_routing_table() {
         let backend = WindowsBackend::new().expect("failed to create Windows backend");
-        let routes = backend.routes().expect("GetIpForwardTable should not fail");
+        let routes = backend
+            .routes()
+            .expect("GetIpForwardTable dump should not require privilege");
+        // Not asserting on contents: the routing table of the machine
+        // running this test is arbitrary. Reaching here without an error is
+        // the assertion.
         let _ = routes;
     }
 
+    /// Requires `Administrator` privileges. Not run by default because most
+    /// development and CI environments don't grant it, and this test would
+    /// otherwise fail with `PermissionDenied` rather than being skipped.
+    ///
+    /// Uses a documentation-only prefix (RFC 5737 `203.0.113.0/24`,
+    /// TEST-NET-3) on `lo` so it can't collide with or disrupt real
+    /// routing, and removes what it added regardless of assertion outcome.
     #[test]
-    #[ignore = "requires Administrator privileges; run manually with elevated cmd/PowerShell on Windows"]
+    #[ignore = "requires Administrator; run manually from elevated cmd/PowerShell on Windows"]
     fn add_then_remove_route_round_trips_through_the_kernel() {
         let backend = WindowsBackend::new().expect("failed to create Windows backend");
         let loopback_index = 1u32;
@@ -374,17 +402,19 @@ mod tests {
             .iter()
             .any(|r| r.destination == destination && r.interface_index == Some(loopback_index));
 
+        // Clean up before asserting, so a failed assertion doesn't leave
+        // the test route behind on the machine that ran this.
         let _ = backend.remove_route(route);
 
         assert!(found, "added route was not present in routes() afterward");
 
-        let routes_after = backend
+        let routes_after_removal = backend
             .routes()
             .expect("routes() failed after remove_route");
         assert!(
-            !routes_after.iter().any(|r| {
-                r.destination == destination && r.interface_index == Some(loopback_index)
-            }),
+            !routes_after_removal
+                .iter()
+                .any(|r| r.destination == destination && r.interface_index == Some(loopback_index)),
             "removed route was still present in routes() afterward"
         );
     }
