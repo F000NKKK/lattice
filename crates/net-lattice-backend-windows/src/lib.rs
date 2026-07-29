@@ -28,16 +28,12 @@ impl WindowsBackend {
         Ok(Self)
     }
 
-    fn ip_forward_table(
-        address_family: u16,
-    ) -> Result<*mut MIB_IPFORWARD_TABLE2> {
+    fn ip_forward_table(address_family: u16) -> Result<*mut MIB_IPFORWARD_TABLE2> {
         unsafe {
             let mut table: *mut MIB_IPFORWARD_TABLE2 = std::ptr::null_mut();
             let status = GetIpForwardTable2(address_family, &mut table);
             if status != 0 {
-                return Err(Error::Platform(PlatformErrorCode::Windows(
-                    status as u32,
-                )));
+                return Err(Error::Platform(PlatformErrorCode::Windows(status as u32)));
             }
             Ok(table)
         }
@@ -61,23 +57,20 @@ impl WindowsBackend {
                     addr.S_un.S_un_w.s_w3,
                     addr.S_un.S_un_w.s_w4,
                 ];
-                let ipv4 = net_lattice_ip::Ipv4Address::new(
-                    octets[0], octets[1], octets[2], octets[3],
-                );
-                let prefix = net_lattice_ip::Ipv4PrefixLength::new(
-                    row.DestinationPrefix.PrefixLength,
-                )
-                .ok()?;
+                let ipv4 =
+                    net_lattice_ip::Ipv4Address::new(octets[0], octets[1], octets[2], octets[3]);
+                let prefix =
+                    net_lattice_ip::Ipv4PrefixLength::new(row.DestinationPrefix.PrefixLength)
+                        .ok()?;
                 Network::from(net_lattice_ip::Ipv4Network::new(ipv4, prefix))
             }
             128 => {
                 let bytes = row.DestinationPrefix.Prefix.Ipv6.s6_bytes;
                 let octets: [u8; 16] = bytes;
                 let ipv6 = net_lattice_ip::Ipv6Address::from(octets);
-                let prefix = net_lattice_ip::Ipv6PrefixLength::new(
-                    row.DestinationPrefix.PrefixLength,
-                )
-                .ok()?;
+                let prefix =
+                    net_lattice_ip::Ipv6PrefixLength::new(row.DestinationPrefix.PrefixLength)
+                        .ok()?;
                 Network::from(net_lattice_ip::Ipv6Network::new(ipv6, prefix))
             }
             _ => return None,
@@ -161,10 +154,7 @@ impl RouteProvider for WindowsBackend {
         let table_v4 = Self::ip_forward_table(AF_INET as u16);
         if let Ok(table_v4) = table_v4 {
             let rows = unsafe {
-                std::slice::from_raw_parts(
-                    (*table_v4).Table,
-                    (*table_v4).NumEntries as usize,
-                )
+                std::slice::from_raw_parts((*table_v4).Table, (*table_v4).NumEntries as usize)
             };
             for row in rows {
                 if let Some(route) = Self::from_row(row)? {
@@ -177,10 +167,7 @@ impl RouteProvider for WindowsBackend {
         let table_v6 = Self::ip_forward_table(AF_INET6 as u16);
         if let Ok(table_v6) = table_v6 {
             let rows = unsafe {
-                std::slice::from_raw_parts(
-                    (*table_v6).Table,
-                    (*table_v6).NumEntries as usize,
-                )
+                std::slice::from_raw_parts((*table_v6).Table, (*table_v6).NumEntries as usize)
             };
             for row in rows {
                 if let Some(route) = Self::from_row(row)? {
@@ -231,10 +218,12 @@ impl RouteProvider for WindowsBackend {
                 unsafe { InitializeIpForwardEntry(&mut r) };
                 r.DestinationPrefix.PrefixLength = net.prefix().value() as u8;
                 r.DestinationPrefix.Prefix.Ipv4 = in_addr;
-                r.NextHop = gateway.unwrap_or(windows::Win32::NetworkManagement::IpHelper::MIB_IPADDRESS_STRING {
-                    si_family: 0,
-                    Ipv4: windows::Win32::Networking::WinSock::IN_ADDR::default(),
-                });
+                r.NextHop = gateway.unwrap_or(
+                    windows::Win32::NetworkManagement::IpHelper::MIB_IPADDRESS_STRING {
+                        si_family: 0,
+                        Ipv4: windows::Win32::Networking::WinSock::IN_ADDR::default(),
+                    },
+                );
                 r.InterfaceIndex = route.interface_index.unwrap_or(0);
                 if let Some(metric) = route.metric {
                     r.Metric1 = metric;
@@ -274,10 +263,12 @@ impl RouteProvider for WindowsBackend {
                 unsafe { InitializeIpForwardEntry(&mut r) };
                 r.DestinationPrefix.PrefixLength = net.prefix().value() as u8;
                 r.DestinationPrefix.Prefix.Ipv6 = in6_addr;
-                r.NextHop = gateway.unwrap_or(windows::Win32::NetworkManagement::IpHelper::MIB_IPADDRESS_STRING {
-                    si_family: 0,
-                    Ipv4: windows::Win32::Networking::WinSock::IN_ADDR::default(),
-                });
+                r.NextHop = gateway.unwrap_or(
+                    windows::Win32::NetworkManagement::IpHelper::MIB_IPADDRESS_STRING {
+                        si_family: 0,
+                        Ipv4: windows::Win32::Networking::WinSock::IN_ADDR::default(),
+                    },
+                );
                 r.InterfaceIndex = route.interface_index.unwrap_or(0);
                 if let Some(metric) = route.metric {
                     r.Metric1 = metric;
@@ -289,9 +280,7 @@ impl RouteProvider for WindowsBackend {
         unsafe {
             let status = CreateIpForwardEntry2(&mut row);
             if status != 0 {
-                return Err(Error::Platform(PlatformErrorCode::Windows(
-                    status as u32,
-                )));
+                return Err(Error::Platform(PlatformErrorCode::Windows(status as u32)));
             }
         }
 
@@ -305,12 +294,8 @@ impl RouteProvider for WindowsBackend {
         };
 
         let table = Self::ip_forward_table(address_family)?;
-        let rows = unsafe {
-            std::slice::from_raw_parts(
-                (*table).Table,
-                (*table).NumEntries as usize,
-            )
-        };
+        let rows =
+            unsafe { std::slice::from_raw_parts((*table).Table, (*table).NumEntries as usize) };
 
         let mut found = false;
         for row in rows {
@@ -358,16 +343,14 @@ mod tests {
     #[test]
     #[ignore = "requires Administrator privileges; run manually with elevated cmd/PowerShell"]
     fn add_then_remove_route_round_trips_through_the_kernel() {
-        let backend =
-            WindowsBackend::new().expect("failed to create Windows backend");
+        let backend = WindowsBackend::new().expect("failed to create Windows backend");
         let loopback_index = 1u32;
 
         let destination = Network::from(Ipv4Network::new(
             Ipv4Address::new(203, 0, 113, 0),
             Ipv4PrefixLength::new(24).unwrap(),
         ));
-        let route = Route::new(RouteId::new(0), destination)
-            .with_interface_index(loopback_index);
+        let route = Route::new(RouteId::new(0), destination).with_interface_index(loopback_index);
 
         let add_result = backend.add_route(route.clone());
         if matches!(
@@ -380,9 +363,9 @@ mod tests {
         let routes = backend
             .routes()
             .expect("routes() failed after add_route succeeded");
-        let found = routes.iter().any(|r| {
-            r.destination == destination && r.interface_index == Some(loopback_index)
-        });
+        let found = routes
+            .iter()
+            .any(|r| r.destination == destination && r.interface_index == Some(loopback_index));
 
         let _ = backend.remove_route(route);
 
@@ -393,8 +376,7 @@ mod tests {
             .expect("routes() failed after remove_route");
         assert!(
             !routes_after.iter().any(|r| {
-                r.destination == destination
-                    && r.interface_index == Some(loopback_index)
+                r.destination == destination && r.interface_index == Some(loopback_index)
             }),
             "removed route was still present in routes() afterward"
         );

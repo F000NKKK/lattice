@@ -11,11 +11,12 @@ categories.workspace = true
 keywords.workspace = true
 description = "Windows backend for Net Lattice: implements platform provider traits via the Windows IP Helper API."
 
-[lib]
-cfg-target = "target_os = \"windows\""
-
-[dependencies]
+[target.'cfg(target_os = "linux")'.dependencies]
 net-lattice-core = { workspace = true }
+net-lattice-ip = { workspace = true }
 net-lattice-model = { workspace = true }
 net-lattice-platform = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+futures = { workspace = true }
+
 windows = { workspace = true }

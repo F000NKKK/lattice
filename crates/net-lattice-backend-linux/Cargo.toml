@@ -16,6 +16,7 @@ net-lattice-core = { workspace = true }
 net-lattice-ip = { workspace = true }
 net-lattice-model = { workspace = true }
 net-lattice-platform = { workspace = true }
-rtnetlink = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 futures = { workspace = true }
+
+rtnetlink = { workspace = true }
