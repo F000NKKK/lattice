@@ -570,12 +570,25 @@ unsafe fn link_entry_to_interface(entry: &libc::ifaddrs) -> Option<Interface> {
         AdminState::Down
     };
 
+    // `IFF_RUNNING` ("resources allocated", set once the link layer has
+    // actually attached) is the closest BSD equivalent to Linux's carrier
+    // state: up-but-not-running reads as no-carrier (cable unplugged,
+    // Wi-Fi not associated, ...).
+    let operational_state = match (
+        entry.ifa_flags & (libc::IFF_UP as u32) != 0,
+        entry.ifa_flags & (libc::IFF_RUNNING as u32) != 0,
+    ) {
+        (true, true) => OperationalState::Up,
+        (true, false) => OperationalState::NoCarrier,
+        (false, _) => OperationalState::Down,
+    };
+
     let index = sdl.sdl_index as u32;
     let kind = ift_type_to_kind(sdl.sdl_type);
 
     let mut interface = Interface::new(Id::new(index as u64), index, name, kind)
         .with_admin_state(admin_state)
-        .with_operational_state(OperationalState::Unknown);
+        .with_operational_state(operational_state);
     if let Some(mac) = mac {
         interface = interface.with_mac(mac);
     }
