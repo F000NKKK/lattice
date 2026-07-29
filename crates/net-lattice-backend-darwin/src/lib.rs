@@ -11,7 +11,6 @@
 
 use std::hash::{Hash, Hasher};
 use std::net::IpAddr;
-use std::os::unix::io::AsRawFd;
 use std::{io, mem};
 
 use net_lattice_core::{Error, Id, PlatformErrorCode, Result};
@@ -123,17 +122,17 @@ unsafe fn sockaddr_to_ip(sa: *const libc::sockaddr) -> Option<IpAddr> {
     if sa.is_null() {
         return None;
     }
-    let family = (*sa).sa_family as libc::c_int;
+    let family = unsafe { (*sa).sa_family } as libc::c_int;
     match family {
         libc::AF_INET => {
-            let sin = &*(sa as *const libc::sockaddr_in);
+            let sin = unsafe { &*(sa as *const libc::sockaddr_in) };
             let octets = u32::from_be(sin.sin_addr.s_addr).to_be_bytes();
             Some(IpAddr::V4(std::net::Ipv4Addr::new(
                 octets[0], octets[1], octets[2], octets[3],
             )))
         }
         libc::AF_INET6 => {
-            let sin6 = &*(sa as *const libc::sockaddr_in6);
+            let sin6 = unsafe { &*(sa as *const libc::sockaddr_in6) };
             let bytes = sin6.sin6_addr.s6_addr;
             Some(IpAddr::V6(std::net::Ipv6Addr::from(bytes)))
         }
@@ -141,31 +140,74 @@ unsafe fn sockaddr_to_ip(sa: *const libc::sockaddr) -> Option<IpAddr> {
     }
 }
 
+/// Counts leading `1` bits across `bytes`, treated as a big-endian mask
+/// zero-padded on the right. BSD routing sockets represent a netmask's
+/// `sockaddr` with trailing zero bytes omitted entirely (`sa_len` shrinks
+/// instead of the buffer being zero-filled) rather than always sending a
+/// full-width mask, so an empty/short `bytes` correctly yields a shorter
+/// prefix (e.g. no bytes at all means `/0`, the default route).
+fn mask_bytes_to_prefix_len(bytes: &[u8]) -> u8 {
+    let mut prefix = 0u8;
+    for &byte in bytes {
+        if byte == 0xff {
+            prefix += 8;
+        } else {
+            prefix += byte.leading_ones() as u8;
+            break;
+        }
+    }
+    prefix
+}
+
 unsafe fn message_to_route(hdr: &libc::rt_msghdr) -> Option<Route> {
     let mut destination_addr = None;
     let mut gateway = None;
     let mut interface_index = None;
+    let mut netmask_bytes: Option<Vec<u8>> = None;
 
     let mut ptr = (hdr as *const libc::rt_msghdr).add(1) as *const u8;
     let mut remaining = hdr.rtm_msglen as usize - mem::size_of::<libc::rt_msghdr>();
     let mut bit: libc::c_int = 1;
-    while bit <= hdr.rtm_addrs && remaining >= mem::size_of::<libc::sockaddr>() {
+    while bit <= hdr.rtm_addrs && remaining >= 1 {
         if hdr.rtm_addrs & bit == 0 {
             bit <<= 1;
             continue;
         }
-        let sa = ptr as *const libc::sockaddr;
-        let len = (*sa).sa_len as usize;
-        let aligned_len = (len + 3) & !3;
-        if aligned_len == 0 || aligned_len > remaining {
+        // `sa_len` is the first byte of every variant of `sockaddr` — read
+        // it directly rather than requiring a full-size `sockaddr` to be
+        // present, since the netmask entry (`RTA_NETMASK`) is routinely
+        // shorter than that (trailing zero mask bytes are omitted).
+        let sa_len = *ptr as usize;
+        let aligned_len = if sa_len == 0 { 4 } else { (sa_len + 3) & !3 };
+        if aligned_len > remaining {
             break;
         }
         match bit {
             RTA_DST => {
-                destination_addr = sockaddr_to_ip(sa);
+                destination_addr = sockaddr_to_ip(ptr as *const libc::sockaddr);
             }
             RTA_GATEWAY => {
-                gateway = sockaddr_to_ip(sa).map(std_ip_to_ip_address);
+                gateway =
+                    sockaddr_to_ip(ptr as *const libc::sockaddr).map(std_ip_to_ip_address);
+            }
+            RTA_NETMASK => {
+                // The mask's address bytes start at the same offset a real
+                // address of the destination's family would (4 bytes in for
+                // `sockaddr_in`: `sa_len`+`sa_family`+`sin_port`; 8 for
+                // `sockaddr_in6`, which adds `sin6_flowinfo`) — `sa_family`
+                // itself is unreliable here, BSD kernels routinely leave it
+                // as `0` on netmask entries.
+                let header = match destination_addr {
+                    Some(IpAddr::V6(_)) => 8,
+                    _ => 4,
+                };
+                let available = sa_len.saturating_sub(header);
+                if available > 0 {
+                    let data = std::slice::from_raw_parts(ptr.add(header), available);
+                    netmask_bytes = Some(data.to_vec());
+                } else {
+                    netmask_bytes = Some(Vec::new());
+                }
             }
             _ => {}
         }
@@ -179,10 +221,21 @@ unsafe fn message_to_route(hdr: &libc::rt_msghdr) -> Option<Route> {
     }
 
     let destination_addr = destination_addr?;
+    // A host route (`RTF_HOST`) carries no `RTA_NETMASK` at all and is
+    // implicitly `/32`/`/128`; otherwise derive the prefix from the actual
+    // netmask bytes (an absent-but-non-host netmask, e.g. the default
+    // route, correctly yields `/0` via `mask_bytes_to_prefix_len(&[])`).
+    let full_len = match destination_addr {
+        IpAddr::V4(_) => 32,
+        IpAddr::V6(_) => 128,
+    };
     let prefix_len = if (hdr.rtm_flags & RTF_HOST) != 0 {
-        32u8
+        full_len
     } else {
-        32u8
+        netmask_bytes
+            .as_deref()
+            .map(mask_bytes_to_prefix_len)
+            .unwrap_or(full_len)
     };
     let destination = match destination_addr {
         IpAddr::V4(addr) => {
@@ -190,7 +243,7 @@ unsafe fn message_to_route(hdr: &libc::rt_msghdr) -> Option<Route> {
             Network::from(net_lattice_ip::Ipv4Network::new(addr.into(), prefix))
         }
         IpAddr::V6(addr) => {
-            let prefix = net_lattice_ip::Ipv6PrefixLength::new(128)?;
+            let prefix = net_lattice_ip::Ipv6PrefixLength::new(prefix_len)?;
             Network::from(net_lattice_ip::Ipv6Network::new(addr.into(), prefix))
         }
     };
@@ -368,8 +421,8 @@ fn push_netmask(buf: &mut [u8], offset: usize, addr: IpAddr, prefix_len: u8) -> 
             let mut mask_bytes = [0u8; 16];
             let full_bytes = (prefix_len / 8) as usize;
             let remainder = prefix_len % 8;
-            for i in 0..full_bytes {
-                mask_bytes[i] = 0xff;
+            for byte in &mut mask_bytes[..full_bytes] {
+                *byte = 0xff;
             }
             if remainder > 0 && full_bytes < 16 {
                 mask_bytes[full_bytes] = !0u8 << (8 - remainder);
