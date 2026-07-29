@@ -22,8 +22,7 @@ pub struct DarwinBackend {
 
 impl DarwinBackend {
     pub fn new() -> Result<Self> {
-        let runtime =
-            tokio::runtime::Runtime::new().map_err(darwin_error_code)?;
+        let runtime = tokio::runtime::Runtime::new().map_err(darwin_error_code)?;
         Ok(Self { runtime })
     }
 }
