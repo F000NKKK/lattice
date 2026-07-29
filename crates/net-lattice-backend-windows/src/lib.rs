@@ -410,8 +410,8 @@ impl InterfaceProvider for WindowsBackend {
             unsafe {
                 let mut table: *mut MIB_IF_TABLE2 = std::ptr::null_mut();
                 let status = GetIfTable2(&mut table);
-                if status != 0 {
-                    return Err(Error::Platform(PlatformErrorCode::Windows(status as u32)));
+                if status.0 != 0 {
+                    return Err(Error::Platform(PlatformErrorCode::Windows(status.0)));
                 }
                 let rows = std::slice::from_raw_parts(
                     (*table).Table.as_ptr(),
