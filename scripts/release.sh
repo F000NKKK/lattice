@@ -293,14 +293,15 @@ resolve_crate_action() {
     fi
 
     # Единственное место со ссылкой на версию крейта — [workspace.dependencies]
-    # в корневом Cargo.toml. Обновляем только при смене минора/мажора.
+    # в корневом Cargo.toml, где версия хранится полностью (x.y.z), а не как
+    # major.minor. Обновляем только при смене минора/мажора.
     if [[ "$old_short" != "$new_short" ]]; then
         local root_toml="$WS/Cargo.toml"
-        if grep -qE "${crate}[[:space:]]*=.*\"${old_short}\"" "$root_toml" 2>/dev/null; then
+        if grep -qE "${crate}[[:space:]]*=.*\"${current}\"" "$root_toml" 2>/dev/null; then
             if $DRY_RUN; then
-                dryrun "  Cargo.toml [workspace.dependencies] : $crate $old_short → $new_short" >&2
+                dryrun "  Cargo.toml [workspace.dependencies] : $crate $current → $new_version" >&2
             else
-                update_ref "$crate" "$root_toml" "$old_short" "$new_short"
+                update_ref "$crate" "$root_toml" "$current" "$new_version"
                 ok "  ссылка: Cargo.toml [workspace.dependencies]" >&2
             fi
         fi
