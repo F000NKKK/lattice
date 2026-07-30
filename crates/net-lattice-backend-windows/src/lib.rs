@@ -9,11 +9,13 @@
 
 #![cfg(target_os = "windows")]
 
+use std::ffi::c_void;
 use std::net::IpAddr;
+use std::sync::mpsc;
 
 use net_lattice_core::{Error, Id, PlatformErrorCode, Result};
 use net_lattice_model::dns::DnsConfig;
-use net_lattice_model::event::Event;
+use net_lattice_model::event::{ChangeKind, Event};
 use net_lattice_model::ifaddr::{InterfaceAddress, InterfaceAddressId};
 use net_lattice_model::interface::{AdminState, Interface, InterfaceKind, OperationalState};
 use net_lattice_model::mac::MacAddress;
@@ -24,13 +26,15 @@ use net_lattice_platform::{
     AddressProvider, Capability, CapabilityProvider, DnsProvider, EventProvider, EventReceiver,
     InterfaceProvider, NeighborProvider, RouteProvider,
 };
+use windows::Win32::Foundation::HANDLE;
 use windows::Win32::NetworkManagement::IpHelper::{
-    CreateIpForwardEntry2, DeleteIpForwardEntry2, FreeMibTable, GAA_FLAG_SKIP_ANYCAST,
-    GAA_FLAG_SKIP_FRIENDLY_NAME, GAA_FLAG_SKIP_MULTICAST, GAA_FLAG_SKIP_UNICAST,
-    GetAdaptersAddresses, GetIfTable2, GetIpForwardTable2, GetIpNetTable2,
+    CancelMibChangeNotify2, CreateIpForwardEntry2, DeleteIpForwardEntry2, FreeMibTable,
+    GAA_FLAG_SKIP_ANYCAST, GAA_FLAG_SKIP_FRIENDLY_NAME, GAA_FLAG_SKIP_MULTICAST,
+    GAA_FLAG_SKIP_UNICAST, GetAdaptersAddresses, GetIfTable2, GetIpForwardTable2, GetIpNetTable2,
     GetUnicastIpAddressTable, IP_ADAPTER_ADDRESSES_LH, InitializeIpForwardEntry, MIB_IF_ROW2,
     MIB_IF_TABLE2, MIB_IPFORWARD_ROW2, MIB_IPFORWARD_TABLE2, MIB_IPNET_ROW2, MIB_IPNET_TABLE2,
-    MIB_UNICASTIPADDRESS_ROW, MIB_UNICASTIPADDRESS_TABLE,
+    MIB_NOTIFICATION_TYPE, MIB_UNICASTIPADDRESS_ROW, MIB_UNICASTIPADDRESS_TABLE, MibAddInstance,
+    MibDeleteInstance, NotifyIpInterfaceChange, NotifyRouteChange2, NotifyUnicastIpAddressChange,
 };
 use windows::Win32::NetworkManagement::Ndis::{
     IfOperStatusDormant, IfOperStatusDown, IfOperStatusLowerLayerDown, IfOperStatusUp,
@@ -633,27 +637,183 @@ impl NeighborProvider for WindowsBackend {
     }
 }
 
+struct WindowsWatchState {
+    sender: mpsc::Sender<Event>,
+}
+
+/// Owns all native notification handles and their callback context. IP Helper
+/// guarantees `CancelMibChangeNotify2` waits for active callbacks, so freeing
+/// `state` after cancellation cannot race a callback dereference.
+struct WindowsWatch {
+    state: *mut WindowsWatchState,
+    route: HANDLE,
+    interface: HANDLE,
+    address: HANDLE,
+}
+
+unsafe impl Send for WindowsWatch {}
+
+impl WindowsWatch {
+    unsafe fn cancel(handle: HANDLE) {
+        if !handle.is_invalid() {
+            let _ = unsafe { CancelMibChangeNotify2(handle) };
+        }
+    }
+}
+
+impl Drop for WindowsWatch {
+    fn drop(&mut self) {
+        unsafe {
+            Self::cancel(self.route);
+            Self::cancel(self.interface);
+            Self::cancel(self.address);
+            drop(Box::from_raw(self.state));
+        }
+    }
+}
+
+fn change_kind(notification: MIB_NOTIFICATION_TYPE) -> ChangeKind {
+    if notification == MibAddInstance {
+        ChangeKind::Added
+    } else if notification == MibDeleteInstance {
+        ChangeKind::Removed
+    } else {
+        // MibParameterNotification is the common case. Treat the documented
+        // initial notification the same way defensively; registrations below
+        // request no initial snapshot.
+        ChangeKind::Changed
+    }
+}
+
+unsafe extern "system" fn route_change_callback(
+    context: *const c_void,
+    row: *const MIB_IPFORWARD_ROW2,
+    notification: MIB_NOTIFICATION_TYPE,
+) {
+    if context.is_null() || row.is_null() {
+        return;
+    }
+    let state = unsafe { &*(context.cast::<WindowsWatchState>()) };
+    if let Ok(Some(route)) = row_to_route(unsafe { &*row }) {
+        let _ = state.sender.send(Event::Route {
+            id: route.id,
+            kind: change_kind(notification),
+        });
+    }
+}
+
+unsafe extern "system" fn interface_change_callback(
+    context: *const c_void,
+    row: *const windows::Win32::NetworkManagement::IpHelper::MIB_IPINTERFACE_ROW,
+    notification: MIB_NOTIFICATION_TYPE,
+) {
+    if context.is_null() || row.is_null() {
+        return;
+    }
+    let state = unsafe { &*(context.cast::<WindowsWatchState>()) };
+    let row = unsafe { &*row };
+    let _ = state.sender.send(Event::Interface {
+        id: Id::new(row.InterfaceIndex as u64),
+        kind: change_kind(notification),
+    });
+}
+
+unsafe extern "system" fn address_change_callback(
+    context: *const c_void,
+    row: *const MIB_UNICASTIPADDRESS_ROW,
+    notification: MIB_NOTIFICATION_TYPE,
+) {
+    if context.is_null() || row.is_null() {
+        return;
+    }
+    let state = unsafe { &*(context.cast::<WindowsWatchState>()) };
+    if let Some(address) = row_to_interface_address(unsafe { &*row }) {
+        let _ = state.sender.send(Event::Address {
+            id: address.id,
+            kind: change_kind(notification),
+        });
+    }
+}
+
 impl CapabilityProvider for WindowsBackend {
     /// `IPV6` unconditionally, same rationale as the other backends: every
     /// provider this backend implements already handles both address
-    /// families. `VRF`/`NAMESPACES`/`MONITORING` are left unset — none of
-    /// them are implemented yet.
+    /// families. `MONITORING` is available through IP Helper notification
+    /// registrations. `VRF`/`NAMESPACES` remain unset because Net Lattice
+    /// does not implement either domain yet.
     fn capabilities(&self) -> Capability {
-        Capability::IPV6
+        Capability::IPV6 | Capability::MONITORING
     }
 }
 
 impl EventProvider for WindowsBackend {
     type Event = Event;
 
-    /// Windows exposes the required notifications through IP Helper callback
-    /// registrations.  Stage 0.8 deliberately does not expose a partial
-    /// registration set: the callback state must be owned by the returned
-    /// receiver and safely cancelled before it is freed.  Until that lifecycle
-    /// is implemented, callers get an explicit error and `MONITORING` remains
-    /// absent from `capabilities()`.
     fn watch(&self) -> Result<EventReceiver<Self::Event>> {
-        Err(Error::Unsupported)
+        let (sender, receiver) = mpsc::channel();
+        let state = Box::into_raw(Box::new(WindowsWatchState { sender }));
+        let mut route = HANDLE::default();
+        let mut interface = HANDLE::default();
+        let mut address = HANDLE::default();
+
+        let status = unsafe {
+            NotifyRouteChange2(
+                AF_UNSPEC,
+                Some(route_change_callback),
+                state.cast(),
+                false,
+                &mut route,
+            )
+        };
+        if status.0 != 0 {
+            unsafe { drop(Box::from_raw(state)) };
+            return Err(Error::Platform(PlatformErrorCode::Windows(status.0)));
+        }
+
+        let status = unsafe {
+            NotifyIpInterfaceChange(
+                AF_UNSPEC,
+                Some(interface_change_callback),
+                Some(state.cast()),
+                false,
+                &mut interface,
+            )
+        };
+        if status.0 != 0 {
+            unsafe {
+                WindowsWatch::cancel(route);
+                drop(Box::from_raw(state));
+            }
+            return Err(Error::Platform(PlatformErrorCode::Windows(status.0)));
+        }
+
+        let status = unsafe {
+            NotifyUnicastIpAddressChange(
+                AF_UNSPEC,
+                Some(address_change_callback),
+                Some(state.cast()),
+                false,
+                &mut address,
+            )
+        };
+        if status.0 != 0 {
+            unsafe {
+                WindowsWatch::cancel(route);
+                WindowsWatch::cancel(interface);
+                drop(Box::from_raw(state));
+            }
+            return Err(Error::Platform(PlatformErrorCode::Windows(status.0)));
+        }
+
+        Ok(EventReceiver::with_subscription(
+            receiver,
+            WindowsWatch {
+                state,
+                route,
+                interface,
+                address,
+            },
+        ))
     }
 }
 

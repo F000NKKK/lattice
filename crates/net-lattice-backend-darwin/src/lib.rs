@@ -1397,22 +1397,21 @@ impl EventProvider for DarwinBackend {
                     revents: 0,
                 };
                 let ready = unsafe { libc::poll(&mut poll_fd, 1, 200) };
-                if ready == 0 || (ready < 0 && io::Error::last_os_error().kind() == io::ErrorKind::Interrupted) {
+                if ready == 0
+                    || (ready < 0
+                        && io::Error::last_os_error().kind() == io::ErrorKind::Interrupted)
+                {
                     continue;
                 }
                 if ready < 0 {
                     break;
                 }
-                let received = unsafe {
-                    libc::recv(
-                        fd,
-                        buffer.as_mut_ptr().cast(),
-                        RTM_MAXSIZE,
-                        0,
-                    )
-                };
+                let received =
+                    unsafe { libc::recv(fd, buffer.as_mut_ptr().cast(), RTM_MAXSIZE, 0) };
                 if received <= 0 {
-                    if received < 0 && io::Error::last_os_error().kind() == io::ErrorKind::Interrupted {
+                    if received < 0
+                        && io::Error::last_os_error().kind() == io::ErrorKind::Interrupted
+                    {
                         continue;
                     }
                     break;
@@ -1421,7 +1420,8 @@ impl EventProvider for DarwinBackend {
                 let received = received as usize;
                 while offset + mem::size_of::<RouteMessageHeader>() <= received {
                     let message = unsafe { buffer.as_ptr().cast::<u8>().add(offset) };
-                    let common = unsafe { std::ptr::read_unaligned(message.cast::<RouteMessageHeader>()) };
+                    let common =
+                        unsafe { std::ptr::read_unaligned(message.cast::<RouteMessageHeader>()) };
                     let len = common.msg_len as usize;
                     if len < mem::size_of::<RouteMessageHeader>() || offset + len > received {
                         break;
