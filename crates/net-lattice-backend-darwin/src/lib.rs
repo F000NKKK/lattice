@@ -857,6 +857,15 @@ mod tests {
     use super::*;
     use net_lattice_ip::{Ipv4Address, Ipv4Network, Ipv4PrefixLength};
 
+    /// Diagnostic-only: formats `bytes` as a space-separated hex dump.
+    fn hex_dump(bytes: &[u8]) -> String {
+        bytes
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
     /// Exercises a real round trip through the route socket, no privilege
     /// required: routing table dumps are readable by any user. This is the
     /// one test in this module that runs by default and actually proves the
@@ -1017,7 +1026,66 @@ mod tests {
         // with `AlreadyExists`.
         let _ = backend.remove_route(route.clone());
 
+        // Diagnostic-only: three rounds of fixes reasoned from reference
+        // implementations (netmask parsing, sockaddr_dl shape/sdl_len/name,
+        // RTAX wire order) have each been individually correct against
+        // those references, yet the round trip still fails identically —
+        // time to stop reasoning from references and look at the actual
+        // bytes this run puts on the wire and gets back. A "spy" socket
+        // opened before `add_route` receives the same kernel broadcast
+        // `send_route_request` consumes on `backend`'s own socket (every
+        // open `PF_ROUTE` socket gets every message), without touching any
+        // production code path.
+        let add_message = build_add_message(&route).expect("build_add_message failed");
+        eprintln!(
+            "[diag] outgoing RTM_ADD ({} bytes): {}",
+            add_message.len(),
+            hex_dump(&add_message)
+        );
+        let spy_fd = unsafe { libc::socket(libc::PF_ROUTE, libc::SOCK_RAW, libc::AF_UNSPEC) };
+        assert!(spy_fd >= 0, "failed to open spy route socket");
+        let timeout = libc::timeval {
+            tv_sec: 2,
+            tv_usec: 0,
+        };
+        unsafe {
+            libc::setsockopt(
+                spy_fd,
+                libc::SOL_SOCKET,
+                libc::SO_RCVTIMEO,
+                &timeout as *const _ as *const libc::c_void,
+                mem::size_of::<libc::timeval>() as libc::socklen_t,
+            );
+        }
+
         let add_result = backend.add_route(route.clone());
+
+        let mut spy_buf = [0u8; RTM_MAXSIZE];
+        let mut spy_seen = Vec::new();
+        for _ in 0..8 {
+            let n = unsafe { libc::recv(spy_fd, spy_buf.as_mut_ptr() as *mut _, spy_buf.len(), 0) };
+            if n <= 0 {
+                break;
+            }
+            let n = n as usize;
+            if n >= mem::size_of::<libc::rt_msghdr>() {
+                let hdr = unsafe { &*(spy_buf.as_ptr() as *const libc::rt_msghdr) };
+                if hdr.rtm_pid == unsafe { libc::getpid() } {
+                    spy_seen.push(format!(
+                        "type={} flags={:#x} addrs={:#x} msglen={} index={} errno={} bytes={}",
+                        hdr.rtm_type,
+                        hdr.rtm_flags,
+                        hdr.rtm_addrs,
+                        hdr.rtm_msglen,
+                        hdr.rtm_index,
+                        hdr.rtm_errno,
+                        hex_dump(&spy_buf[..n]),
+                    ));
+                }
+            }
+        }
+        unsafe { libc::close(spy_fd) };
+        eprintln!("[diag] spy socket saw (our pid only): {spy_seen:#?}");
         if matches!(
             add_result,
             Err(Error::PermissionDenied) | Err(Error::Platform(_))
