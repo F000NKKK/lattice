@@ -16,15 +16,15 @@ use futures::{StreamExt, TryStreamExt};
 use net_lattice_core::{Error, Id, PlatformErrorCode, Result};
 use net_lattice_model::dns::DnsConfig;
 use net_lattice_model::event::{ChangeKind, Event};
-use net_lattice_model::ifaddr::{InterfaceAddress, InterfaceAddressId};
+use net_lattice_model::ifaddr::{InterfaceAddress, InterfaceAddressId, NewInterfaceAddress};
 use net_lattice_model::interface::{AdminState, Interface, InterfaceKind, OperationalState};
 use net_lattice_model::mac::MacAddress;
 use net_lattice_model::neighbor::{NeighborEntry, NeighborId, NeighborState};
 use net_lattice_model::route::{Route, RouteId};
 use net_lattice_model::{IpAddress, Network};
 use net_lattice_platform::{
-    AddressProvider, Capability, CapabilityProvider, DnsProvider, EventProvider, EventReceiver,
-    InterfaceProvider, NeighborProvider, RouteProvider,
+    AddressMutator, AddressProvider, Capability, CapabilityProvider, DnsProvider, EventProvider,
+    EventReceiver, InterfaceProvider, NeighborProvider, RouteProvider,
 };
 use rtnetlink::packet_route::RouteNetlinkMessage;
 use rtnetlink::packet_route::address::{AddressAttribute, AddressMessage};
@@ -154,6 +154,60 @@ impl AddressProvider for LinuxBackend {
                 addresses.extend(message_to_interface_address(&message));
             }
             Ok(addresses)
+        })
+    }
+}
+
+impl AddressMutator for LinuxBackend {
+    type NewInterfaceAddress = NewInterfaceAddress;
+    type InterfaceAddress = InterfaceAddress;
+
+    fn add_address(&self, address: Self::NewInterfaceAddress) -> Result<Self::InterfaceAddress> {
+        let interface_index = address.interface_id.value() as u32;
+        let (ip, prefix_len) = network_to_std(address.address);
+        self.runtime.block_on(async {
+            let mut request = self.handle.address().add(interface_index, ip, prefix_len);
+            if let Some(broadcast) = address.broadcast {
+                request
+                    .message_mut()
+                    .attributes
+                    .push(AddressAttribute::Broadcast(broadcast.into()));
+            }
+            request
+                .execute()
+                .await
+                .map_err(|err| Error::Platform(rtnetlink_error_code(&err)))
+        })?;
+
+        self.addresses()?
+            .into_iter()
+            .find(|observed| {
+                observed.interface_index == interface_index && observed.address == address.address
+            })
+            .ok_or(Error::InvalidState)
+    }
+
+    fn remove_address(&self, address: Self::InterfaceAddress) -> Result<()> {
+        self.runtime.block_on(async {
+            let mut messages = self.handle.address().get().execute();
+            while let Some(message) = messages
+                .try_next()
+                .await
+                .map_err(|err| Error::Platform(rtnetlink_error_code(&err)))?
+            {
+                if message_to_interface_address(&message)
+                    .is_some_and(|observed| observed.id == address.id)
+                {
+                    return self
+                        .handle
+                        .address()
+                        .del(message)
+                        .execute()
+                        .await
+                        .map_err(|err| Error::Platform(rtnetlink_error_code(&err)));
+                }
+            }
+            Err(Error::NotFound)
         })
     }
 }
