@@ -12,9 +12,10 @@
 use std::hash::{Hash, Hasher};
 use std::net::IpAddr;
 
-use futures::TryStreamExt;
+use futures::{StreamExt, TryStreamExt};
 use net_lattice_core::{Error, Id, PlatformErrorCode, Result};
 use net_lattice_model::dns::DnsConfig;
+use net_lattice_model::event::{ChangeKind, Event};
 use net_lattice_model::ifaddr::{InterfaceAddress, InterfaceAddressId};
 use net_lattice_model::interface::{AdminState, Interface, InterfaceKind, OperationalState};
 use net_lattice_model::mac::MacAddress;
@@ -22,16 +23,17 @@ use net_lattice_model::neighbor::{NeighborEntry, NeighborId, NeighborState};
 use net_lattice_model::route::{Route, RouteId};
 use net_lattice_model::{IpAddress, Network};
 use net_lattice_platform::{
-    AddressProvider, Capability, CapabilityProvider, DnsProvider, InterfaceProvider,
-    NeighborProvider, RouteProvider,
+    AddressProvider, Capability, CapabilityProvider, DnsProvider, EventProvider, EventReceiver,
+    InterfaceProvider, NeighborProvider, RouteProvider,
 };
+use rtnetlink::packet_route::RouteNetlinkMessage;
 use rtnetlink::packet_route::address::{AddressAttribute, AddressMessage};
 use rtnetlink::packet_route::link::{LinkAttribute, LinkLayerType, LinkMessage, State};
 use rtnetlink::packet_route::neighbour::{
     NeighbourAddress, NeighbourAttribute, NeighbourMessage, NeighbourState as RtNeighbourState,
 };
 use rtnetlink::packet_route::route::{RouteAddress, RouteAttribute, RouteMessage};
-use rtnetlink::{Handle, RouteMessageBuilder};
+use rtnetlink::{Handle, MulticastGroup, RouteMessageBuilder};
 
 /// The Linux Netlink-backed implementation of Net Lattice's provider traits.
 pub struct LinuxBackend {
