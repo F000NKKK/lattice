@@ -15,14 +15,16 @@ use net_lattice_core::{Error, Id, PlatformErrorCode, Result};
 use net_lattice_model::dns::DnsConfig;
 use net_lattice_model::interface::{AdminState, Interface, InterfaceKind, OperationalState};
 use net_lattice_model::mac::MacAddress;
+use net_lattice_model::neighbor::{NeighborEntry, NeighborId, NeighborState};
 use net_lattice_model::route::{Route, RouteId};
 use net_lattice_model::{IpAddress, Network};
-use net_lattice_platform::{DnsProvider, InterfaceProvider, RouteProvider};
+use net_lattice_platform::{DnsProvider, InterfaceProvider, NeighborProvider, RouteProvider};
 use windows::Win32::NetworkManagement::IpHelper::{
     CreateIpForwardEntry2, DeleteIpForwardEntry2, FreeMibTable, GAA_FLAG_SKIP_ANYCAST,
     GAA_FLAG_SKIP_FRIENDLY_NAME, GAA_FLAG_SKIP_MULTICAST, GAA_FLAG_SKIP_UNICAST,
-    GetAdaptersAddresses, GetIfTable2, GetIpForwardTable2, IP_ADAPTER_ADDRESSES_LH,
+    GetAdaptersAddresses, GetIfTable2, GetIpForwardTable2, GetIpNetTable2, IP_ADAPTER_ADDRESSES_LH,
     InitializeIpForwardEntry, MIB_IF_ROW2, MIB_IF_TABLE2, MIB_IPFORWARD_ROW2, MIB_IPFORWARD_TABLE2,
+    MIB_IPNET_ROW2, MIB_IPNET_TABLE2,
 };
 use windows::Win32::NetworkManagement::Ndis::{
     IfOperStatusDormant, IfOperStatusDown, IfOperStatusLowerLayerDown, IfOperStatusUp,
@@ -30,7 +32,8 @@ use windows::Win32::NetworkManagement::Ndis::{
 };
 use windows::Win32::Networking::WinSock::{
     ADDRESS_FAMILY, AF_INET, AF_INET6, IN_ADDR, IN_ADDR_0, IN_ADDR_0_0, IN6_ADDR, IN6_ADDR_0,
-    SOCKADDR, SOCKADDR_IN, SOCKADDR_IN6, SOCKADDR_IN6_0, SOCKADDR_INET,
+    NL_NEIGHBOR_STATE, NlnsDelay, NlnsIncomplete, NlnsPermanent, NlnsProbe, NlnsReachable,
+    NlnsStale, SOCKADDR, SOCKADDR_IN, SOCKADDR_IN6, SOCKADDR_IN6_0, SOCKADDR_INET,
 };
 
 const AF_UNSPEC: ADDRESS_FAMILY = ADDRESS_FAMILY(0);
@@ -496,6 +499,77 @@ fn adapter_addresses() -> Result<Vec<u8>> {
     Ok(buffer)
 }
 
+/// Placeholder identity scheme, same rationale as `synthesize_route_id`: a
+/// neighbor entry has no kernel-assigned numeric ID, so this hashes its
+/// interface and address together.
+fn synthesize_neighbor_id(interface_index: u32, address: &IpAddress) -> NeighborId {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    interface_index.hash(&mut hasher);
+    address.hash(&mut hasher);
+    NeighborId::new(hasher.finish())
+}
+
+/// Maps Windows `NL_NEIGHBOR_STATE` to the cross-platform [`NeighborState`].
+fn neighbor_state_to_state(state: NL_NEIGHBOR_STATE) -> NeighborState {
+    match state {
+        s if s == NlnsIncomplete => NeighborState::Incomplete,
+        s if s == NlnsReachable => NeighborState::Reachable,
+        s if s == NlnsStale => NeighborState::Stale,
+        s if s == NlnsDelay => NeighborState::Delay,
+        s if s == NlnsProbe => NeighborState::Probe,
+        s if s == NlnsPermanent => NeighborState::Permanent,
+        _ => NeighborState::Unknown,
+    }
+}
+
+fn row_to_neighbor(row: &MIB_IPNET_ROW2) -> Option<NeighborEntry> {
+    let address = unsafe { sockaddr_inet_to_ip(&row.Address) }.map(std_ip_to_ip_address)?;
+
+    let mac = if row.PhysicalAddressLength == 6 {
+        let mut octets = [0u8; 6];
+        octets.copy_from_slice(&row.PhysicalAddress[..6]);
+        Some(MacAddress::new(octets))
+    } else {
+        None
+    };
+
+    let mut entry = NeighborEntry::new(
+        synthesize_neighbor_id(row.InterfaceIndex, &address),
+        row.InterfaceIndex,
+        address,
+    )
+    .with_state(neighbor_state_to_state(row.State));
+    if let Some(mac) = mac {
+        entry = entry.with_mac(mac);
+    }
+    Some(entry)
+}
+
+impl NeighborProvider for WindowsBackend {
+    type NeighborEntry = NeighborEntry;
+
+    fn neighbors(&self) -> Result<Vec<Self::NeighborEntry>> {
+        self.runtime.block_on(async {
+            let mut table: *mut MIB_IPNET_TABLE2 = std::ptr::null_mut();
+            let status = unsafe { GetIpNetTable2(AF_UNSPEC, &mut table) };
+            if status.0 != 0 {
+                return Err(Error::Platform(PlatformErrorCode::Windows(status.0)));
+            }
+
+            let neighbors = unsafe {
+                let rows = std::slice::from_raw_parts(
+                    (*table).Table.as_ptr(),
+                    (*table).NumEntries as usize,
+                );
+                rows.iter().filter_map(row_to_neighbor).collect()
+            };
+            unsafe { FreeMibTable(table.cast()) };
+            Ok(neighbors)
+        })
+    }
+}
+
 impl DnsProvider for WindowsBackend {
     type DnsConfig = DnsConfig;
 
@@ -562,6 +636,20 @@ mod tests {
         // running this test is arbitrary. Reaching here without an error is
         // the assertion.
         let _ = routes;
+    }
+
+    /// Exercises a real round trip through `GetIpNetTable2`, no privilege
+    /// required: reading the neighbor cache is readable by any user.
+    #[test]
+    fn neighbors_reads_the_real_kernel_neighbor_table() {
+        let backend = WindowsBackend::new().expect("failed to create Windows backend");
+        let neighbors = backend
+            .neighbors()
+            .expect("GetIpNetTable2 dump should not require privilege");
+        // Not asserting on contents: the neighbor table of the machine
+        // running this test is arbitrary. Reaching here without an error is
+        // the assertion.
+        let _ = neighbors;
     }
 
     /// Exercises a real round trip through `GetAdaptersAddresses`, no
