@@ -214,10 +214,16 @@ publish_with_retry() {
 }
 
 # ── Функция замены версии-ссылки в файле ──────────────────────────────────────
+# Заменяет версию в ссылке на $dep на $new, вне зависимости от того, что там
+# было раньше. НЕ матчим на $old: patch-бампы намеренно не трогают корневой
+# Cargo.toml (semver-совместимо), поэтому к моменту minor/major-бампа версия
+# в корне почти всегда уже отстала от текущей версии крейта — точное
+# совпадение по старой версии там ловить нельзя, иначе замена молча не
+# сработает (см. CHANGELOG: baг с net-lattice-backend-darwin).
 update_ref() {
-    local dep="$1" file="$2" old="$3" new="$4"
-    sed -i -E "s|(${dep}[[:space:]]*=[[:space:]]*\")${old}([.\"])|\1${new}\2|g" "$file"
-    sed -i -E "s|(${dep}[[:space:]]*=[[:space:]]*\{[^}]*version[[:space:]]*=[[:space:]]*\")${old}([.\"])|\1${new}\2|g" "$file"
+    local dep="$1" file="$2" new="$3"
+    sed -i -E "s|(${dep}[[:space:]]*=[[:space:]]*\")[^\"]*|\1${new}|g" "$file"
+    sed -i -E "s|(${dep}[[:space:]]*=[[:space:]]*\{[^}]*version[[:space:]]*=[[:space:]]*\")[^\"]*|\1${new}|g" "$file"
 }
 
 # ── Круглая ли версия относительно запрошенного бампа? ────────────────────────
@@ -295,13 +301,21 @@ resolve_crate_action() {
     # Единственное место со ссылкой на версию крейта — [workspace.dependencies]
     # в корневом Cargo.toml, где версия хранится полностью (x.y.z), а не как
     # major.minor. Обновляем только при смене минора/мажора.
+    #
+    # НЕ проверяем, что корень уже содержит именно $current: patch-бампы
+    # намеренно не трогают корень (semver-совместимо через caret), поэтому
+    # к моменту minor/major-бампа корень почти всегда отстаёт от реальной
+    # версии крейта на несколько patch-версий. Раньше здесь был grep,
+    # требовавший точного совпадения с $current — молча ничего не делал,
+    # если корень был «позади», и корневой Cargo.toml оставался устаревшим.
+    # Проверяем только, что ссылка на крейт вообще присутствует в корне.
     if [[ "$old_short" != "$new_short" ]]; then
         local root_toml="$WS/Cargo.toml"
-        if grep -qE "${crate}[[:space:]]*=.*\"${current}\"" "$root_toml" 2>/dev/null; then
+        if grep -qE "^${crate}[[:space:]]*=" "$root_toml" 2>/dev/null; then
             if $DRY_RUN; then
                 dryrun "  Cargo.toml [workspace.dependencies] : $crate $current → $new_version" >&2
             else
-                update_ref "$crate" "$root_toml" "$current" "$new_version"
+                update_ref "$crate" "$root_toml" "$new_version"
                 ok "  ссылка: Cargo.toml [workspace.dependencies]" >&2
             fi
         fi
