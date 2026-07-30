@@ -931,6 +931,20 @@ mod tests {
         let _ = config;
     }
 
+    /// Registers and immediately drops the three native notification handles
+    /// without changing Windows networking state. The ignored test below
+    /// verifies a real route notification end-to-end.
+    #[test]
+    fn watch_registers_ip_helper_notifications() {
+        let backend = WindowsBackend::new().expect("failed to create Windows backend");
+        assert!(backend.capabilities().contains(Capability::MONITORING));
+        drop(
+            backend
+                .watch()
+                .expect("failed to register IP Helper notifications"),
+        );
+    }
+
     /// Requires `Administrator` privileges (root, or `sudo -E cargo test -- --ignored`
     /// in this crate). Not run by default because most development and CI
     /// environments — including the one this crate was originally written

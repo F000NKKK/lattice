@@ -1519,6 +1519,15 @@ mod tests {
         let _ = config;
     }
 
+    /// Opens and drops a dedicated PF_ROUTE event socket without modifying
+    /// system state. The ignored test below verifies delivery end-to-end.
+    #[test]
+    fn watch_opens_a_real_route_socket() {
+        let backend = DarwinBackend::new().expect("failed to open a route socket");
+        assert!(backend.capabilities().contains(Capability::MONITORING));
+        drop(backend.watch().expect("failed to open PF_ROUTE watcher"));
+    }
+
     /// Diagnostic-only: formats `bytes` as a space-separated hex dump.
     fn hex_dump(bytes: &[u8]) -> String {
         bytes

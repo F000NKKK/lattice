@@ -790,6 +790,21 @@ mod tests {
         let _ = neighbors;
     }
 
+    /// Opens a real multicast subscription without changing system state.
+    /// The ignored test below verifies delivery through the same subscription
+    /// by adding and removing a temporary route.
+    #[test]
+    fn watch_opens_a_real_netlink_subscription() {
+        use std::time::Duration;
+
+        let backend = LinuxBackend::new().expect("failed to open a Netlink connection");
+        assert!(backend.capabilities().contains(Capability::MONITORING));
+        let watcher = backend
+            .watch()
+            .expect("failed to subscribe to Netlink multicast groups");
+        assert!(watcher.recv_timeout(Duration::from_millis(1)).is_ok());
+    }
+
     #[test]
     fn parse_resolv_conf_reads_nameservers_and_search_domains() {
         let contents = "# comment\n\
