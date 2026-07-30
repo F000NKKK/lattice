@@ -12,7 +12,7 @@ pub use net_lattice_ip::{
     Ipv4Address, Ipv4Network, Ipv4PrefixLength, Ipv6Address, Ipv6Network, Ipv6PrefixLength,
 };
 pub use net_lattice_model::dns::DnsConfig;
-pub use net_lattice_model::event::{ChangeKind, Event};
+pub use net_lattice_model::event::{ChangeKind, Event, EventDomain, EventFilter};
 pub use net_lattice_model::ifaddr::{InterfaceAddress, InterfaceAddressId, NewInterfaceAddress};
 pub use net_lattice_model::interface::{
     AdminState, Interface, InterfaceId, InterfaceKind, OperationalState,
@@ -46,7 +46,7 @@ pub trait LatticeBackend:
     + NeighborProvider<NeighborEntry = NeighborEntry>
     + AddressProvider<InterfaceAddress = InterfaceAddress>
     + AddressMutator<NewInterfaceAddress = NewInterfaceAddress, InterfaceAddress = InterfaceAddress>
-    + EventProvider<Event = Event>
+    + EventProvider<Event = Event, EventFilter = EventFilter>
     + CapabilityProvider
 {
 }
@@ -60,7 +60,7 @@ impl<B> LatticeBackend for B where
         + AddressMutator<
             NewInterfaceAddress = NewInterfaceAddress,
             InterfaceAddress = InterfaceAddress,
-        > + EventProvider<Event = Event>
+        > + EventProvider<Event = Event, EventFilter = EventFilter>
         + CapabilityProvider
 {
 }
@@ -127,6 +127,9 @@ impl<B: LatticeBackend> Lattice<B> {
     /// `Iterator`).
     pub fn watch(&self) -> Result<EventReceiver<Event>> {
         self.backend.watch()
+    }
+    pub fn watch_filtered(&self, filter: EventFilter) -> Result<EventReceiver<Event>> {
+        self.backend.watch_filtered(filter)
     }
 }
 
