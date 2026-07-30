@@ -1139,8 +1139,8 @@ fn add_interface_address(address: &NewInterfaceAddress) -> Result<()> {
     if matches!(ip, IpAddr::V6(_)) && address.broadcast.is_some() {
         return Err(Error::InvalidState);
     }
-    let socket = socket_for_address(ip)?;
     let name = interface_name_array(address.interface_id.value() as u32)?;
+    let socket = socket_for_address(ip)?;
     let result = match ip {
         IpAddr::V4(ip) => {
             let mut request: IfAliasReq = unsafe { mem::zeroed() };
@@ -1172,8 +1172,8 @@ fn add_interface_address(address: &NewInterfaceAddress) -> Result<()> {
 
 fn remove_interface_address(address: &InterfaceAddress) -> Result<()> {
     let (ip, _) = network_to_std(address.address);
-    let socket = socket_for_address(ip)?;
     let name = interface_name_array(address.interface_index)?;
+    let socket = socket_for_address(ip)?;
     let result = match ip {
         IpAddr::V4(ip) => {
             let mut request: libc::ifreq = unsafe { mem::zeroed() };
