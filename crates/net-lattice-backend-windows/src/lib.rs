@@ -13,18 +13,22 @@ use std::net::IpAddr;
 
 use net_lattice_core::{Error, Id, PlatformErrorCode, Result};
 use net_lattice_model::dns::DnsConfig;
+use net_lattice_model::ifaddr::{InterfaceAddress, InterfaceAddressId};
 use net_lattice_model::interface::{AdminState, Interface, InterfaceKind, OperationalState};
 use net_lattice_model::mac::MacAddress;
 use net_lattice_model::neighbor::{NeighborEntry, NeighborId, NeighborState};
 use net_lattice_model::route::{Route, RouteId};
 use net_lattice_model::{IpAddress, Network};
-use net_lattice_platform::{DnsProvider, InterfaceProvider, NeighborProvider, RouteProvider};
+use net_lattice_platform::{
+    AddressProvider, DnsProvider, InterfaceProvider, NeighborProvider, RouteProvider,
+};
 use windows::Win32::NetworkManagement::IpHelper::{
     CreateIpForwardEntry2, DeleteIpForwardEntry2, FreeMibTable, GAA_FLAG_SKIP_ANYCAST,
     GAA_FLAG_SKIP_FRIENDLY_NAME, GAA_FLAG_SKIP_MULTICAST, GAA_FLAG_SKIP_UNICAST,
-    GetAdaptersAddresses, GetIfTable2, GetIpForwardTable2, GetIpNetTable2, IP_ADAPTER_ADDRESSES_LH,
-    InitializeIpForwardEntry, MIB_IF_ROW2, MIB_IF_TABLE2, MIB_IPFORWARD_ROW2, MIB_IPFORWARD_TABLE2,
-    MIB_IPNET_ROW2, MIB_IPNET_TABLE2,
+    GetAdaptersAddresses, GetIfTable2, GetIpForwardTable2, GetIpNetTable2,
+    GetUnicastIpAddressTable, IP_ADAPTER_ADDRESSES_LH, InitializeIpForwardEntry, MIB_IF_ROW2,
+    MIB_IF_TABLE2, MIB_IPFORWARD_ROW2, MIB_IPFORWARD_TABLE2, MIB_IPNET_ROW2, MIB_IPNET_TABLE2,
+    MIB_UNICASTIPADDRESS_ROW, MIB_UNICASTIPADDRESS_TABLE,
 };
 use windows::Win32::NetworkManagement::Ndis::{
     IfOperStatusDormant, IfOperStatusDown, IfOperStatusLowerLayerDown, IfOperStatusUp,
@@ -430,6 +434,63 @@ impl InterfaceProvider for WindowsBackend {
     }
 }
 
+/// Placeholder identity scheme, same rationale as `synthesize_route_id`: an
+/// interface address has no kernel-assigned numeric ID, so this hashes its
+/// interface and network together.
+fn synthesize_interface_address_id(interface_index: u32, network: &Network) -> InterfaceAddressId {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    interface_index.hash(&mut hasher);
+    network.hash(&mut hasher);
+    InterfaceAddressId::new(hasher.finish())
+}
+
+fn row_to_interface_address(row: &MIB_UNICASTIPADDRESS_ROW) -> Option<InterfaceAddress> {
+    let address_addr = unsafe { sockaddr_inet_to_ip(&row.Address) }?;
+    let prefix_len = row.OnLinkPrefixLength;
+
+    let network = match address_addr {
+        IpAddr::V4(addr) => {
+            let prefix = net_lattice_ip::Ipv4PrefixLength::new(prefix_len)?;
+            Network::from(net_lattice_ip::Ipv4Network::new(addr.into(), prefix))
+        }
+        IpAddr::V6(addr) => {
+            let prefix = net_lattice_ip::Ipv6PrefixLength::new(prefix_len)?;
+            Network::from(net_lattice_ip::Ipv6Network::new(addr.into(), prefix))
+        }
+    };
+
+    Some(InterfaceAddress::new(
+        synthesize_interface_address_id(row.InterfaceIndex, &network),
+        row.InterfaceIndex,
+        network,
+    ))
+}
+
+impl AddressProvider for WindowsBackend {
+    type InterfaceAddress = InterfaceAddress;
+
+    fn addresses(&self) -> Result<Vec<Self::InterfaceAddress>> {
+        self.runtime.block_on(async {
+            let mut table: *mut MIB_UNICASTIPADDRESS_TABLE = std::ptr::null_mut();
+            let status = unsafe { GetUnicastIpAddressTable(AF_UNSPEC, &mut table) };
+            if status.0 != 0 {
+                return Err(Error::Platform(PlatformErrorCode::Windows(status.0)));
+            }
+
+            let addresses = unsafe {
+                let rows = std::slice::from_raw_parts(
+                    (*table).Table.as_ptr(),
+                    (*table).NumEntries as usize,
+                );
+                rows.iter().filter_map(row_to_interface_address).collect()
+            };
+            unsafe { FreeMibTable(table.cast()) };
+            Ok(addresses)
+        })
+    }
+}
+
 /// Reads the address out of a raw `SOCKADDR`, dispatching on its
 /// `sa_family` — used for `GetAdaptersAddresses`'s DNS server entries,
 /// which point at a `sockaddr_in`/`sockaddr_in6`-sized buffer directly
@@ -636,6 +697,24 @@ mod tests {
         // running this test is arbitrary. Reaching here without an error is
         // the assertion.
         let _ = routes;
+    }
+
+    /// Exercises a real round trip through `GetUnicastIpAddressTable`, no
+    /// privilege required: every Windows system has a loopback address
+    /// assigned.
+    #[test]
+    fn addresses_includes_loopbacks_address() {
+        let backend = WindowsBackend::new().expect("failed to create Windows backend");
+        let addresses = backend
+            .addresses()
+            .expect("GetUnicastIpAddressTable dump should not require privilege");
+        assert!(
+            addresses.iter().any(|addr| matches!(
+                addr.address,
+                Network::V4(net) if net.address() == Ipv4Address::new(127, 0, 0, 1)
+            )),
+            "expected `127.0.0.1` among the assigned addresses, got: {addresses:?}"
+        );
     }
 
     /// Exercises a real round trip through `GetIpNetTable2`, no privilege
