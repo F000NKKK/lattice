@@ -16,6 +16,81 @@ pub enum ChangeKind {
     Changed,
 }
 
+/// A domain whose state must be re-read after an overflow notification.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum EventDomain {
+    Route,
+    Interface,
+    Neighbor,
+    Address,
+    All,
+}
+
+/// Selects which domains an event watcher delivers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct EventFilter {
+    routes: bool,
+    interfaces: bool,
+    neighbors: bool,
+    addresses: bool,
+}
+
+impl EventFilter {
+    pub const ALL: Self = Self {
+        routes: true,
+        interfaces: true,
+        neighbors: true,
+        addresses: true,
+    };
+    pub const fn none() -> Self {
+        Self {
+            routes: false,
+            interfaces: false,
+            neighbors: false,
+            addresses: false,
+        }
+    }
+    pub const fn routes(mut self) -> Self {
+        self.routes = true;
+        self
+    }
+    pub const fn interfaces(mut self) -> Self {
+        self.interfaces = true;
+        self
+    }
+    pub const fn neighbors(mut self) -> Self {
+        self.neighbors = true;
+        self
+    }
+    pub const fn addresses(mut self) -> Self {
+        self.addresses = true;
+        self
+    }
+    pub const fn matches(self, event: Event) -> bool {
+        match event {
+            Event::Route { .. } => self.routes,
+            Event::Interface { .. } => self.interfaces,
+            Event::Neighbor { .. } => self.neighbors,
+            Event::Address { .. } => self.addresses,
+            Event::ResyncRequired { domain } => match domain {
+                EventDomain::Route => self.routes,
+                EventDomain::Interface => self.interfaces,
+                EventDomain::Neighbor => self.neighbors,
+                EventDomain::Address => self.addresses,
+                EventDomain::All => {
+                    self.routes || self.interfaces || self.neighbors || self.addresses
+                }
+            },
+        }
+    }
+}
+impl Default for EventFilter {
+    fn default() -> Self {
+        Self::ALL
+    }
+}
+
 /// A signal that something changed in the system's networking state —
 /// carrying an ID and a [`ChangeKind`], not a clone of the full domain
 /// object.
@@ -57,6 +132,18 @@ pub enum Event {
         id: InterfaceAddressId,
         kind: ChangeKind,
     },
+    /// Notifications were dropped because the bounded queue filled; re-read
+    /// the indicated domain before relying on later signals.
+    ResyncRequired {
+        domain: EventDomain,
+    },
+}
+impl Event {
+    pub const fn resync_all() -> Self {
+        Self::ResyncRequired {
+            domain: EventDomain::All,
+        }
+    }
 }
 
 #[cfg(test)]

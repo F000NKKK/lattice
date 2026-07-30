@@ -15,7 +15,7 @@ pub mod route;
 
 pub use address::{IpAddress, Network};
 pub use dns::DnsConfig;
-pub use event::{ChangeKind, Event};
+pub use event::{ChangeKind, Event, EventDomain, EventFilter};
 pub use ifaddr::{InterfaceAddress, InterfaceAddressId, NewInterfaceAddress};
 pub use interface::{AdminState, Interface, InterfaceId, InterfaceKind, OperationalState};
 pub use mac::MacAddress;
