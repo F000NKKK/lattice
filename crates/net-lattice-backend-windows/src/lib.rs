@@ -16,25 +16,27 @@ use std::sync::mpsc;
 use net_lattice_core::{Error, Id, PlatformErrorCode, Result};
 use net_lattice_model::dns::DnsConfig;
 use net_lattice_model::event::{ChangeKind, Event};
-use net_lattice_model::ifaddr::{InterfaceAddress, InterfaceAddressId};
+use net_lattice_model::ifaddr::{InterfaceAddress, InterfaceAddressId, NewInterfaceAddress};
 use net_lattice_model::interface::{AdminState, Interface, InterfaceKind, OperationalState};
 use net_lattice_model::mac::MacAddress;
 use net_lattice_model::neighbor::{NeighborEntry, NeighborId, NeighborState};
 use net_lattice_model::route::{Route, RouteId};
 use net_lattice_model::{IpAddress, Network};
 use net_lattice_platform::{
-    AddressProvider, Capability, CapabilityProvider, DnsProvider, EventProvider, EventReceiver,
-    InterfaceProvider, NeighborProvider, RouteProvider,
+    AddressMutator, AddressProvider, Capability, CapabilityProvider, DnsProvider, EventProvider,
+    EventReceiver, InterfaceProvider, NeighborProvider, RouteProvider,
 };
 use windows::Win32::Foundation::HANDLE;
 use windows::Win32::NetworkManagement::IpHelper::{
-    CancelMibChangeNotify2, CreateIpForwardEntry2, DeleteIpForwardEntry2, FreeMibTable,
-    GAA_FLAG_SKIP_ANYCAST, GAA_FLAG_SKIP_FRIENDLY_NAME, GAA_FLAG_SKIP_MULTICAST,
-    GAA_FLAG_SKIP_UNICAST, GetAdaptersAddresses, GetIfTable2, GetIpForwardTable2, GetIpNetTable2,
-    GetUnicastIpAddressTable, IP_ADAPTER_ADDRESSES_LH, InitializeIpForwardEntry, MIB_IF_ROW2,
-    MIB_IF_TABLE2, MIB_IPFORWARD_ROW2, MIB_IPFORWARD_TABLE2, MIB_IPNET_ROW2, MIB_IPNET_TABLE2,
-    MIB_NOTIFICATION_TYPE, MIB_UNICASTIPADDRESS_ROW, MIB_UNICASTIPADDRESS_TABLE, MibAddInstance,
-    MibDeleteInstance, NotifyIpInterfaceChange, NotifyRouteChange2, NotifyUnicastIpAddressChange,
+    CancelMibChangeNotify2, CreateIpForwardEntry2, CreateUnicastIpAddressEntry,
+    DeleteIpForwardEntry2, DeleteUnicastIpAddressEntry, FreeMibTable, GAA_FLAG_SKIP_ANYCAST,
+    GAA_FLAG_SKIP_FRIENDLY_NAME, GAA_FLAG_SKIP_MULTICAST, GAA_FLAG_SKIP_UNICAST,
+    GetAdaptersAddresses, GetIfTable2, GetIpForwardTable2, GetIpNetTable2,
+    GetUnicastIpAddressTable, IP_ADAPTER_ADDRESSES_LH, InitializeIpForwardEntry,
+    InitializeUnicastIpAddressEntry, MIB_IF_ROW2, MIB_IF_TABLE2, MIB_IPFORWARD_ROW2,
+    MIB_IPFORWARD_TABLE2, MIB_IPNET_ROW2, MIB_IPNET_TABLE2, MIB_NOTIFICATION_TYPE,
+    MIB_UNICASTIPADDRESS_ROW, MIB_UNICASTIPADDRESS_TABLE, MibAddInstance, MibDeleteInstance,
+    NotifyIpInterfaceChange, NotifyRouteChange2, NotifyUnicastIpAddressChange,
 };
 use windows::Win32::NetworkManagement::Ndis::{
     IfOperStatusDormant, IfOperStatusDown, IfOperStatusLowerLayerDown, IfOperStatusUp,
@@ -494,6 +496,52 @@ impl AddressProvider for WindowsBackend {
             unsafe { FreeMibTable(table.cast()) };
             Ok(addresses)
         })
+    }
+}
+
+fn build_unicast_address_row(address: &NewInterfaceAddress) -> MIB_UNICASTIPADDRESS_ROW {
+    let (ip, prefix_len) = network_to_std(address.address);
+    let mut row = MIB_UNICASTIPADDRESS_ROW::default();
+    unsafe { InitializeUnicastIpAddressEntry(&mut row) };
+    row.InterfaceIndex = address.interface_id.value() as u32;
+    row.Address = ip_to_sockaddr_inet(ip);
+    row.OnLinkPrefixLength = prefix_len;
+    row
+}
+
+impl AddressMutator for WindowsBackend {
+    type NewInterfaceAddress = NewInterfaceAddress;
+    type InterfaceAddress = InterfaceAddress;
+
+    fn add_address(&self, address: Self::NewInterfaceAddress) -> Result<Self::InterfaceAddress> {
+        // IP Helper derives IPv4 broadcast from the prefix and cannot accept
+        // an override. Refuse one rather than silently discarding intent.
+        if address.broadcast.is_some() {
+            return Err(Error::Unsupported);
+        }
+        let row = build_unicast_address_row(&address);
+        let status = unsafe { CreateUnicastIpAddressEntry(&row) };
+        if status.0 != 0 {
+            return Err(Error::Platform(PlatformErrorCode::Windows(status.0)));
+        }
+        self.addresses()?
+            .into_iter()
+            .find(|observed| {
+                observed.interface_index == row.InterfaceIndex
+                    && observed.address == address.address
+            })
+            .ok_or(Error::InvalidState)
+    }
+
+    fn remove_address(&self, address: Self::InterfaceAddress) -> Result<()> {
+        let request =
+            NewInterfaceAddress::new(Id::new(address.interface_index as u64), address.address);
+        let row = build_unicast_address_row(&request);
+        let status = unsafe { DeleteUnicastIpAddressEntry(&row) };
+        if status.0 != 0 {
+            return Err(Error::Platform(PlatformErrorCode::Windows(status.0)));
+        }
+        Ok(())
     }
 }
 
