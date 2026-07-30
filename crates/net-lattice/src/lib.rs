@@ -21,7 +21,8 @@ pub use net_lattice_model::neighbor::{NeighborEntry, NeighborId, NeighborState};
 pub use net_lattice_model::route::{Route, RouteId};
 pub use net_lattice_model::{IpAddress, Network};
 pub use net_lattice_platform::{
-    AddressProvider, Capability, DnsProvider, InterfaceProvider, NeighborProvider, RouteProvider,
+    AddressProvider, Capability, CapabilityProvider, DnsProvider, InterfaceProvider,
+    NeighborProvider, RouteProvider,
 };
 
 /// Bound satisfied by any backend usable with [`Lattice`].
@@ -33,13 +34,16 @@ pub use net_lattice_platform::{
 /// `net_lattice_model`'s corresponding type fails to satisfy this trait and
 /// cannot be used with [`Lattice`] — a compile error at the point the
 /// backend is wired in, not a runtime surprise. See ARCHITECTURE.md's
-/// `net-lattice` section.
+/// `net-lattice` section. `CapabilityProvider` has no associated type to
+/// converge — it reports plain runtime facts about the connected system,
+/// not domain objects — so it's required as-is.
 pub trait LatticeBackend:
     RouteProvider<Route = Route>
     + InterfaceProvider<Interface = Interface>
     + DnsProvider<DnsConfig = DnsConfig>
     + NeighborProvider<NeighborEntry = NeighborEntry>
     + AddressProvider<InterfaceAddress = InterfaceAddress>
+    + CapabilityProvider
 {
 }
 
@@ -49,6 +53,7 @@ impl<B> LatticeBackend for B where
         + DnsProvider<DnsConfig = DnsConfig>
         + NeighborProvider<NeighborEntry = NeighborEntry>
         + AddressProvider<InterfaceAddress = InterfaceAddress>
+        + CapabilityProvider
 {
 }
 
@@ -84,6 +89,18 @@ impl<B: LatticeBackend> Lattice<B> {
 
     pub fn addresses(&self) -> Result<Vec<InterfaceAddress>> {
         self.backend.addresses()
+    }
+
+    /// The full set of runtime-dependent [`Capability`] flags the connected
+    /// backend currently has available.
+    pub fn capabilities(&self) -> Capability {
+        self.backend.capabilities()
+    }
+
+    /// Whether the connected backend currently has `capability` available.
+    /// Shorthand for `self.capabilities().contains(capability)`.
+    pub fn supports(&self, capability: Capability) -> bool {
+        self.backend.capabilities().contains(capability)
     }
 }
 
