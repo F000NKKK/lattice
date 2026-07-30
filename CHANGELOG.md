@@ -122,7 +122,21 @@ BSD/macOS.
   route is actually created. `push_link_gateway` now looks up the
   interface's name via `if_indextoname` and includes it (`sdl_nlen`/
   `sdl_data`), matching what a real, working `sockaddr_dl` for that
-  interface looks like.
+  interface looks like. Still didn't fix the round trip — see the next
+  entry, which turned out to be the actual root cause of every `add_route`
+  failure so far in this stage.
+- `net-lattice-backend-darwin`: `build_add_message`/`build_delete_message`
+  wrote the destination's sockaddrs to the message body in `DST, NETMASK,
+  GATEWAY` order. BSD routing-socket messages require sockaddrs in
+  ascending `RTAX_*` index order (`DST`=0, `GATEWAY`=1, `NETMASK`=2, ...) —
+  confirmed against `golang.org/x/net/route`'s `marshalAddrs`, which
+  iterates addresses strictly by that index when building the wire
+  format. Every previous fix in this stage (netmask parsing, the link
+  gateway's shape, its `sdl_len`, its name) was individually correct but
+  moot: with gateway and netmask swapped, the kernel was reading the
+  netmask sockaddr as the gateway and the gateway/link-layer sockaddr as
+  the netmask, on every `RTM_ADD`/`RTM_DELETE` this backend ever sent.
+  Reordered to `DST, GATEWAY, NETMASK` in both functions.
 
 ## [0.3.0] - TBD
 

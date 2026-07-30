@@ -351,14 +351,14 @@ fn build_add_message(route: &Route) -> Result<Vec<u8>> {
     hdr.rtm_addrs = RTA_DST;
     let mut offset = mem::size_of::<libc::rt_msghdr>();
 
+    // Sockaddrs must appear in the message body in ascending `RTAX_*`
+    // index order (DST=0, GATEWAY=1, NETMASK=2, ...) — this isn't just a
+    // convention, the kernel's parser walks the buffer expecting exactly
+    // that order for whichever bits are set in `rtm_addrs`. Gateway must
+    // therefore be written (if present) *before* netmask, even though the
+    // netmask's presence is decided by the same prefix-length check that
+    // comes right after computing the destination.
     offset += push_sockaddr(&mut buf, offset, destination);
-
-    if prefix_len == 32 || prefix_len == 128 {
-        hdr.rtm_flags |= RTF_HOST;
-    } else {
-        hdr.rtm_addrs |= RTA_NETMASK;
-        offset += push_netmask(&mut buf, offset, destination, prefix_len);
-    }
 
     match (route.gateway.map(ip_address_to_std), route.interface_index) {
         (Some(gateway), _) => {
@@ -396,6 +396,13 @@ fn build_add_message(route: &Route) -> Result<Vec<u8>> {
         (None, None) => return Err(Error::InvalidState),
     }
 
+    if prefix_len == 32 || prefix_len == 128 {
+        hdr.rtm_flags |= RTF_HOST;
+    } else {
+        hdr.rtm_addrs |= RTA_NETMASK;
+        offset += push_netmask(&mut buf, offset, destination, prefix_len);
+    }
+
     if let Some(interface_index) = route.interface_index {
         hdr.rtm_index = interface_index as u16;
     }
@@ -417,19 +424,21 @@ fn build_delete_message(route: &Route) -> Result<Vec<u8>> {
     hdr.rtm_addrs = RTA_DST;
     let mut offset = mem::size_of::<libc::rt_msghdr>();
 
+    // Same `RTAX_*` ascending-order requirement as `build_add_message`:
+    // gateway (if present) must be written before netmask.
     offset += push_sockaddr(&mut buf, offset, destination);
+
+    if let Some(gateway) = route.gateway.map(ip_address_to_std) {
+        hdr.rtm_flags |= RTF_GATEWAY;
+        hdr.rtm_addrs |= RTA_GATEWAY;
+        offset += push_sockaddr(&mut buf, offset, gateway);
+    }
 
     if prefix_len == 32 || prefix_len == 128 {
         hdr.rtm_flags |= RTF_HOST;
     } else {
         hdr.rtm_addrs |= RTA_NETMASK;
         offset += push_netmask(&mut buf, offset, destination, prefix_len);
-    }
-
-    if let Some(gateway) = route.gateway.map(ip_address_to_std) {
-        hdr.rtm_flags |= RTF_GATEWAY;
-        hdr.rtm_addrs |= RTA_GATEWAY;
-        offset += push_sockaddr(&mut buf, offset, gateway);
     }
 
     if let Some(interface_index) = route.interface_index {
