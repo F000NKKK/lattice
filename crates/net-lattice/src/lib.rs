@@ -12,6 +12,7 @@ pub use net_lattice_ip::{
     Ipv4Address, Ipv4Network, Ipv4PrefixLength, Ipv6Address, Ipv6Network, Ipv6PrefixLength,
 };
 pub use net_lattice_model::dns::DnsConfig;
+pub use net_lattice_model::event::{ChangeKind, Event};
 pub use net_lattice_model::ifaddr::{InterfaceAddress, InterfaceAddressId};
 pub use net_lattice_model::interface::{
     AdminState, Interface, InterfaceId, InterfaceKind, OperationalState,
@@ -21,8 +22,8 @@ pub use net_lattice_model::neighbor::{NeighborEntry, NeighborId, NeighborState};
 pub use net_lattice_model::route::{Route, RouteId};
 pub use net_lattice_model::{IpAddress, Network};
 pub use net_lattice_platform::{
-    AddressProvider, Capability, CapabilityProvider, DnsProvider, InterfaceProvider,
-    NeighborProvider, RouteProvider,
+    AddressProvider, Capability, CapabilityProvider, DnsProvider, EventProvider, EventReceiver,
+    InterfaceProvider, NeighborProvider, RouteProvider,
 };
 
 /// Bound satisfied by any backend usable with [`Lattice`].
@@ -30,10 +31,10 @@ pub use net_lattice_platform::{
 /// This is where model convergence is enforced: a backend whose
 /// `RouteProvider::Route` (or `InterfaceProvider::Interface`,
 /// `DnsProvider::DnsConfig`, `NeighborProvider::NeighborEntry`,
-/// `AddressProvider::InterfaceAddress`) is not literally
-/// `net_lattice_model`'s corresponding type fails to satisfy this trait and
-/// cannot be used with [`Lattice`] — a compile error at the point the
-/// backend is wired in, not a runtime surprise. See ARCHITECTURE.md's
+/// `AddressProvider::InterfaceAddress`, `EventProvider::Event`) is not
+/// literally `net_lattice_model`'s corresponding type fails to satisfy this
+/// trait and cannot be used with [`Lattice`] — a compile error at the point
+/// the backend is wired in, not a runtime surprise. See ARCHITECTURE.md's
 /// `net-lattice` section. `CapabilityProvider` has no associated type to
 /// converge — it reports plain runtime facts about the connected system,
 /// not domain objects — so it's required as-is.
@@ -43,6 +44,7 @@ pub trait LatticeBackend:
     + DnsProvider<DnsConfig = DnsConfig>
     + NeighborProvider<NeighborEntry = NeighborEntry>
     + AddressProvider<InterfaceAddress = InterfaceAddress>
+    + EventProvider<Event = Event>
     + CapabilityProvider
 {
 }
@@ -53,6 +55,7 @@ impl<B> LatticeBackend for B where
         + DnsProvider<DnsConfig = DnsConfig>
         + NeighborProvider<NeighborEntry = NeighborEntry>
         + AddressProvider<InterfaceAddress = InterfaceAddress>
+        + EventProvider<Event = Event>
         + CapabilityProvider
 {
 }
@@ -101,6 +104,13 @@ impl<B: LatticeBackend> Lattice<B> {
     /// Shorthand for `self.capabilities().contains(capability)`.
     pub fn supports(&self, capability: Capability) -> bool {
         self.backend.capabilities().contains(capability)
+    }
+
+    /// Subscribes to change notifications. See [`EventReceiver`] for how to
+    /// consume the returned events (`recv`/`try_recv`/`recv_timeout`, or
+    /// `Iterator`).
+    pub fn watch(&self) -> Result<EventReceiver<Event>> {
+        self.backend.watch()
     }
 }
 
