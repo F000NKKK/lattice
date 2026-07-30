@@ -10,6 +10,7 @@
 //! Stage 0.6 added `NeighborProvider`; Stage 0.7 added `AddressProvider`;
 //! Stage 0.8 adds `EventProvider`.
 
+mod address_mutator;
 mod address_provider;
 mod capability;
 mod dns_provider;
@@ -18,6 +19,7 @@ mod interface_provider;
 mod neighbor_provider;
 mod route_provider;
 
+pub use address_mutator::AddressMutator;
 pub use address_provider::AddressProvider;
 pub use capability::{Capability, CapabilityProvider};
 pub use dns_provider::DnsProvider;
