@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-07-31
+
+### Fixed
+
+- `net-lattice-backend-darwin`: write IPv4 octets to `sockaddr_in` in the
+  correct network byte order for native address ioctls. The previous encoding
+  could make a successful `SIOCAIFADDR` assignment unreadable through the
+  requested `InterfaceAddress`, causing `add_address()` to return
+  `Error::InvalidState` on macOS. A regression test now verifies the exact
+  `sockaddr_in` round trip.
+
 ## [0.9.0] - 2026-07-31
 
 ### Added
