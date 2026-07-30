@@ -17,7 +17,7 @@
 
 **Net Lattice** — это современная кроссплатформенная библиотека для Rust, предназначенная для настройки и анализа сетевой конфигурации операционной системы через единый строго типизированный API.
 
-> **Статус:** В репозитории реализованы этапы плана архитектуры вплоть до 0.8 включительно. Есть реальные реализации для просмотра, добавления и удаления маршрутов IPv4/IPv6; просмотра сетевых интерфейсов; чтения конфигурации DNS-резолвера, таблиц соседей (ARP/NDP) и IP-адресов, назначенных интерфейсам; а также мониторинга сетевых изменений в Linux. Модель чтения реализована в Linux, Windows и BSD/macOS; мониторинг пока использует Netlink multicast в Linux и на остальных backend'ах ограничен capability. Это минимальный законченный вертикальный срез, а не полноценная библиотека — см. раздел «Текущий статус» ниже.
+> **Статус:** В репозитории реализованы этапы плана архитектуры вплоть до 0.8 включительно. Есть реальные реализации для просмотра, добавления и удаления маршрутов IPv4/IPv6; просмотра сетевых интерфейсов; чтения конфигурации DNS-резолвера, таблиц соседей (ARP/NDP) и IP-адресов, назначенных интерфейсам; а также мониторинга сетевых изменений в Linux, Windows и BSD/macOS. Это минимальный законченный вертикальный срез, а не полноценная библиотека — см. раздел «Текущий статус» ниже.
 
 ## Обзор
 
@@ -73,11 +73,11 @@ Net Lattice призвана закрыть этот пробел, предос�
 - модули `route`, `mac`, `interface`, `dns`, `neighbor`, `ifaddr` и `event` в `net-lattice-model`
 - `RouteProvider`, `InterfaceProvider`, `DnsProvider`, `NeighborProvider`, `AddressProvider`, `CapabilityProvider` и синхронные `EventProvider`/`EventReceiver` в `net-lattice-platform`
 - `net-lattice-backend-linux` (маршруты, интерфейсы, соседи, адреса и мониторинг через Netlink; DNS через `/etc/resolv.conf`)
-- `net-lattice-backend-windows` (маршруты и интерфейсы через Windows IP Helper API, DNS через `GetAdaptersAddresses`, соседи через `GetIpNetTable2`, адреса через `GetUnicastIpAddressTable`; мониторинг возвращает `Unsupported`)
-- `net-lattice-backend-darwin` (маршруты, соседи и адреса через BSD/macOS route sockets/`getifaddrs`, интерфейсы через `getifaddrs`, DNS через `/etc/resolv.conf`; мониторинг возвращает `Unsupported`)
+- `net-lattice-backend-windows` (маршруты и интерфейсы через Windows IP Helper API, DNS через `GetAdaptersAddresses`, соседи через `GetIpNetTable2`, адреса через `GetUnicastIpAddressTable`, мониторинг через уведомления IP Helper)
+- `net-lattice-backend-darwin` (маршруты, соседи, адреса и мониторинг через BSD/macOS route sockets/`getifaddrs`, интерфейсы через `getifaddrs`, DNS через `/etc/resolv.conf`)
 - фасад `net-lattice`, включая `Lattice::capabilities()`, `Lattice::supports()` и `Lattice::watch()`
 
-Это даёт реальное управление маршрутами, просмотр интерфейсов, чтение DNS-конфигурации резолвера, чтение таблиц соседей (ARP/NDP) и чтение IP-адресов интерфейсов на Linux, Windows и BSD/macOS, а также мониторинг сетевых изменений в Linux. В переносимом коде перед `Lattice::watch()` проверяйте `Lattice::supports(Capability::MONITORING)`. Это всё ещё не полноценная библиотека: все остальные пункты из долгосрочных целей выше ещё впереди; см. [ARCHITECTURE.ru.md](ARCHITECTURE.ru.md) для поэтапной дорожной карты и [CHANGELOG.md](CHANGELOG.md) для того, что реально вышло.
+Это даёт реальное управление маршрутами, просмотр интерфейсов, чтение DNS-конфигурации резолвера, чтение таблиц соседей (ARP/NDP), чтение IP-адресов интерфейсов и мониторинг сетевых изменений на Linux, Windows и BSD/macOS. В переносимом коде перед `Lattice::watch()` проверяйте `Lattice::supports(Capability::MONITORING)`. Это всё ещё не полноценная библиотека: все остальные пункты из долгосрочных целей выше ещё впереди; см. [ARCHITECTURE.ru.md](ARCHITECTURE.ru.md) для поэтапной дорожной карты и [CHANGELOG.md](CHANGELOG.md) для того, что реально вышло.
 
 ## Дорожная карта
 

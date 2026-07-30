@@ -29,15 +29,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The receiver provides `recv`, `try_recv`, `recv_timeout`, and `Iterator`,
   without adding an async-runtime dependency to the core API.
 - `net-lattice-backend-linux`: monitoring through an independent Netlink
-  multicast socket for link, route, neighbor, and address notifications;
-  advertises `Capability::MONITORING`.
+  multicast socket for link, route, neighbor, and address notifications.
+- `net-lattice-backend-windows`: monitoring through IP Helper route,
+  interface, and unicast-address change registrations.
+- `net-lattice-backend-darwin`: monitoring through an independent PF_ROUTE
+  socket for route, interface, address, and neighbor notifications.
+- All backends advertise `Capability::MONITORING` and retain native watcher
+  cancellation state in the returned `EventReceiver`.
 - `net-lattice` facade: `Lattice::watch()` plus event-related re-exports.
 
 ### Changed
 
-- `net-lattice-backend-windows` and `-darwin` implement the new provider
-  trait but return `Error::Unsupported` from `watch()` and do not advertise
-  `Capability::MONITORING` until their native watcher lifecycles are ready.
 - `net-lattice-core`: `Error::Disconnected` distinguishes a stopped watcher
   from an empty event queue or a timeout.
 

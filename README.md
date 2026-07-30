@@ -17,7 +17,7 @@
 
 **Net Lattice** is a modern, cross-platform Rust library for configuring and inspecting operating system networking through a single, strongly typed API.
 
-> **Status:** Net Lattice has shipped through Stage 0.8 of its architecture plan. The repository contains real implementations for listing, adding, and removing IPv4/IPv6 routes; listing network interfaces; reading DNS resolver configuration, neighbor (ARP/NDP) tables, and IP addresses assigned to interfaces; and monitoring network changes on Linux. The read-side model is implemented on Linux, Windows, and BSD/macOS; monitoring currently uses Linux Netlink multicast and is capability-gated on the other backends. This is still a minimal vertical slice, not a complete library — see Current Status below.
+> **Status:** Net Lattice has shipped through Stage 0.8 of its architecture plan. The repository contains real implementations for listing, adding, and removing IPv4/IPv6 routes; listing network interfaces; reading DNS resolver configuration, neighbor (ARP/NDP) tables, and IP addresses assigned to interfaces; and monitoring network changes on Linux, Windows, and BSD/macOS. This is still a minimal vertical slice, not a complete library — see Current Status below.
 
 ## Overview
 
@@ -73,11 +73,11 @@ Stage 0.8 of the [architecture](ARCHITECTURE.md)'s Incremental Delivery Plan has
 - `net-lattice-model`'s `route`, `mac`, `interface`, `dns`, `neighbor`, `ifaddr`, and `event` modules
 - `net-lattice-platform`'s `RouteProvider`, `InterfaceProvider`, `DnsProvider`, `NeighborProvider`, `AddressProvider`, `CapabilityProvider`, and synchronous `EventProvider`/`EventReceiver`
 - `net-lattice-backend-linux` (routes, interfaces, neighbors, addresses, and monitoring via Netlink; DNS via `/etc/resolv.conf`)
-- `net-lattice-backend-windows` (routes and interfaces via the Windows IP Helper API, DNS via `GetAdaptersAddresses`, neighbors via `GetIpNetTable2`, addresses via `GetUnicastIpAddressTable`; monitoring returns `Unsupported`)
-- `net-lattice-backend-darwin` (routes, neighbors, and addresses via BSD/macOS route sockets/`getifaddrs`, interfaces via `getifaddrs`, DNS via `/etc/resolv.conf`; monitoring returns `Unsupported`)
+- `net-lattice-backend-windows` (routes and interfaces via the Windows IP Helper API, DNS via `GetAdaptersAddresses`, neighbors via `GetIpNetTable2`, addresses via `GetUnicastIpAddressTable`, monitoring via IP Helper notifications)
+- `net-lattice-backend-darwin` (routes, neighbors, addresses, and monitoring via BSD/macOS route sockets/`getifaddrs`, interfaces via `getifaddrs`, DNS via `/etc/resolv.conf`)
 - the `net-lattice` facade, including `Lattice::capabilities()`, `Lattice::supports()`, and `Lattice::watch()`
 
-This gives real route management, interface listing, DNS resolver reads, neighbor (ARP/NDP) table reads, and interface address reads on Linux, Windows, and BSD/macOS, plus Linux network-change monitoring. Query `Lattice::supports(Capability::MONITORING)` before calling `Lattice::watch()` in portable code. This is still not a complete library: every other item in the Long-Term Goals above is still ahead; see [ARCHITECTURE.md](ARCHITECTURE.md)'s Incremental Delivery Plan for the staged roadmap and [CHANGELOG.md](CHANGELOG.md) for what has actually shipped.
+This gives real route management, interface listing, DNS resolver reads, neighbor (ARP/NDP) table reads, interface address reads, and network-change monitoring on Linux, Windows, and BSD/macOS. Query `Lattice::supports(Capability::MONITORING)` before calling `Lattice::watch()` in portable code. This is still not a complete library: every other item in the Long-Term Goals above is still ahead; see [ARCHITECTURE.md](ARCHITECTURE.md)'s Incremental Delivery Plan for the staged roadmap and [CHANGELOG.md](CHANGELOG.md) for what has actually shipped.
 
 ## Roadmap
 
