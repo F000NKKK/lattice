@@ -7,11 +7,12 @@
 This document describes the planned workspace structure for Net Lattice and the
 design principles behind it. It reflects intended direction, not current
 state: see [CHANGELOG.md](CHANGELOG.md) and [README.md](README.md) for what
-actually exists in the repository today. As of this writing, Stage 0.5 of
+actually exists in the repository today. As of this writing, Stage 0.6 of
 the Incremental Delivery Plan below has landed: `net-lattice-core`,
-`net-lattice-ip`, `net-lattice-model`'s `route`, `interface`, and `dns`
-modules, `net-lattice-platform`'s `RouteProvider`, `InterfaceProvider`, and
-`DnsProvider`, route/interface/DNS support in `net-lattice-backend-linux`,
+`net-lattice-ip`, `net-lattice-model`'s `route`, `interface`, `dns`, and
+`neighbor` modules, `net-lattice-platform`'s `RouteProvider`,
+`InterfaceProvider`, `DnsProvider`, and `NeighborProvider`,
+route/interface/DNS/neighbor support in `net-lattice-backend-linux`,
 `net-lattice-backend-windows`, and `net-lattice-backend-darwin`, and the
 `net-lattice` facade — everything past that stage is still a target, not
 current state.
@@ -588,7 +589,7 @@ are introduced only when there is real implementation work for them:
 | 0.3 ✅ | `net-lattice-backend-darwin` (`RouteProvider`) |
 | 0.4 ✅ | `interface` module + `InterfaceProvider` across all backends |
 | 0.5 ✅ | `dns` module + `DnsProvider` across all backends |
-| 0.6 | `neighbor` module + `NeighborProvider` (ARP/NDP) |
+| 0.6 ✅ | `neighbor` module + `NeighborProvider` (ARP/NDP) across all backends |
 | 0.7+ | Capability-gated domains: VLAN, VRF, firewall integration, tunnels; `event` module + `EventProvider`; `CurrentState`/`DesiredState`/`Diff`/`ApplyPlan` declarative configuration |
 
 Each stage is expected to validate the architecture before the next is

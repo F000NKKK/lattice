@@ -8,10 +8,10 @@
 дизайна, лежащие в её основе. Он отражает предполагаемое направление, а не
 текущее состояние: см. [CHANGELOG.md](CHANGELOG.md) и [README.md](README.md)
 для того, что реально существует в репозитории на данный момент. На момент
-написания реализован этап 0.5 плана поэтапной поставки ниже: `net-lattice-core`,
-`net-lattice-ip`, модули `route`, `interface` и `dns` в `net-lattice-model`,
-`RouteProvider`, `InterfaceProvider` и `DnsProvider` в `net-lattice-platform`,
-поддержка маршрутов, интерфейсов и DNS в `net-lattice-backend-linux`,
+написания реализован этап 0.6 плана поэтапной поставки ниже: `net-lattice-core`,
+`net-lattice-ip`, модули `route`, `interface`, `dns` и `neighbor` в `net-lattice-model`,
+`RouteProvider`, `InterfaceProvider`, `DnsProvider` и `NeighborProvider` в `net-lattice-platform`,
+поддержка маршрутов, интерфейсов, DNS и соседей (ARP/NDP) в `net-lattice-backend-linux`,
 `net-lattice-backend-windows` и `net-lattice-backend-darwin`, а также фасад
 `net-lattice` — всё, что описано дальше этого этапа, по-прежнему только цель,
 а не текущее состояние.
@@ -600,7 +600,7 @@ provider-traits, а не другой контракт backend'а. Дорабо�
 | 0.3 ✅ | `net-lattice-backend-darwin` (`RouteProvider`) |
 | 0.4 ✅ | модуль `interface` + `InterfaceProvider` на всех backend'ах |
 | 0.5 ✅ | модуль `dns` + `DnsProvider` на всех backend'ах |
-| 0.6 | модуль `neighbor` + `NeighborProvider` (ARP/NDP) |
+| 0.6 ✅ | модуль `neighbor` + `NeighborProvider` (ARP/NDP) на всех backend'ах |
 | 0.7+ | Домены под Capability: VLAN, VRF, интеграция firewall, туннели; модуль `event` + `EventProvider`; декларативная конфигурация `CurrentState`/`DesiredState`/`Diff`/`ApplyPlan` |
 
 Ожидается, что каждый этап проверяет архитектуру перед началом следующего;
