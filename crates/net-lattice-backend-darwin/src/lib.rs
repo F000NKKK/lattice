@@ -1359,24 +1359,93 @@ unsafe fn route_socket_message_to_event(message: *const u8, len: usize) -> Optio
 impl CapabilityProvider for DarwinBackend {
     /// `IPV6` unconditionally, same rationale as the Linux backend: every
     /// provider this backend implements already handles both address
-    /// families. `VRF`/`NAMESPACES`/`MONITORING` are left unset — none of
-    /// them are implemented yet, and BSD/macOS has no VRF/namespace
+    /// families. `MONITORING` is available through a dedicated PF_ROUTE
+    /// reader. `VRF`/`NAMESPACES` are left unset: BSD/macOS has no direct
+    /// equivalent and Net Lattice does not implement either domain.
     /// equivalent to begin with.
     fn capabilities(&self) -> Capability {
-        Capability::IPV6
+        Capability::IPV6 | Capability::MONITORING
     }
 }
 
 impl EventProvider for DarwinBackend {
     type Event = Event;
 
-    /// A PF_ROUTE socket can deliver change messages, but Stage 0.8 only
-    /// enables the production watcher on Linux.  The Darwin parser must first
-    /// distinguish notifications from this backend's request/reply traffic
-    /// and cover the platform's several route-message header layouts.  Do not
-    /// claim `Capability::MONITORING` until that is complete.
     fn watch(&self) -> Result<EventReceiver<Self::Event>> {
-        Err(Error::Unsupported)
+        // Never read from `self.fd`: it carries replies to this backend's
+        // route mutations as well as system broadcasts. A dedicated socket
+        // makes this subscription independent and avoids stealing replies
+        // from route operations.
+        let fd = unsafe { libc::socket(libc::PF_ROUTE, libc::SOCK_RAW, libc::AF_UNSPEC) };
+        if fd < 0 {
+            return Err(Error::Platform(io_error_code(&io::Error::last_os_error())));
+        }
+
+        let (sender, receiver) = mpsc::channel();
+        let stop = Arc::new(AtomicBool::new(false));
+        let thread_stop = Arc::clone(&stop);
+        let thread = thread::spawn(move || {
+            // `c_long` gives this receive buffer at least the alignment of all
+            // PF_ROUTE headers. The native parsers below can then safely view
+            // each 4-byte-aligned message as its concrete header type.
+            let words = RTM_MAXSIZE.div_ceil(mem::size_of::<libc::c_long>());
+            let mut buffer = vec![0 as libc::c_long; words];
+            while !thread_stop.load(Ordering::Acquire) {
+                let mut poll_fd = libc::pollfd {
+                    fd,
+                    events: libc::POLLIN,
+                    revents: 0,
+                };
+                let ready = unsafe { libc::poll(&mut poll_fd, 1, 200) };
+                if ready == 0 || (ready < 0 && io::Error::last_os_error().kind() == io::ErrorKind::Interrupted) {
+                    continue;
+                }
+                if ready < 0 {
+                    break;
+                }
+                let received = unsafe {
+                    libc::recv(
+                        fd,
+                        buffer.as_mut_ptr().cast(),
+                        RTM_MAXSIZE,
+                        0,
+                    )
+                };
+                if received <= 0 {
+                    if received < 0 && io::Error::last_os_error().kind() == io::ErrorKind::Interrupted {
+                        continue;
+                    }
+                    break;
+                }
+                let mut offset = 0usize;
+                let received = received as usize;
+                while offset + mem::size_of::<RouteMessageHeader>() <= received {
+                    let message = unsafe { buffer.as_ptr().cast::<u8>().add(offset) };
+                    let common = unsafe { std::ptr::read_unaligned(message.cast::<RouteMessageHeader>()) };
+                    let len = common.msg_len as usize;
+                    if len < mem::size_of::<RouteMessageHeader>() || offset + len > received {
+                        break;
+                    }
+                    if common.version == RTM_VERSION
+                        && let Some(event) = unsafe { route_socket_message_to_event(message, len) }
+                        && sender.send(event).is_err()
+                    {
+                        unsafe { libc::close(fd) };
+                        return;
+                    }
+                    offset += (len + 3) & !3;
+                }
+            }
+            unsafe { libc::close(fd) };
+        });
+
+        Ok(EventReceiver::with_subscription(
+            receiver,
+            DarwinWatch {
+                stop,
+                thread: Some(thread),
+            },
+        ))
     }
 }
 
