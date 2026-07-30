@@ -15,3 +15,16 @@ bitflags::bitflags! {
         const MONITORING = 1 << 3;
     }
 }
+
+/// Reports which runtime-dependent [`Capability`] flags the connected
+/// backend currently has available.
+///
+/// Every backend implements this (it costs nothing when there's nothing to
+/// report — an empty flag set is a valid answer), which is why `capabilities`
+/// returns a bare `Capability` rather than `Result<Capability>`: unlike the
+/// other provider traits, there is no OS call here that can fail in a way
+/// worth surfacing to the caller. `addresses`-style methods that really do
+/// call into the OS keep returning `Result`.
+pub trait CapabilityProvider {
+    fn capabilities(&self) -> Capability;
+}

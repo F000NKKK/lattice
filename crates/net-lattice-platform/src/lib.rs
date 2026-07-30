@@ -19,7 +19,7 @@ mod neighbor_provider;
 mod route_provider;
 
 pub use address_provider::AddressProvider;
-pub use capability::Capability;
+pub use capability::{Capability, CapabilityProvider};
 pub use dns_provider::DnsProvider;
 pub use interface_provider::InterfaceProvider;
 pub use neighbor_provider::NeighborProvider;
