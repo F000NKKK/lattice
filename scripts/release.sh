@@ -226,17 +226,6 @@ update_ref() {
     sed -i -E "s|(${dep}[[:space:]]*=[[:space:]]*\{[^}]*version[[:space:]]*=[[:space:]]*\")[^\"]*|\1${new}|g" "$file"
 }
 
-# ── Круглая ли версия относительно запрошенного бампа? ────────────────────────
-is_round_for_bump() {
-    local bump="$1" min="$2" pat="$3"
-    case "$bump" in
-        --patch) return 1 ;;
-        --minor) [[ "$pat" == "0" ]] ;;
-        --major) [[ "$min" == "0" && "$pat" == "0" ]] ;;
-        *)       return 1 ;;
-    esac
-}
-
 # ── Решение по одному крейту: новая версия + публиковать или пропустить ───────
 resolve_crate_action() {
     local crate="$1" bump="$2"
@@ -263,8 +252,17 @@ resolve_crate_action() {
     local maj min pat
     IFS='.' read -r maj min pat <<< "$current"
 
-    if ! $NO_CHECK_VER && is_round_for_bump "$bump" "$min" "$pat"; then
-        info "Проверяю crates.io: $crate v$current ($bump — круглая версия) ..." >&2
+    # Проверяем публикацию текущей версии перед ЛЮБЫМ minor/major-бампом, не
+    # только перед «круглым»: is_round_for_bump раньше пропускала проверку
+    # для непатчевых-круглых версий (например 0.2.11 перед --minor),
+    # предполагая, что раз версия не круглая — она точно уже опубликована.
+    # Это предположение ложно, если предыдущий бамп был закоммичен, но не
+    # опубликован (--no-publish/сбой публикации) — тогда --minor тихо
+    # перепрыгивал бы неопубликованную версию, как это случилось с
+    # net-lattice-backend-darwin. --patch по-прежнему не проверяется:
+    # patch-бамп ничего не пропускает, т.к. каждая patch-версия совместима.
+    if ! $NO_CHECK_VER && [[ "$bump" == "--minor" || "$bump" == "--major" ]]; then
+        info "Проверяю crates.io: $crate v$current перед $bump ..." >&2
         if crate_is_published "$crate" "$current"; then
             ok "  $crate v$current опубликован — бампаю" >&2
         else
