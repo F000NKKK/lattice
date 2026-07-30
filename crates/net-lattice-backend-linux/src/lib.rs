@@ -41,6 +41,18 @@ pub struct LinuxBackend {
     handle: Handle,
 }
 
+struct LinuxWatch {
+    connection: tokio::task::JoinHandle<()>,
+    events: tokio::task::JoinHandle<()>,
+}
+
+impl Drop for LinuxWatch {
+    fn drop(&mut self) {
+        self.events.abort();
+        self.connection.abort();
+    }
+}
+
 impl LinuxBackend {
     pub fn new() -> Result<Self> {
         let runtime =
@@ -674,10 +686,10 @@ impl EventProvider for LinuxBackend {
         let _guard = self.runtime.enter();
         let (connection, _handle, mut messages) = rtnetlink::new_multicast_connection(&groups)
             .map_err(|err| Error::Platform(io_error_code(&err)))?;
-        self.runtime.spawn(connection);
+        let connection = self.runtime.spawn(connection);
 
         let (sender, receiver) = std::sync::mpsc::channel();
-        self.runtime.spawn(async move {
+        let events = self.runtime.spawn(async move {
             while let Some((message, _addr)) = messages.next().await {
                 let (_header, payload) = message.into_parts();
                 let rtnetlink::packet_core::NetlinkPayload::InnerMessage(inner) = payload else {
@@ -686,17 +698,15 @@ impl EventProvider for LinuxBackend {
                 if let Some(event) = route_netlink_message_to_event(inner)
                     && sender.send(event).is_err()
                 {
-                    // The `EventReceiver` was dropped — nothing left to
-                    // forward to. `messages` itself is left undrained here
-                    // (see the doc comment above); the connection task
-                    // keeps running harmlessly until `self.runtime` is
-                    // dropped.
                     break;
                 }
             }
         });
 
-        Ok(EventReceiver::new(receiver))
+        Ok(EventReceiver::with_subscription(
+            receiver,
+            LinuxWatch { connection, events },
+        ))
     }
 }
 
