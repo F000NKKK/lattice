@@ -1032,7 +1032,19 @@ mod tests {
         backend
             .add_route(route.clone())
             .expect("failed to add monitoring test route");
-        let watched_id = synthesize_route_id(&destination, &None, Some(interface_index));
+        // The kernel may canonicalize an on-link next hop differently from
+        // the `AF_UNSPEC` value used to create it. Read the canonical row so
+        // the asserted ID is exactly the one the notification callback maps.
+        let watched_id = backend
+            .routes()
+            .expect("failed to read routes after adding test route")
+            .into_iter()
+            .find(|candidate| {
+                candidate.destination == destination
+                    && candidate.interface_index == Some(interface_index)
+            })
+            .expect("test route was not present after it was added")
+            .id;
 
         let observed = (0..12).any(|_| {
             matches!(
