@@ -67,25 +67,25 @@ Net Lattice призвана закрыть этот пробел, предос�
 
 ## Текущий статус
 
-Реализован этап 0.4 плана поэтапной поставки из [архитектуры](ARCHITECTURE.ru.md):
+Реализован этап 0.5 плана поэтапной поставки из [архитектуры](ARCHITECTURE.ru.md):
 
 - `net-lattice-core`, `net-lattice-ip`
-- модули `route`, `mac` и `interface` в `net-lattice-model`
-- `RouteProvider` и `InterfaceProvider` в `net-lattice-platform`
-- `net-lattice-backend-linux` (маршруты и интерфейсы через Netlink)
-- `net-lattice-backend-windows` (маршруты и интерфейсы через Windows IP Helper API)
-- `net-lattice-backend-darwin` (маршруты через BSD/macOS route sockets, интерфейсы через `getifaddrs`)
+- модули `route`, `mac`, `interface` и `dns` в `net-lattice-model`
+- `RouteProvider`, `InterfaceProvider` и `DnsProvider` в `net-lattice-platform`
+- `net-lattice-backend-linux` (маршруты и интерфейсы через Netlink, DNS через `/etc/resolv.conf`)
+- `net-lattice-backend-windows` (маршруты и интерфейсы через Windows IP Helper API, DNS через `GetAdaptersAddresses`)
+- `net-lattice-backend-darwin` (маршруты через BSD/macOS route sockets, интерфейсы через `getifaddrs`, DNS через `/etc/resolv.conf`)
 - фасад `net-lattice`
 
-Это даёт реальное, опубликованное управление маршрутами и просмотр интерфейсов на Linux, Windows и BSD/macOS. Это всё ещё не полноценная библиотека: DNS, соседи и все остальные пункты из долгосрочных целей выше ещё впереди; см. [ARCHITECTURE.ru.md](ARCHITECTURE.ru.md) для поэтапной дорожной карты и [CHANGELOG.md](CHANGELOG.md) для того, что реально вышло.
+Это даёт реальное, опубликованное управление маршрутами, просмотр интерфейсов и чтение DNS-конфигурации резолвера на Linux, Windows и BSD/macOS. Это всё ещё не полноценная библиотека: соседи и все остальные пункты из долгосрочных целей выше ещё впереди; см. [ARCHITECTURE.ru.md](ARCHITECTURE.ru.md) для поэтапной дорожной карты и [CHANGELOG.md](CHANGELOG.md) для того, что реально вышло.
 
 ## Дорожная карта
 
 1. **Bootstrap** *(завершён)* — инфраструктура репозитория, лицензирование, файлы для сообщества и настройка инструментов.
 2. **Проектирование** *(завершено)* — структура крейтов, базовые абстракции и стратегия абстрагирования платформ реализованы на этапе 0.1. См. [ARCHITECTURE.ru.md](ARCHITECTURE.ru.md).
 3. **Фундамент** *(завершено)* — реализованы базовые типы IP/маршрутов/интерфейсов и все три платформенных бэкенда.
-4. **Паритет платформ** *(завершён)* — shipped Linux/Windows/BSD/macOS бэкенды для маршрутов и интерфейсов.
-5. **Продвинутые возможности** — DNS, соседи, мониторинг, уведомления, транзакционная конфигурация и декларативная настройка сети.
+4. **Паритет платформ** *(завершён)* — shipped Linux/Windows/BSD/macOS бэкенды для маршрутов, интерфейсов и чтения DNS.
+5. **Продвинутые возможности** — соседи, мониторинг, уведомления, транзакционная конфигурация и декларативная настройка сети.
 
 ## Участие в проекте
 
