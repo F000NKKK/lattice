@@ -12,6 +12,12 @@
 use std::hash::{Hash, Hasher};
 use std::net::IpAddr;
 use std::sync::mpsc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
+use std::thread;
+use std::time::Duration;
 use std::{io, mem};
 
 use net_lattice_core::{Error, Id, PlatformErrorCode, Result};
@@ -75,6 +81,23 @@ struct RouteMessageHeader {
     msg_len: u16,
     version: u8,
     message_type: u8,
+}
+
+struct DarwinWatch {
+    stop: Arc<AtomicBool>,
+    thread: Option<thread::JoinHandle<()>>,
+}
+
+impl Drop for DarwinWatch {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        if let Some(thread) = self.thread.take() {
+            // The reader polls with a bounded timeout, so joining cannot block
+            // indefinitely and guarantees the PF_ROUTE fd is closed before
+            // this subscription is gone.
+            let _ = thread.join();
+        }
+    }
 }
 
 /// The BSD/macOS route socket-backed implementation of Net Lattice's provider
@@ -1197,6 +1220,139 @@ fn resolv_conf_error(err: &io::Error) -> Error {
         io::ErrorKind::NotFound => Error::NotFound,
         io::ErrorKind::PermissionDenied => Error::PermissionDenied,
         _ => Error::Platform(io_error_code(err)),
+    }
+}
+
+/// Extracts the address identity from a `RTM_NEWADDR`/`RTM_DELADDR` message.
+/// The routing socket includes the interface index in its fixed header and
+/// the address/netmask as `RTAX_IFA`/`RTAX_NETMASK` sockaddrs.
+unsafe fn message_to_interface_address_id(hdr: &libc::ifa_msghdr) -> Option<InterfaceAddressId> {
+    let mut address = None;
+    let mut netmask_bytes = None;
+    let mut ptr = unsafe { (hdr as *const libc::ifa_msghdr).add(1).cast::<u8>() };
+    let mut remaining = hdr.ifam_msglen as usize - mem::size_of::<libc::ifa_msghdr>();
+    let mut bit: libc::c_int = 1;
+    while bit <= hdr.ifam_addrs && remaining > 0 {
+        if hdr.ifam_addrs & bit == 0 {
+            bit <<= 1;
+            continue;
+        }
+        let sa_len = unsafe { *ptr } as usize;
+        let aligned_len = if sa_len == 0 { 4 } else { (sa_len + 3) & !3 };
+        if aligned_len > remaining {
+            return None;
+        }
+        if bit == RTA_IFA {
+            address = unsafe { sockaddr_to_ip(ptr.cast()) };
+        } else if bit == RTA_NETMASK {
+            let header = match address {
+                Some(IpAddr::V6(_)) => 8,
+                _ => 4,
+            };
+            let bytes = sa_len.saturating_sub(header);
+            netmask_bytes = Some(if bytes == 0 {
+                Vec::new()
+            } else {
+                unsafe { std::slice::from_raw_parts(ptr.add(header), bytes) }.to_vec()
+            });
+        }
+        ptr = unsafe { ptr.add(aligned_len) };
+        remaining -= aligned_len;
+        bit <<= 1;
+    }
+
+    let address = address?;
+    let prefix_len = netmask_bytes
+        .as_deref()
+        .map(mask_bytes_to_prefix_len)
+        .unwrap_or_else(|| match address {
+            IpAddr::V4(_) => 32,
+            IpAddr::V6(_) => 128,
+        });
+    let network = match address {
+        IpAddr::V4(address) => Network::from(net_lattice_ip::Ipv4Network::new(
+            address.into(),
+            net_lattice_ip::Ipv4PrefixLength::new(prefix_len)?,
+        )),
+        IpAddr::V6(address) => Network::from(net_lattice_ip::Ipv6Network::new(
+            address.into(),
+            net_lattice_ip::Ipv6PrefixLength::new(prefix_len)?,
+        )),
+    };
+    Some(synthesize_interface_address_id(
+        hdr.ifam_index as u32,
+        &network,
+    ))
+}
+
+/// Maps one native routing-socket notification to the cross-platform signal.
+/// `RTM_ADD` is also emitted for changes by BSD, so it deliberately maps to
+/// `Changed`; deleting a route/address/ARP entry is unambiguous.
+unsafe fn route_socket_message_to_event(message: *const u8, len: usize) -> Option<Event> {
+    if len < mem::size_of::<RouteMessageHeader>() {
+        return None;
+    }
+    let common = unsafe { std::ptr::read_unaligned(message.cast::<RouteMessageHeader>()) };
+    match common.message_type as libc::c_int {
+        libc::RTM_ADD => {
+            if len < mem::size_of::<libc::rt_msghdr>() {
+                return None;
+            }
+            let hdr = unsafe { &*message.cast::<libc::rt_msghdr>() };
+            if hdr.rtm_flags & libc::RTF_LLINFO != 0 {
+                unsafe { message_to_neighbor(hdr) }.map(|neighbor| Event::Neighbor {
+                    id: neighbor.id,
+                    kind: ChangeKind::Changed,
+                })
+            } else {
+                unsafe { message_to_route(hdr) }.map(|route| Event::Route {
+                    id: route.id,
+                    kind: ChangeKind::Changed,
+                })
+            }
+        }
+        libc::RTM_DELETE => {
+            if len < mem::size_of::<libc::rt_msghdr>() {
+                return None;
+            }
+            let hdr = unsafe { &*message.cast::<libc::rt_msghdr>() };
+            if hdr.rtm_flags & libc::RTF_LLINFO != 0 {
+                unsafe { message_to_neighbor(hdr) }.map(|neighbor| Event::Neighbor {
+                    id: neighbor.id,
+                    kind: ChangeKind::Removed,
+                })
+            } else {
+                unsafe { message_to_route(hdr) }.map(|route| Event::Route {
+                    id: route.id,
+                    kind: ChangeKind::Removed,
+                })
+            }
+        }
+        libc::RTM_IFINFO | libc::RTM_IFINFO2 => {
+            if len < mem::size_of::<libc::if_msghdr>() {
+                return None;
+            }
+            let hdr = unsafe { &*message.cast::<libc::if_msghdr>() };
+            Some(Event::Interface {
+                id: Id::new(hdr.ifm_index as u64),
+                kind: ChangeKind::Changed,
+            })
+        }
+        libc::RTM_NEWADDR | libc::RTM_DELADDR => {
+            if len < mem::size_of::<libc::ifa_msghdr>() {
+                return None;
+            }
+            let hdr = unsafe { &*message.cast::<libc::ifa_msghdr>() };
+            unsafe { message_to_interface_address_id(hdr) }.map(|id| Event::Address {
+                id,
+                kind: if common.message_type as libc::c_int == libc::RTM_DELADDR {
+                    ChangeKind::Removed
+                } else {
+                    ChangeKind::Changed
+                },
+            })
+        }
+        _ => None,
     }
 }
 

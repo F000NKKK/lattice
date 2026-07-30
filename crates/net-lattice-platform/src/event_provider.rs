@@ -21,6 +21,11 @@ use net_lattice_core::{Error, Result};
 /// way `mpsc::Receiver`'s `Iterator` impl does.
 pub struct EventReceiver<E> {
     receiver: mpsc::Receiver<E>,
+    // Owns backend-specific cancellation state (for example, a Windows IP
+    // Helper registration or a route-socket reader). It is intentionally
+    // opaque: consumers only receive events, while dropping the receiver
+    // reliably tears down the native subscription.
+    _subscription: Option<Box<dyn Send>>,
 }
 
 impl<E> EventReceiver<E> {
@@ -28,7 +33,23 @@ impl<E> EventReceiver<E> {
     /// sends events into. The `Sender` half is not exposed here — only the
     /// backend that spawned the watcher should be able to produce events.
     pub fn new(receiver: mpsc::Receiver<E>) -> Self {
-        Self { receiver }
+        Self {
+            receiver,
+            _subscription: None,
+        }
+    }
+
+    /// Associates a backend-owned cancellation guard with this receiver.
+    /// Backends use this after registering a native watcher; dropping the
+    /// receiver drops the guard and therefore stops the native subscription.
+    pub fn with_subscription<S>(receiver: mpsc::Receiver<E>, subscription: S) -> Self
+    where
+        S: Send + 'static,
+    {
+        Self {
+            receiver,
+            _subscription: Some(Box::new(subscription)),
+        }
     }
 
     /// Blocks until an event arrives. Returns `Err(Error::Disconnected)`
