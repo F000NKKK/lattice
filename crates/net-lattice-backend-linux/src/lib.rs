@@ -724,6 +724,18 @@ impl DnsProvider for LinuxBackend {
 mod tests {
     use super::*;
     use net_lattice_ip::{Ipv4Address, Ipv4Network, Ipv4PrefixLength};
+    use std::sync::{Mutex, MutexGuard, OnceLock};
+
+    /// The kernel can reject simultaneous Netlink dumps in a shared CI
+    /// network namespace with `EBUSY`. All tests that open a real Netlink
+    /// socket take this guard; pure parser tests intentionally do not.
+    fn kernel_test_guard() -> MutexGuard<'static, ()> {
+        static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
+        GUARD
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("a previous kernel test panicked while holding the lock")
+    }
 
     /// Exercises a real round trip through Netlink, no privilege required:
     /// `RTM_GETROUTE` dumps are readable by any user. This is the one test
@@ -731,6 +743,7 @@ mod tests {
     /// talks to the kernel, rather than only exercising conversion logic.
     #[test]
     fn routes_reads_the_real_kernel_routing_table() {
+        let _guard = kernel_test_guard();
         let backend = LinuxBackend::new().expect("failed to open a Netlink connection");
         let routes = backend
             .routes()
@@ -746,6 +759,7 @@ mod tests {
     /// has at least `lo`.
     #[test]
     fn interfaces_includes_the_loopback_interface() {
+        let _guard = kernel_test_guard();
         let backend = LinuxBackend::new().expect("failed to open a Netlink connection");
         let interfaces = backend
             .interfaces()
@@ -763,6 +777,7 @@ mod tests {
     /// has at least `lo`'s `127.0.0.1/8`.
     #[test]
     fn addresses_includes_loopbacks_address() {
+        let _guard = kernel_test_guard();
         let backend = LinuxBackend::new().expect("failed to open a Netlink connection");
         let addresses = backend
             .addresses()
@@ -780,6 +795,7 @@ mod tests {
     /// `RTM_GETNEIGH` dumps are readable by any user.
     #[test]
     fn neighbors_reads_the_real_kernel_neighbor_table() {
+        let _guard = kernel_test_guard();
         let backend = LinuxBackend::new().expect("failed to open a Netlink connection");
         let neighbors = backend
             .neighbors()
@@ -797,6 +813,7 @@ mod tests {
     fn watch_opens_a_real_netlink_subscription() {
         use std::time::Duration;
 
+        let _guard = kernel_test_guard();
         let backend = LinuxBackend::new().expect("failed to open a Netlink connection");
         assert!(backend.capabilities().contains(Capability::MONITORING));
         let watcher = backend
@@ -831,6 +848,7 @@ mod tests {
     /// without requiring any specific content.
     #[test]
     fn dns_config_reads_the_real_resolv_conf() {
+        let _guard = kernel_test_guard();
         let backend = LinuxBackend::new().expect("failed to open a Netlink connection");
         let config = backend
             .dns_config()
@@ -870,6 +888,7 @@ mod tests {
     #[test]
     #[ignore = "requires CAP_NET_ADMIN; run with `sudo -E cargo test -p net-lattice-backend-linux -- --ignored`"]
     fn add_then_remove_route_round_trips_through_the_kernel() {
+        let _guard = kernel_test_guard();
         let backend = LinuxBackend::new().expect("failed to open a Netlink connection");
         let interface_index = loopback_interface_index(&backend);
 
@@ -923,6 +942,7 @@ mod tests {
     fn watch_observes_route_changes() {
         use std::time::Duration;
 
+        let _guard = kernel_test_guard();
         let backend = LinuxBackend::new().expect("failed to open a Netlink connection");
         assert!(backend.capabilities().contains(Capability::MONITORING));
         let watcher = backend
@@ -930,7 +950,7 @@ mod tests {
             .expect("failed to subscribe to Netlink events");
         let interface_index = loopback_interface_index(&backend);
         let destination = Network::from(Ipv4Network::new(
-            Ipv4Address::new(203, 0, 113, 0),
+            Ipv4Address::new(198, 51, 100, 0),
             Ipv4PrefixLength::new(24).unwrap(),
         ));
         let route = Route::new(RouteId::new(0), destination).with_interface_index(interface_index);

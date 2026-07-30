@@ -1854,7 +1854,9 @@ mod tests {
         let watcher = backend.watch().expect("failed to open PF_ROUTE watcher");
         let interface_index = loopback_interface_index(&backend);
         let destination = Network::from(Ipv4Network::new(
-            Ipv4Address::new(203, 0, 113, 0),
+            // TEST-NET-2 is distinct from the route CRUD test's TEST-NET-3
+            // prefix because ignored tests run in parallel.
+            Ipv4Address::new(198, 51, 100, 0),
             Ipv4PrefixLength::new(24).unwrap(),
         ));
         let route = Route::new(RouteId::new(0), destination).with_interface_index(interface_index);
