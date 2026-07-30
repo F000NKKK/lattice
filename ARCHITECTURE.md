@@ -585,7 +585,7 @@ are introduced only when there is real implementation work for them:
 | 0.5 ✅ | `dns` module + `DnsProvider` across all backends |
 | 0.6 ✅ | `neighbor` module + `NeighborProvider` (ARP/NDP) across all backends |
 | 0.7 ✅ | `ifaddr` module + `AddressProvider` (IP addresses on interfaces) across all backends |
-| 0.8 ✅ | `event` module + synchronous `EventProvider`/`EventReceiver`; Linux monitoring via Netlink multicast. Other backends expose the trait but return `Unsupported` and do not advertise `Capability::MONITORING` until their native watcher lifecycle is implemented. |
+| 0.8 ✅ | `event` module + synchronous `EventProvider`/`EventReceiver`; monitoring via Netlink multicast (Linux), PF_ROUTE (BSD/macOS), and IP Helper notifications (Windows). |
 | 0.9+ | capability-gated domains: VLAN, VRF, firewall integration, tunnels; `CurrentState`/`DesiredState`/`Diff`/`ApplyPlan` declarative configuration |
 
 Each stage is expected to validate the architecture before the next is

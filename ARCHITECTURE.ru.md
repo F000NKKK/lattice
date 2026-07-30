@@ -594,7 +594,7 @@ provider-traits, а не другой контракт backend'а. Дорабо�
 | 0.5 ✅ | модуль `dns` + `DnsProvider` на всех backend'ах |
 | 0.6 ✅ | модуль `neighbor` + `NeighborProvider` (ARP/NDP) на всех backend'ах |
 | 0.7 ✅ | модуль `ifaddr` + `AddressProvider` (IP-адреса интерфейсов) на всех backend'ах |
-| 0.8 ✅ | модуль `event` + синхронные `EventProvider`/`EventReceiver`; мониторинг Linux через Netlink multicast. Остальные backend'ы предоставляют trait, но возвращают `Unsupported` и не объявляют `Capability::MONITORING`, пока не реализован безопасный жизненный цикл нативного watcher'а. |
+| 0.8 ✅ | модуль `event` + синхронные `EventProvider`/`EventReceiver`; мониторинг через Netlink multicast (Linux), PF_ROUTE (BSD/macOS) и уведомления IP Helper (Windows). |
 | 0.9+ | домены под Capability: VLAN, VRF, интеграция firewall, туннели; декларативная конфигурация `CurrentState`/`DesiredState`/`Diff`/`ApplyPlan` |
 
 Ожидается, что каждый этап проверяет архитектуру перед началом следующего;
