@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-07-31
+
+### Added
+
+- `net-lattice-model`: `NewInterfaceAddress`, a separate, typed intent for
+  assigning an interface address. It accepts an interface ID, address/prefix,
+  and optional IPv4 broadcast; the caller never constructs an observed
+  `InterfaceAddressId`.
+- `net-lattice-platform`: `AddressMutator`, separate from read-only
+  `AddressProvider`, with `add_address` returning the canonical observed
+  address and `remove_address` accepting that observed record.
+- `net-lattice-backend-linux`: native IPv4/IPv6 address assignment and
+  removal through Netlink.
+- `net-lattice-backend-windows`: native IPv4/IPv6 address assignment and
+  removal through `CreateUnicastIpAddressEntry` and
+  `DeleteUnicastIpAddressEntry`. Windows rejects an explicit IPv4 broadcast,
+  because IP Helper derives it from the prefix instead of accepting an
+  override.
+- `net-lattice-backend-darwin`: native IPv4/IPv6 address assignment and
+  removal through BSD address ioctls; no `ifconfig` subprocess is used.
+- `net-lattice` facade: `Lattice::add_address()` and
+  `Lattice::remove_address()`, with model convergence enforced for
+  `AddressMutator` as well as `AddressProvider`.
+
+### Testing
+
+- Privileged end-to-end add/read/remove address tests for Linux, Windows, and
+  BSD/macOS, using a dedicated TEST-NET-1 address on the loopback interface.
+
 ## [0.8.0] - 2026-07-30
 
 ### Added
