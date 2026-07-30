@@ -1,4 +1,4 @@
-use std::sync::mpsc;
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
 use net_lattice_core::{Error, Result};
@@ -19,8 +19,48 @@ use net_lattice_core::{Error, Result};
 /// Also implements [`Iterator`], for `for event in receiver { ... }` —
 /// iteration ends (`None`) exactly when the channel disconnects, the same
 /// way `mpsc::Receiver`'s `Iterator` impl does.
+pub const DEFAULT_EVENT_QUEUE_CAPACITY: usize = 256;
+
+/// Non-blocking backend producer for a bounded event receiver.
+#[derive(Clone)]
+pub struct EventSender<E> {
+    sender: mpsc::SyncSender<Result<E>>,
+    pending_resync: Arc<Mutex<Option<E>>>,
+}
+
+impl<E> EventSender<E> {
+    /// Never blocks a native callback. On overflow, records one resync event
+    /// that is delivered before a later ordinary event.
+    pub fn send(&self, event: E, resync: E) -> bool {
+        let mut pending = self.pending_resync.lock().expect("event sender poisoned");
+        if let Some(resync) = pending.take() {
+            match self.sender.try_send(Ok(resync)) {
+                Ok(()) => {}
+                Err(mpsc::TrySendError::Full(Ok(resync))) => {
+                    *pending = Some(resync);
+                    return true;
+                }
+                Err(mpsc::TrySendError::Disconnected(_)) => return false,
+                Err(mpsc::TrySendError::Full(Err(_))) => unreachable!(),
+            }
+        }
+        match self.sender.try_send(Ok(event)) {
+            Ok(()) => true,
+            Err(mpsc::TrySendError::Full(Ok(_))) => {
+                *pending = Some(resync);
+                true
+            }
+            Err(mpsc::TrySendError::Disconnected(_)) => false,
+            Err(mpsc::TrySendError::Full(Err(_))) => unreachable!(),
+        }
+    }
+    pub fn send_error(&self, error: Error) -> bool {
+        self.sender.send(Err(error)).is_ok()
+    }
+}
+
 pub struct EventReceiver<E> {
-    receiver: mpsc::Receiver<E>,
+    receiver: mpsc::Receiver<Result<E>>,
     // Owns backend-specific cancellation state (for example, a Windows IP
     // Helper registration or a route-socket reader). It is intentionally
     // opaque: consumers only receive events, while dropping the receiver
@@ -29,10 +69,27 @@ pub struct EventReceiver<E> {
 }
 
 impl<E> EventReceiver<E> {
+    pub fn bounded() -> (EventSender<E>, Self) {
+        Self::bounded_with_capacity(DEFAULT_EVENT_QUEUE_CAPACITY)
+    }
+    pub fn bounded_with_capacity(capacity: usize) -> (EventSender<E>, Self) {
+        assert!(capacity > 0, "event queue capacity must be non-zero");
+        let (sender, receiver) = mpsc::sync_channel(capacity);
+        (
+            EventSender {
+                sender,
+                pending_resync: Arc::new(Mutex::new(None)),
+            },
+            Self {
+                receiver,
+                _subscription: None,
+            },
+        )
+    }
     /// Wraps a channel receiver a backend's background watcher thread/task
     /// sends events into. The `Sender` half is not exposed here — only the
     /// backend that spawned the watcher should be able to produce events.
-    pub fn new(receiver: mpsc::Receiver<E>) -> Self {
+    pub fn new(receiver: mpsc::Receiver<Result<E>>) -> Self {
         Self {
             receiver,
             _subscription: None,
@@ -42,7 +99,10 @@ impl<E> EventReceiver<E> {
     /// Associates a backend-owned cancellation guard with this receiver.
     /// Backends use this after registering a native watcher; dropping the
     /// receiver drops the guard and therefore stops the native subscription.
-    pub fn with_subscription<S>(receiver: mpsc::Receiver<E>, subscription: S) -> Self
+    pub fn from_receiver_with_subscription<S>(
+        receiver: mpsc::Receiver<Result<E>>,
+        subscription: S,
+    ) -> Self
     where
         S: Send + 'static,
     {
@@ -51,12 +111,19 @@ impl<E> EventReceiver<E> {
             _subscription: Some(Box::new(subscription)),
         }
     }
+    pub fn with_subscription<S>(mut self, subscription: S) -> Self
+    where
+        S: Send + 'static,
+    {
+        self._subscription = Some(Box::new(subscription));
+        self
+    }
 
     /// Blocks until an event arrives. Returns `Err(Error::Disconnected)`
     /// once the backend's watcher has shut down and no further event will
     /// ever arrive.
     pub fn recv(&self) -> Result<E> {
-        self.receiver.recv().map_err(|_| Error::Disconnected)
+        self.receiver.recv().map_err(|_| Error::Disconnected)?
     }
 
     /// Returns immediately: `Ok(Some(event))` if one is already queued,
@@ -65,7 +132,8 @@ impl<E> EventReceiver<E> {
     /// watcher has shut down.
     pub fn try_recv(&self) -> Result<Option<E>> {
         match self.receiver.try_recv() {
-            Ok(event) => Ok(Some(event)),
+            Ok(Ok(event)) => Ok(Some(event)),
+            Ok(Err(error)) => Err(error),
             Err(mpsc::TryRecvError::Empty) => Ok(None),
             Err(mpsc::TryRecvError::Disconnected) => Err(Error::Disconnected),
         }
@@ -76,7 +144,8 @@ impl<E> EventReceiver<E> {
     /// `Err(Error::Disconnected)` if the watcher has shut down.
     pub fn recv_timeout(&self, timeout: Duration) -> Result<Option<E>> {
         match self.receiver.recv_timeout(timeout) {
-            Ok(event) => Ok(Some(event)),
+            Ok(Ok(event)) => Ok(Some(event)),
+            Ok(Err(error)) => Err(error),
             Err(mpsc::RecvTimeoutError::Timeout) => Ok(None),
             Err(mpsc::RecvTimeoutError::Disconnected) => Err(Error::Disconnected),
         }
@@ -108,8 +177,10 @@ impl<E> Iterator for EventReceiver<E> {
 /// it) is alive.
 pub trait EventProvider {
     type Event;
+    type EventFilter;
 
     fn watch(&self) -> Result<EventReceiver<Self::Event>>;
+    fn watch_filtered(&self, filter: Self::EventFilter) -> Result<EventReceiver<Self::Event>>;
 }
 
 #[cfg(test)]
@@ -119,26 +190,23 @@ mod tests {
 
     #[test]
     fn recv_returns_disconnected_once_the_sender_is_dropped() {
-        let (sender, receiver) = mpsc::channel::<u32>();
-        let receiver = EventReceiver::new(receiver);
+        let (sender, receiver) = EventReceiver::<u32>::bounded();
         drop(sender);
         assert!(matches!(receiver.recv(), Err(Error::Disconnected)));
     }
 
     #[test]
     fn try_recv_returns_none_when_empty_but_still_connected() {
-        let (_sender, receiver) = mpsc::channel::<u32>();
-        let receiver = EventReceiver::new(receiver);
+        let (_sender, receiver) = EventReceiver::<u32>::bounded();
         assert!(matches!(receiver.try_recv(), Ok(None)));
     }
 
     #[test]
     fn iterator_ends_when_the_sender_is_dropped() {
-        let (sender, receiver) = mpsc::channel::<u32>();
-        let receiver = EventReceiver::new(receiver);
+        let (sender, receiver) = EventReceiver::<u32>::bounded();
         thread::spawn(move || {
-            sender.send(1).unwrap();
-            sender.send(2).unwrap();
+            assert!(sender.send(1, 0));
+            assert!(sender.send(2, 0));
         });
         let received: Vec<u32> = receiver.collect();
         assert_eq!(received, vec![1, 2]);
@@ -146,16 +214,32 @@ mod tests {
 
     #[test]
     fn recv_timeout_returns_none_on_timeout_without_disconnecting() {
-        let (sender, receiver) = mpsc::channel::<u32>();
-        let receiver = EventReceiver::new(receiver);
+        let (sender, receiver) = EventReceiver::<u32>::bounded();
         assert!(matches!(
             receiver.recv_timeout(Duration::from_millis(10)),
             Ok(None)
         ));
-        sender.send(7).unwrap();
+        assert!(sender.send(7, 0));
         assert_eq!(
             receiver.recv_timeout(Duration::from_secs(1)).unwrap(),
             Some(7)
         );
+    }
+
+    #[test]
+    fn overflow_delivers_resync_before_a_later_event() {
+        let (sender, receiver) = EventReceiver::bounded_with_capacity(1);
+        assert!(sender.send(1, 99));
+        assert!(sender.send(2, 99));
+        assert_eq!(receiver.recv().unwrap(), 1);
+        assert!(sender.send(3, 99));
+        assert_eq!(receiver.recv().unwrap(), 99);
+    }
+
+    #[test]
+    fn background_error_is_returned() {
+        let (sender, receiver) = EventReceiver::<u32>::bounded();
+        assert!(sender.send_error(Error::InvalidState));
+        assert!(matches!(receiver.recv(), Err(Error::InvalidState)));
     }
 }
