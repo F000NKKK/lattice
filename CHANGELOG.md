@@ -7,7 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.4.10] - TBD
+### Added
+
+- `net-lattice-model`: the `dns` module (`DnsConfig`: nameservers and
+  search domains).
+- `net-lattice-platform`: `DnsProvider`, with no dependency on
+  `net-lattice-model`.
+- `net-lattice-backend-linux` and `net-lattice-backend-darwin`:
+  `DnsProvider` implementation via parsing `/etc/resolv.conf`
+  (`nameserver`/`search`/`domain` directives — identical format on both
+  platforms, so the parser is shared verbatim between the two crates).
+- `net-lattice-backend-windows`: `DnsProvider` implementation via
+  `GetAdaptersAddresses`, aggregating each adapter's DNS servers and
+  suffix, deduplicated across the machine.
+- `net-lattice` facade: `Lattice::dns_config()`, and `LatticeBackend` now
+  additionally requires `DnsProvider<DnsConfig = DnsConfig>`.
+
+### Fixed
+
+- `scripts/release.sh`: the root `Cargo.toml` `[workspace.dependencies]`
+  version reference for a crate could silently fail to update on a
+  minor/major bump. The check required the crate's *current* version to
+  match, character-for-character, whatever was already pinned in root
+  `Cargo.toml` — but patch bumps intentionally never touch root (they're
+  semver-compatible via caret), so after enough patch bumps accumulated,
+  root's pinned version drifted behind the crate's real version, and the
+  match silently failed on the next minor/major bump, leaving root stale
+  (observed live: `net-lattice-backend-darwin` bumped 0.2.11 → 0.3.0 while
+  root Cargo.toml kept referencing 0.2.10). Fixed by replacing whatever
+  version is present for that dependency, unconditionally, instead of
+  requiring an exact match against the old version.
+- `scripts/release.sh`: the crates.io "is this version already published?"
+  guard (which exists to avoid skipping past a version that was bumped in
+  git but never actually published) only ran when the *current* version
+  was "round" relative to the requested bump (e.g. patch `0` before a
+  `--minor`). A non-round current version (e.g. `0.2.11`) skipped the
+  check entirely and bumped straight past it even if unpublished. Fixed:
+  the publication check now runs before every `--minor`/`--major` bump
+  regardless of whether the current version is round; `--patch` still
+  skips it, since a patch bump is always semver-compatible with what it
+  replaces.
+
+## [0.4.10] - 2026-07-30
 
 ### Added
 
@@ -153,7 +194,7 @@ BSD/macOS.
   length, and hardened the test to fail on *any* `add_route` error rather
   than only those two variants.
 
-## [0.3.0] - TBD
+## [0.3.0] -  2026-07-29
 
 ### Added
 
@@ -169,7 +210,7 @@ This is Stage 0.3 of [ARCHITECTURE.md](ARCHITECTURE.md)'s Incremental
 Delivery Plan: listing, adding, and removing IPv4/IPv6 routes on BSD/macOS.
 
 
-## [0.2.0] - TBD
+## [0.2.0] - 2026-07-29
 
 ### Added
 
