@@ -3,13 +3,13 @@
 ## Supported Versions
 
 Net Lattice follows a rolling support policy. Security fixes are provided only
-for the latest stable release series. With the release of Stage 0.9, support
-for the 0.1.x-0.8.x series has ended — upgrade to 0.9.x to receive fixes.
+for the latest stable release series. With the release of Stage 0.10, support
+for the 0.1.x-0.9.x series has ended — upgrade to 0.10.x to receive fixes.
 
 | Version | Supported |
 | ------- | --------- |
-| 0.9.x | ✅ |
-| 0.1.0 - 0.8.x | ❌ |
+| 0.10.x | ✅ |
+| 0.1.0 - 0.9.x | ❌ |
 
 ## Reporting a Vulnerability
 
@@ -31,13 +31,13 @@ informed as the issue is investigated and resolved.
 
 ## Scope
 
-Net Lattice has landed Stage 0.9 of its [architecture](ARCHITECTURE.md)'s
+Net Lattice has landed Stage 0.10 of its [architecture](ARCHITECTURE.md)'s
 Incremental Delivery Plan: route, interface, DNS-read, neighbor-read, and
 address-read and address-mutation providers for Linux (`net-lattice-backend-linux`, via Netlink
 and `/etc/resolv.conf`), Windows (`net-lattice-backend-windows`, via the IP
 Helper API), and macOS (`net-lattice-backend-darwin`, via BSD routing sockets,
 `getifaddrs`, address ioctls, and `/etc/resolv.conf`), plus monitoring via Netlink multicast
-(Linux), PF_ROUTE (macOS), and IP Helper notifications (Windows). Route
+(Linux), PF_ROUTE (macOS), and IP Helper notifications (Windows), with bounded delivery and explicit overflow resynchronization. Route
 Route, interface, and address-mutation operations are privileged (see ARCHITECTURE.md's Privilege
 Model) — vulnerability reports involving unintended route manipulation,
 privilege confusion, or memory-safety issues in route, interface, DNS,

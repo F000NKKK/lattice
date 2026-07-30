@@ -7,7 +7,7 @@
 This document describes the planned workspace structure for Net Lattice and the
 design principles behind it. It reflects intended direction, not current
 state: see [CHANGELOG.md](CHANGELOG.md) and [README.md](README.md) for what
-actually exists in the repository today. As of this writing, Stage 0.9 of
+actually exists in the repository today. As of this writing, Stage 0.10 of
 the Incremental Delivery Plan below has landed: `net-lattice-core`,
 `net-lattice-ip`, `net-lattice-model`'s `route`, `interface`, `dns`,
 `neighbor`, and `ifaddr` modules, `net-lattice-platform`'s `RouteProvider`,
@@ -596,7 +596,7 @@ are introduced only when there is real implementation work for them:
 | 0.7 ✅ | `ifaddr` module + `AddressProvider` (IP addresses on interfaces) across all backends |
 | 0.8 ✅ | `event` module + synchronous `EventProvider`/`EventReceiver`; monitoring via Netlink multicast (Linux), PF_ROUTE (macOS), and IP Helper notifications (Windows). |
 | 0.9 ✅ | `NewInterfaceAddress` + `AddressMutator`; native IPv4/IPv6 address assignment/removal via Netlink (Linux), IP Helper (Windows), and address ioctls (macOS). |
-| 0.10 | Event semantics: bounded delivery, overflow/resynchronization, filtering, cancellation, and background-error propagation. |
+| 0.10 ✅ | Event semantics: bounded delivery, overflow/resynchronization, filtering, cancellation, and background-error propagation. |
 | 0.11 | Runtime-agnostic async event adapter in a separate crate, with an explicit bridge from the synchronous receiver. |
 | 0.12+ | Further write parity (including DNS), transaction primitives, declarative `CurrentState`/`DesiredState`/`Diff`/`ApplyPlan`, then capability-gated VLAN, VRF, firewall, tunnel, and namespace domains. |
 

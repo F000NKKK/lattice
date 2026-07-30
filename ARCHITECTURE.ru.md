@@ -8,7 +8,7 @@
 дизайна, лежащие в её основе. Он отражает предполагаемое направление, а не
 текущее состояние: см. [CHANGELOG.md](CHANGELOG.md) и [README.md](README.md)
 для того, что реально существует в репозитории на данный момент. На момент
-написания реализован этап 0.9 плана поэтапной поставки ниже: `net-lattice-core`,
+написания реализован этап 0.10 плана поэтапной поставки ниже: `net-lattice-core`,
 `net-lattice-ip`, модули `route`, `interface`, `dns`, `neighbor` и `ifaddr` в `net-lattice-model`,
 `RouteProvider`, `InterfaceProvider`, `DnsProvider`, `NeighborProvider`, `AddressProvider`, `AddressMutator`, `CapabilityProvider` и `EventProvider` в `net-lattice-platform`,
 поддержка маршрутов, адресов интерфейсов, DNS, соседей (ARP/NDP) и нативного мониторинга событий в `net-lattice-backend-linux`,
@@ -605,7 +605,7 @@ provider-traits, а не другой контракт backend'а. Дорабо�
 | 0.7 ✅ | модуль `ifaddr` + `AddressProvider` (IP-адреса интерфейсов) на всех backend'ах |
 | 0.8 ✅ | модуль `event` + синхронные `EventProvider`/`EventReceiver`; мониторинг через Netlink multicast (Linux), PF_ROUTE (macOS) и уведомления IP Helper (Windows). |
 | 0.9 ✅ | `NewInterfaceAddress` + `AddressMutator`; нативное назначение/удаление IPv4/IPv6-адресов через Netlink (Linux), IP Helper (Windows) и address ioctl (macOS). |
-| 0.10 | Семантика событий: bounded delivery, overflow/resynchronization, filtering, cancellation и распространение ошибок фонового watcher'а. |
+| 0.10 ✅ | Семантика событий: bounded delivery, overflow/resynchronization, filtering, cancellation и распространение ошибок фонового watcher'а. |
 | 0.11 | Runtime-agnostic async-адаптер событий в отдельном crate с явным bridge от синхронного receiver. |
 | 0.12+ | Дальнейший паритет операций записи (включая DNS), примитивы транзакций, декларативные `CurrentState`/`DesiredState`/`Diff`/`ApplyPlan`, затем домены VLAN, VRF, firewall, tunnel и namespace под Capability. |
 

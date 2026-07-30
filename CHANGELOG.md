@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-07-31
+
+### Added
+
+- Bounded event delivery (256 entries), `Event::ResyncRequired` overflow
+  signalling, `EventFilter`, and `Lattice::watch_filtered()` across Linux,
+  Windows, and macOS native watchers.
+
 ## [0.9.1] - 2026-07-31
 
 ### Fixed
