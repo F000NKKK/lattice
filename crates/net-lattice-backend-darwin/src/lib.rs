@@ -15,6 +15,7 @@ use std::{io, mem};
 
 use net_lattice_core::{Error, Id, PlatformErrorCode, Result};
 use net_lattice_model::dns::DnsConfig;
+use net_lattice_model::event::Event;
 use net_lattice_model::ifaddr::{InterfaceAddress, InterfaceAddressId};
 use net_lattice_model::interface::{AdminState, Interface, InterfaceKind, OperationalState};
 use net_lattice_model::mac::MacAddress;
@@ -22,8 +23,8 @@ use net_lattice_model::neighbor::{NeighborEntry, NeighborId, NeighborState};
 use net_lattice_model::route::{Route, RouteId};
 use net_lattice_model::{IpAddress, Network};
 use net_lattice_platform::{
-    AddressProvider, Capability, CapabilityProvider, DnsProvider, InterfaceProvider,
-    NeighborProvider, RouteProvider,
+    AddressProvider, Capability, CapabilityProvider, DnsProvider, EventProvider, EventReceiver,
+    InterfaceProvider, NeighborProvider, RouteProvider,
 };
 
 const RTM_VERSION: u8 = 5;
@@ -1194,6 +1195,19 @@ impl CapabilityProvider for DarwinBackend {
     /// equivalent to begin with.
     fn capabilities(&self) -> Capability {
         Capability::IPV6
+    }
+}
+
+impl EventProvider for DarwinBackend {
+    type Event = Event;
+
+    /// A PF_ROUTE socket can deliver change messages, but Stage 0.8 only
+    /// enables the production watcher on Linux.  The Darwin parser must first
+    /// distinguish notifications from this backend's request/reply traffic
+    /// and cover the platform's several route-message header layouts.  Do not
+    /// claim `Capability::MONITORING` until that is complete.
+    fn watch(&self) -> Result<EventReceiver<Self::Event>> {
+        Err(Error::Unsupported)
     }
 }
 

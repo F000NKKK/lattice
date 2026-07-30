@@ -13,6 +13,7 @@ use std::net::IpAddr;
 
 use net_lattice_core::{Error, Id, PlatformErrorCode, Result};
 use net_lattice_model::dns::DnsConfig;
+use net_lattice_model::event::Event;
 use net_lattice_model::ifaddr::{InterfaceAddress, InterfaceAddressId};
 use net_lattice_model::interface::{AdminState, Interface, InterfaceKind, OperationalState};
 use net_lattice_model::mac::MacAddress;
@@ -20,8 +21,8 @@ use net_lattice_model::neighbor::{NeighborEntry, NeighborId, NeighborState};
 use net_lattice_model::route::{Route, RouteId};
 use net_lattice_model::{IpAddress, Network};
 use net_lattice_platform::{
-    AddressProvider, Capability, CapabilityProvider, DnsProvider, InterfaceProvider,
-    NeighborProvider, RouteProvider,
+    AddressProvider, Capability, CapabilityProvider, DnsProvider, EventProvider, EventReceiver,
+    InterfaceProvider, NeighborProvider, RouteProvider,
 };
 use windows::Win32::NetworkManagement::IpHelper::{
     CreateIpForwardEntry2, DeleteIpForwardEntry2, FreeMibTable, GAA_FLAG_SKIP_ANYCAST,
@@ -639,6 +640,20 @@ impl CapabilityProvider for WindowsBackend {
     /// them are implemented yet.
     fn capabilities(&self) -> Capability {
         Capability::IPV6
+    }
+}
+
+impl EventProvider for WindowsBackend {
+    type Event = Event;
+
+    /// Windows exposes the required notifications through IP Helper callback
+    /// registrations.  Stage 0.8 deliberately does not expose a partial
+    /// registration set: the callback state must be owned by the returned
+    /// receiver and safely cancelled before it is freed.  Until that lifecycle
+    /// is implemented, callers get an explicit error and `MONITORING` remains
+    /// absent from `capabilities()`.
+    fn watch(&self) -> Result<EventReceiver<Self::Event>> {
+        Err(Error::Unsupported)
     }
 }
 

@@ -588,8 +588,10 @@ impl CapabilityProvider for LinuxBackend {
 /// [`Event`]. Reuses the existing `message_to_*` conversion functions
 /// (built for the one-shot `routes()`/`interfaces()`/... dumps) purely to
 /// derive the same `Id` a consumer would see from those methods — a
-/// notification's `NewFoo`/`DelFoo` variant already tells us the
-/// `ChangeKind`, so only the `Id` needs deriving here.
+/// notification's `DelFoo` variant tells us an object was removed. Netlink
+/// uses the corresponding `NewFoo` message for both creation and mutation,
+/// so it is reported as `Changed` rather than incorrectly promising an add;
+/// only the `Id` needs deriving here.
 ///
 /// Returns `None` for Netlink message kinds this backend doesn't turn into
 /// an `Event` (link property changes, neighbour tables, ...) and for any
@@ -600,7 +602,7 @@ fn route_netlink_message_to_event(message: RouteNetlinkMessage) -> Option<Event>
     match message {
         RouteNetlinkMessage::NewRoute(msg) => message_to_route(&msg).map(|route| Event::Route {
             id: route.id,
-            kind: ChangeKind::Added,
+            kind: ChangeKind::Changed,
         }),
         RouteNetlinkMessage::DelRoute(msg) => message_to_route(&msg).map(|route| Event::Route {
             id: route.id,
@@ -608,7 +610,7 @@ fn route_netlink_message_to_event(message: RouteNetlinkMessage) -> Option<Event>
         }),
         RouteNetlinkMessage::NewLink(msg) => Some(Event::Interface {
             id: Id::new(msg.header.index as u64),
-            kind: ChangeKind::Added,
+            kind: ChangeKind::Changed,
         }),
         RouteNetlinkMessage::DelLink(msg) => Some(Event::Interface {
             id: Id::new(msg.header.index as u64),
@@ -617,7 +619,7 @@ fn route_netlink_message_to_event(message: RouteNetlinkMessage) -> Option<Event>
         RouteNetlinkMessage::NewNeighbour(msg) => {
             message_to_neighbor(&msg).map(|entry| Event::Neighbor {
                 id: entry.id,
-                kind: ChangeKind::Added,
+                kind: ChangeKind::Changed,
             })
         }
         RouteNetlinkMessage::DelNeighbour(msg) => {
@@ -629,7 +631,7 @@ fn route_netlink_message_to_event(message: RouteNetlinkMessage) -> Option<Event>
         RouteNetlinkMessage::NewAddress(msg) => {
             message_to_interface_address(&msg).map(|addr| Event::Address {
                 id: addr.id,
-                kind: ChangeKind::Added,
+                kind: ChangeKind::Changed,
             })
         }
         RouteNetlinkMessage::DelAddress(msg) => {
