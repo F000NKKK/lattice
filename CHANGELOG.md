@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-30
+
+### Added
+
+- `net-lattice-model`: the `neighbor` module (`NeighborEntry`, `NeighborId`,
+  `NeighborState` — mirroring Linux's `NUD_*`/BSD's route-socket flags/
+  Windows's `NL_NEIGHBOR_STATE`).
+- `net-lattice-platform`: `NeighborProvider`, with no dependency on
+  `net-lattice-model`.
+- `net-lattice-backend-linux`: `NeighborProvider` implementation via
+  Netlink's `RTM_GETNEIGH` (`rtnetlink`'s `neighbours()` handle).
+- `net-lattice-backend-darwin`: `NeighborProvider` implementation via
+  `sysctl(NET_RT_FLAGS, RTF_LLINFO)` over `AF_INET`/`AF_INET6` — the same
+  mechanism `arp -a`/`ndp -an` use — reusing the `rt_msghdr` parsing
+  already in place for route dumps.
+- `net-lattice-backend-windows`: `NeighborProvider` implementation via
+  `GetIpNetTable2`.
+- `net-lattice` facade: `Lattice::neighbors()`, and `LatticeBackend` now
+  additionally requires `NeighborProvider<NeighborEntry = NeighborEntry>`.
+
 ## [0.5.0] - 2026-07-30
 
 ### Added
