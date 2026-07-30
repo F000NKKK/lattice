@@ -16,22 +16,27 @@ pub use net_lattice_model::interface::{
     AdminState, Interface, InterfaceId, InterfaceKind, OperationalState,
 };
 pub use net_lattice_model::mac::MacAddress;
+pub use net_lattice_model::neighbor::{NeighborEntry, NeighborId, NeighborState};
 pub use net_lattice_model::route::{Route, RouteId};
 pub use net_lattice_model::{IpAddress, Network};
-pub use net_lattice_platform::{Capability, DnsProvider, InterfaceProvider, RouteProvider};
+pub use net_lattice_platform::{
+    Capability, DnsProvider, InterfaceProvider, NeighborProvider, RouteProvider,
+};
 
 /// Bound satisfied by any backend usable with [`Lattice`].
 ///
 /// This is where model convergence is enforced: a backend whose
 /// `RouteProvider::Route` (or `InterfaceProvider::Interface`,
-/// `DnsProvider::DnsConfig`) is not literally `net_lattice_model`'s
-/// corresponding type fails to satisfy this trait and cannot be used with
-/// [`Lattice`] — a compile error at the point the backend is wired in, not
-/// a runtime surprise. See ARCHITECTURE.md's `net-lattice` section.
+/// `DnsProvider::DnsConfig`, `NeighborProvider::NeighborEntry`) is not
+/// literally `net_lattice_model`'s corresponding type fails to satisfy this
+/// trait and cannot be used with [`Lattice`] — a compile error at the point
+/// the backend is wired in, not a runtime surprise. See ARCHITECTURE.md's
+/// `net-lattice` section.
 pub trait LatticeBackend:
     RouteProvider<Route = Route>
     + InterfaceProvider<Interface = Interface>
     + DnsProvider<DnsConfig = DnsConfig>
+    + NeighborProvider<NeighborEntry = NeighborEntry>
 {
 }
 
@@ -39,6 +44,7 @@ impl<B> LatticeBackend for B where
     B: RouteProvider<Route = Route>
         + InterfaceProvider<Interface = Interface>
         + DnsProvider<DnsConfig = DnsConfig>
+        + NeighborProvider<NeighborEntry = NeighborEntry>
 {
 }
 
@@ -66,6 +72,10 @@ impl<B: LatticeBackend> Lattice<B> {
 
     pub fn dns_config(&self) -> Result<DnsConfig> {
         self.backend.dns_config()
+    }
+
+    pub fn neighbors(&self) -> Result<Vec<NeighborEntry>> {
+        self.backend.neighbors()
     }
 }
 
