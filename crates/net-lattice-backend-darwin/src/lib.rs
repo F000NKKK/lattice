@@ -11,11 +11,12 @@
 
 use std::hash::{Hash, Hasher};
 use std::net::IpAddr;
+use std::sync::mpsc;
 use std::{io, mem};
 
 use net_lattice_core::{Error, Id, PlatformErrorCode, Result};
 use net_lattice_model::dns::DnsConfig;
-use net_lattice_model::event::Event;
+use net_lattice_model::event::{ChangeKind, Event};
 use net_lattice_model::ifaddr::{InterfaceAddress, InterfaceAddressId};
 use net_lattice_model::interface::{AdminState, Interface, InterfaceKind, OperationalState};
 use net_lattice_model::mac::MacAddress;
@@ -52,6 +53,7 @@ const IFT_L2VLAN: libc::c_uchar = 0x87;
 const RTA_DST: libc::c_int = 0x1;
 const RTA_GATEWAY: libc::c_int = 0x2;
 const RTA_NETMASK: libc::c_int = 0x4;
+const RTA_IFA: libc::c_int = 0x20;
 
 const RTF_UP: libc::c_int = 0x0001;
 const RTF_GATEWAY: libc::c_int = 0x0002;
@@ -63,6 +65,17 @@ const RTF_STATIC: libc::c_int = 0x0800;
 const RTF_REJECT: libc::c_int = 0x0008;
 
 const RTM_MAXSIZE: usize = 2048;
+
+/// The initial four bytes shared by every PF_ROUTE message.  Reading this
+/// small header first lets the watcher split a `read(2)` result containing
+/// multiple route messages without assuming a particular message body.
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct RouteMessageHeader {
+    msg_len: u16,
+    version: u8,
+    message_type: u8,
+}
 
 /// The BSD/macOS route socket-backed implementation of Net Lattice's provider
 /// traits.
