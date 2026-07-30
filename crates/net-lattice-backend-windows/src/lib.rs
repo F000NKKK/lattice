@@ -514,6 +514,9 @@ impl AddressMutator for WindowsBackend {
     type InterfaceAddress = InterfaceAddress;
 
     fn add_address(&self, address: Self::NewInterfaceAddress) -> Result<Self::InterfaceAddress> {
+        if matches!(address.address, Network::V6(_)) && address.broadcast.is_some() {
+            return Err(Error::InvalidState);
+        }
         // IP Helper derives IPv4 broadcast from the prefix and cannot accept
         // an override. Refuse one rather than silently discarding intent.
         if address.broadcast.is_some() {

@@ -163,6 +163,9 @@ impl AddressMutator for LinuxBackend {
     type InterfaceAddress = InterfaceAddress;
 
     fn add_address(&self, address: Self::NewInterfaceAddress) -> Result<Self::InterfaceAddress> {
+        if matches!(address.address, Network::V6(_)) && address.broadcast.is_some() {
+            return Err(Error::InvalidState);
+        }
         let interface_index = address.interface_id.value() as u32;
         let (ip, prefix_len) = network_to_std(address.address);
         self.runtime.block_on(async {
