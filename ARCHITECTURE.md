@@ -7,15 +7,15 @@
 This document describes the planned workspace structure for Net Lattice and the
 design principles behind it. It reflects intended direction, not current
 state: see [CHANGELOG.md](CHANGELOG.md) and [README.md](README.md) for what
-actually exists in the repository today. As of this writing, Stage 0.6 of
+actually exists in the repository today. As of this writing, Stage 0.7 of
 the Incremental Delivery Plan below has landed: `net-lattice-core`,
-`net-lattice-ip`, `net-lattice-model`'s `route`, `interface`, `dns`, and
-`neighbor` modules, `net-lattice-platform`'s `RouteProvider`,
-`InterfaceProvider`, `DnsProvider`, and `NeighborProvider`,
-route/interface/DNS/neighbor support in `net-lattice-backend-linux`,
-`net-lattice-backend-windows`, and `net-lattice-backend-darwin`, and the
-`net-lattice` facade — everything past that stage is still a target, not
-current state.
+`net-lattice-ip`, `net-lattice-model`'s `route`, `interface`, `dns`,
+`neighbor`, and `ifaddr` modules, `net-lattice-platform`'s `RouteProvider`,
+`InterfaceProvider`, `DnsProvider`, `NeighborProvider`, and
+`AddressProvider`, route/interface/DNS/neighbor/address support in
+`net-lattice-backend-linux`, `net-lattice-backend-windows`, and
+`net-lattice-backend-darwin`, and the `net-lattice` facade — everything past
+that stage is still a target, not current state.
 
 ## Guiding Principle
 
@@ -139,6 +139,11 @@ The domain model of operating system networking state, organized as modules:
 - `interface` — `Interface` and interface kind (depends on `mac`)
 - `neighbor` — ARP/NDP entries (depends on `net-lattice-ip` and `mac`)
 - `dns` — DNS resolver configuration (depends on `net-lattice-ip`)
+- `ifaddr` — IP addresses assigned to interfaces (depends on `net-lattice-ip`;
+  named `ifaddr` rather than `address` to avoid colliding with
+  `net-lattice-ip`/`net-lattice-model`'s own `IpAddress`/`Network`
+  primitives — this is the distinct concept of an address *bound to an
+  interface*, not another address representation)
 - `event` — `Event`, the change-notification enum. This lives here, not in
   `net-lattice-platform`, because an event refers to domain data — it has no
   meaning without knowing what a route or an interface is, which is
@@ -234,6 +239,7 @@ force every backend to stub out methods for features it doesn't have:
 - `InterfaceProvider` — list/configure interfaces.
 - `NeighborProvider` — list ARP/NDP entries.
 - `DnsProvider` — read/write DNS resolver configuration.
+- `AddressProvider` — list/configure IP addresses assigned to interfaces.
 - `EventProvider` — subscribe to change notifications, generic over an
   associated `Event` type for the same reason as the others.
 
@@ -590,7 +596,8 @@ are introduced only when there is real implementation work for them:
 | 0.4 ✅ | `interface` module + `InterfaceProvider` across all backends |
 | 0.5 ✅ | `dns` module + `DnsProvider` across all backends |
 | 0.6 ✅ | `neighbor` module + `NeighborProvider` (ARP/NDP) across all backends |
-| 0.7+ | Capability-gated domains: VLAN, VRF, firewall integration, tunnels; `event` module + `EventProvider`; `CurrentState`/`DesiredState`/`Diff`/`ApplyPlan` declarative configuration |
+| 0.7 ✅ | `ifaddr` module + `AddressProvider` (IP addresses on interfaces) across all backends |
+| 0.8+ | `event` module + `EventProvider`; capability-gated domains: VLAN, VRF, firewall integration, tunnels; `CurrentState`/`DesiredState`/`Diff`/`ApplyPlan` declarative configuration |
 
 Each stage is expected to validate the architecture before the next is
 started; earlier stages may inform adjustments to later ones.

@@ -8,10 +8,10 @@
 дизайна, лежащие в её основе. Он отражает предполагаемое направление, а не
 текущее состояние: см. [CHANGELOG.md](CHANGELOG.md) и [README.md](README.md)
 для того, что реально существует в репозитории на данный момент. На момент
-написания реализован этап 0.6 плана поэтапной поставки ниже: `net-lattice-core`,
-`net-lattice-ip`, модули `route`, `interface`, `dns` и `neighbor` в `net-lattice-model`,
-`RouteProvider`, `InterfaceProvider`, `DnsProvider` и `NeighborProvider` в `net-lattice-platform`,
-поддержка маршрутов, интерфейсов, DNS и соседей (ARP/NDP) в `net-lattice-backend-linux`,
+написания реализован этап 0.7 плана поэтапной поставки ниже: `net-lattice-core`,
+`net-lattice-ip`, модули `route`, `interface`, `dns`, `neighbor` и `ifaddr` в `net-lattice-model`,
+`RouteProvider`, `InterfaceProvider`, `DnsProvider`, `NeighborProvider` и `AddressProvider` в `net-lattice-platform`,
+поддержка маршрутов, интерфейсов, DNS, соседей (ARP/NDP) и IP-адресов интерфейсов в `net-lattice-backend-linux`,
 `net-lattice-backend-windows` и `net-lattice-backend-darwin`, а также фасад
 `net-lattice` — всё, что описано дальше этого этапа, по-прежнему только цель,
 а не текущее состояние.
@@ -138,6 +138,11 @@ workspace появился новый домен (DNS, firewall, VLAN, ...) — 
 - `interface` — `Interface` и тип интерфейса (зависит от `mac`)
 - `neighbor` — записи ARP/NDP (зависит от `net-lattice-ip` и `mac`)
 - `dns` — конфигурация DNS-резолвера (зависит от `net-lattice-ip`)
+- `ifaddr` — IP-адреса, назначенные интерфейсам (зависит от `net-lattice-ip`;
+  назван `ifaddr`, а не `address`, чтобы не конфликтовать с собственными
+  примитивами `IpAddress`/`Network` из `net-lattice-ip`/`net-lattice-model` —
+  это отдельное понятие адреса, *привязанного к интерфейсу*, а не ещё одно
+  представление адреса)
 - `event` — `Event`, enum уведомлений об изменениях. Он живёт здесь, а не в
   `net-lattice-platform`, потому что событие ссылается на доменные данные — оно
   бессмысленно без знания того, что такое маршрут или интерфейс, а это ровно
@@ -235,6 +240,7 @@ Provider-traits, по одному на возможность, а не один
 - `InterfaceProvider` — список/настройка интерфейсов.
 - `NeighborProvider` — список записей ARP/NDP.
 - `DnsProvider` — чтение/запись конфигурации DNS-резолвера.
+- `AddressProvider` — список/настройка IP-адресов, назначенных интерфейсам.
 - `EventProvider` — подписка на уведомления об изменениях, generic
   относительно associated-типа `Event` по той же причине, что и остальные.
 
@@ -601,7 +607,8 @@ provider-traits, а не другой контракт backend'а. Дорабо�
 | 0.4 ✅ | модуль `interface` + `InterfaceProvider` на всех backend'ах |
 | 0.5 ✅ | модуль `dns` + `DnsProvider` на всех backend'ах |
 | 0.6 ✅ | модуль `neighbor` + `NeighborProvider` (ARP/NDP) на всех backend'ах |
-| 0.7+ | Домены под Capability: VLAN, VRF, интеграция firewall, туннели; модуль `event` + `EventProvider`; декларативная конфигурация `CurrentState`/`DesiredState`/`Diff`/`ApplyPlan` |
+| 0.7 ✅ | модуль `ifaddr` + `AddressProvider` (IP-адреса интерфейсов) на всех backend'ах |
+| 0.8+ | модуль `event` + `EventProvider`; домены под Capability: VLAN, VRF, интеграция firewall, туннели; декларативная конфигурация `CurrentState`/`DesiredState`/`Diff`/`ApplyPlan` |
 
 Ожидается, что каждый этап проверяет архитектуру перед началом следующего;
 более ранние этапы могут повлиять на корректировки более поздних.
