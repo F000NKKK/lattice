@@ -22,7 +22,8 @@ use net_lattice_model::neighbor::{NeighborEntry, NeighborId, NeighborState};
 use net_lattice_model::route::{Route, RouteId};
 use net_lattice_model::{IpAddress, Network};
 use net_lattice_platform::{
-    AddressProvider, DnsProvider, InterfaceProvider, NeighborProvider, RouteProvider,
+    AddressProvider, Capability, CapabilityProvider, DnsProvider, InterfaceProvider,
+    NeighborProvider, RouteProvider,
 };
 
 const RTM_VERSION: u8 = 5;
@@ -1182,6 +1183,17 @@ fn resolv_conf_error(err: &io::Error) -> Error {
         io::ErrorKind::NotFound => Error::NotFound,
         io::ErrorKind::PermissionDenied => Error::PermissionDenied,
         _ => Error::Platform(io_error_code(err)),
+    }
+}
+
+impl CapabilityProvider for DarwinBackend {
+    /// `IPV6` unconditionally, same rationale as the Linux backend: every
+    /// provider this backend implements already handles both address
+    /// families. `VRF`/`NAMESPACES`/`MONITORING` are left unset — none of
+    /// them are implemented yet, and BSD/macOS has no VRF/namespace
+    /// equivalent to begin with.
+    fn capabilities(&self) -> Capability {
+        Capability::IPV6
     }
 }
 

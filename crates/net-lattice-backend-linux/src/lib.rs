@@ -22,7 +22,8 @@ use net_lattice_model::neighbor::{NeighborEntry, NeighborId, NeighborState};
 use net_lattice_model::route::{Route, RouteId};
 use net_lattice_model::{IpAddress, Network};
 use net_lattice_platform::{
-    AddressProvider, DnsProvider, InterfaceProvider, NeighborProvider, RouteProvider,
+    AddressProvider, Capability, CapabilityProvider, DnsProvider, InterfaceProvider,
+    NeighborProvider, RouteProvider,
 };
 use rtnetlink::packet_route::address::{AddressAttribute, AddressMessage};
 use rtnetlink::packet_route::link::{LinkAttribute, LinkLayerType, LinkMessage, State};
@@ -565,6 +566,18 @@ fn resolv_conf_error(err: &std::io::Error) -> Error {
         std::io::ErrorKind::NotFound => Error::NotFound,
         std::io::ErrorKind::PermissionDenied => Error::PermissionDenied,
         _ => Error::Platform(io_error_code(err)),
+    }
+}
+
+impl CapabilityProvider for LinuxBackend {
+    /// `IPV6` unconditionally: every provider this backend implements
+    /// (routes, interfaces, neighbors, addresses) already handles both
+    /// address families. `VRF`/`NAMESPACES`/`MONITORING` are left unset —
+    /// Linux genuinely supports all three at the kernel level, but Net
+    /// Lattice doesn't implement any of them yet, and a `Capability` this
+    /// backend can't actually act on would be a lie to the caller.
+    fn capabilities(&self) -> Capability {
+        Capability::IPV6
     }
 }
 

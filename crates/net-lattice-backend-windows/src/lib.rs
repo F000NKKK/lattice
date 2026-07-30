@@ -20,7 +20,8 @@ use net_lattice_model::neighbor::{NeighborEntry, NeighborId, NeighborState};
 use net_lattice_model::route::{Route, RouteId};
 use net_lattice_model::{IpAddress, Network};
 use net_lattice_platform::{
-    AddressProvider, DnsProvider, InterfaceProvider, NeighborProvider, RouteProvider,
+    AddressProvider, Capability, CapabilityProvider, DnsProvider, InterfaceProvider,
+    NeighborProvider, RouteProvider,
 };
 use windows::Win32::NetworkManagement::IpHelper::{
     CreateIpForwardEntry2, DeleteIpForwardEntry2, FreeMibTable, GAA_FLAG_SKIP_ANYCAST,
@@ -628,6 +629,16 @@ impl NeighborProvider for WindowsBackend {
             unsafe { FreeMibTable(table.cast()) };
             Ok(neighbors)
         })
+    }
+}
+
+impl CapabilityProvider for WindowsBackend {
+    /// `IPV6` unconditionally, same rationale as the other backends: every
+    /// provider this backend implements already handles both address
+    /// families. `VRF`/`NAMESPACES`/`MONITORING` are left unset — none of
+    /// them are implemented yet.
+    fn capabilities(&self) -> Capability {
+        Capability::IPV6
     }
 }
 
