@@ -17,7 +17,7 @@
 
 **Net Lattice** is a modern, cross-platform Rust library for configuring and inspecting operating system networking through a single, strongly typed API.
 
-> **Status:** Net Lattice has shipped through Stage 0.6 of its architecture plan. The repository now contains multiple crates with real implementations for listing, adding, and removing IPv4/IPv6 routes, for listing network interfaces, for reading DNS resolver configuration, and for reading neighbor (ARP/NDP) tables, on Linux, Windows, and BSD/macOS. This is still a minimal vertical slice, not a complete library — see Current Status below.
+> **Status:** Net Lattice has shipped through Stage 0.7 of its architecture plan. The repository now contains multiple crates with real implementations for listing, adding, and removing IPv4/IPv6 routes, for listing network interfaces, for reading DNS resolver configuration, for reading neighbor (ARP/NDP) tables, and for reading IP addresses assigned to interfaces, on Linux, Windows, and BSD/macOS. This is still a minimal vertical slice, not a complete library — see Current Status below.
 
 ## Overview
 
@@ -67,24 +67,24 @@ Net Lattice intends to eventually provide support for:
 
 ## Current Status
 
-Stage 0.6 of the [architecture](ARCHITECTURE.md)'s Incremental Delivery Plan has landed:
+Stage 0.7 of the [architecture](ARCHITECTURE.md)'s Incremental Delivery Plan has landed:
 
 - `net-lattice-core`, `net-lattice-ip`
-- `net-lattice-model`'s `route`, `mac`, `interface`, `dns`, and `neighbor` modules
-- `net-lattice-platform`'s `RouteProvider`, `InterfaceProvider`, `DnsProvider`, and `NeighborProvider`
-- `net-lattice-backend-linux` (routes, interfaces, and neighbors via Netlink, DNS via `/etc/resolv.conf`)
-- `net-lattice-backend-windows` (routes and interfaces via the Windows IP Helper API, DNS via `GetAdaptersAddresses`, neighbors via `GetIpNetTable2`)
-- `net-lattice-backend-darwin` (routes and neighbors via BSD/macOS route sockets, interfaces via `getifaddrs`, DNS via `/etc/resolv.conf`)
+- `net-lattice-model`'s `route`, `mac`, `interface`, `dns`, `neighbor`, and `ifaddr` modules
+- `net-lattice-platform`'s `RouteProvider`, `InterfaceProvider`, `DnsProvider`, `NeighborProvider`, and `AddressProvider`
+- `net-lattice-backend-linux` (routes, interfaces, neighbors, and addresses via Netlink, DNS via `/etc/resolv.conf`)
+- `net-lattice-backend-windows` (routes and interfaces via the Windows IP Helper API, DNS via `GetAdaptersAddresses`, neighbors via `GetIpNetTable2`, addresses via `GetUnicastIpAddressTable`)
+- `net-lattice-backend-darwin` (routes, neighbors, and addresses via BSD/macOS route sockets/`getifaddrs`, interfaces via `getifaddrs`, DNS via `/etc/resolv.conf`)
 - the `net-lattice` facade
 
-This gives real, published route management, interface listing, DNS resolver reads, and neighbor (ARP/NDP) table reads on Linux, Windows, and BSD/macOS. This is still not a complete library: every other item in the Long-Term Goals above is still ahead; see [ARCHITECTURE.md](ARCHITECTURE.md)'s Incremental Delivery Plan for the staged roadmap and [CHANGELOG.md](CHANGELOG.md) for what has actually shipped.
+This gives real, published route management, interface listing, DNS resolver reads, neighbor (ARP/NDP) table reads, and interface address reads on Linux, Windows, and BSD/macOS. This is still not a complete library: every other item in the Long-Term Goals above is still ahead; see [ARCHITECTURE.md](ARCHITECTURE.md)'s Incremental Delivery Plan for the staged roadmap and [CHANGELOG.md](CHANGELOG.md) for what has actually shipped.
 
 ## Roadmap
 
 1. **Bootstrap** *(completed)* — repository infrastructure, licensing, community health files, and tooling configuration.
 2. **Design** *(completed)* — define the crate layout, core abstractions, and platform abstraction strategy. See [ARCHITECTURE.md](ARCHITECTURE.md) for the planned workspace structure.
 3. **Foundations** *(completed)* — core IP/route/interface types and all three platform backends shipped.
-4. **Platform parity** *(completed)* — Linux, Windows, and BSD/macOS route, interface, DNS-read, and neighbor-read backends shipped.
+4. **Platform parity** *(completed)* — Linux, Windows, and BSD/macOS route, interface, DNS-read, neighbor-read, and address-read backends shipped.
 5. **Advanced features** — monitoring, notifications, transactional configuration, and declarative networking.
 
 ## Contributing

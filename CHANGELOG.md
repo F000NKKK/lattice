@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `net-lattice-model`: the `ifaddr` module (`InterfaceAddress`,
+  `InterfaceAddressId` — an IP address assigned to an interface, plus its
+  prefix length and, for IPv4, its broadcast address). Named `ifaddr`
+  rather than `address` to avoid colliding with the existing
+  `IpAddress`/`Network` primitives.
+- `net-lattice-platform`: `AddressProvider`, with no dependency on
+  `net-lattice-model`.
+- `net-lattice-backend-linux`: `AddressProvider` implementation via
+  Netlink's `RTM_GETADDR` (`rtnetlink`'s `address()` handle).
+- `net-lattice-backend-darwin`: `AddressProvider` implementation via
+  `getifaddrs`'s `AF_INET`/`AF_INET6` entries, reusing the interface
+  backend's existing traversal.
+- `net-lattice-backend-windows`: `AddressProvider` implementation via
+  `GetUnicastIpAddressTable`.
+- `net-lattice` facade: `Lattice::addresses()`, and `LatticeBackend` now
+  additionally requires `AddressProvider<InterfaceAddress = InterfaceAddress>`.
+
 ## [0.6.0] - 2026-07-30
 
 ### Added
