@@ -3,13 +3,13 @@
 ## Supported Versions
 
 Net Lattice follows a rolling support policy. Security fixes are provided only
-for the latest stable release series. With the release of Stage 0.5, support
-for the 0.1.x-0.4.x series has ended — upgrade to 0.5.x to receive fixes.
+for the latest stable release series. With the release of Stage 0.6, support
+for the 0.1.x-0.5.x series has ended — upgrade to 0.6.x to receive fixes.
 
 | Version | Supported |
 | ------- | --------- |
-| 0.5.x | ✅ |
-| 0.1.0 - 0.4.x | ❌ |
+| 0.6.x | ✅ |
+| 0.1.0 - 0.5.x | ❌ |
 
 ## Reporting a Vulnerability
 
@@ -31,13 +31,13 @@ informed as the issue is investigated and resolved.
 
 ## Scope
 
-Net Lattice has landed Stage 0.5 of its [architecture](ARCHITECTURE.md)'s
-Incremental Delivery Plan: route, interface, and DNS-read providers for Linux
-(`net-lattice-backend-linux`, via Netlink and `/etc/resolv.conf`), Windows
-(`net-lattice-backend-windows`, via the IP Helper API), and BSD/macOS
-(`net-lattice-backend-darwin`, via route sockets, `getifaddrs`, and
-`/etc/resolv.conf`). Route and interface operations are privileged (see
-ARCHITECTURE.md's Privilege Model) — vulnerability reports involving
-unintended route manipulation, privilege confusion, or memory-safety issues
-in route, interface, or DNS message/data handling are in scope. No other
-domain (neighbors, firewall, ...) exists yet.
+Net Lattice has landed Stage 0.6 of its [architecture](ARCHITECTURE.md)'s
+Incremental Delivery Plan: route, interface, DNS-read, and neighbor-read
+providers for Linux (`net-lattice-backend-linux`, via Netlink and
+`/etc/resolv.conf`), Windows (`net-lattice-backend-windows`, via the IP
+Helper API), and BSD/macOS (`net-lattice-backend-darwin`, via route sockets,
+`getifaddrs`, and `/etc/resolv.conf`). Route and interface operations are
+privileged (see ARCHITECTURE.md's Privilege Model) — vulnerability reports
+involving unintended route manipulation, privilege confusion, or
+memory-safety issues in route, interface, DNS, or neighbor message/data
+handling are in scope. No other domain (firewall, ...) exists yet.
