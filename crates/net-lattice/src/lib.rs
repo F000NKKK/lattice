@@ -13,7 +13,7 @@ pub use net_lattice_ip::{
 };
 pub use net_lattice_model::dns::DnsConfig;
 pub use net_lattice_model::event::{ChangeKind, Event};
-pub use net_lattice_model::ifaddr::{InterfaceAddress, InterfaceAddressId};
+pub use net_lattice_model::ifaddr::{InterfaceAddress, InterfaceAddressId, NewInterfaceAddress};
 pub use net_lattice_model::interface::{
     AdminState, Interface, InterfaceId, InterfaceKind, OperationalState,
 };
@@ -22,8 +22,8 @@ pub use net_lattice_model::neighbor::{NeighborEntry, NeighborId, NeighborState};
 pub use net_lattice_model::route::{Route, RouteId};
 pub use net_lattice_model::{IpAddress, Network};
 pub use net_lattice_platform::{
-    AddressProvider, Capability, CapabilityProvider, DnsProvider, EventProvider, EventReceiver,
-    InterfaceProvider, NeighborProvider, RouteProvider,
+    AddressMutator, AddressProvider, Capability, CapabilityProvider, DnsProvider, EventProvider,
+    EventReceiver, InterfaceProvider, NeighborProvider, RouteProvider,
 };
 
 /// Bound satisfied by any backend usable with [`Lattice`].
@@ -31,7 +31,8 @@ pub use net_lattice_platform::{
 /// This is where model convergence is enforced: a backend whose
 /// `RouteProvider::Route` (or `InterfaceProvider::Interface`,
 /// `DnsProvider::DnsConfig`, `NeighborProvider::NeighborEntry`,
-/// `AddressProvider::InterfaceAddress`, `EventProvider::Event`) is not
+/// `AddressProvider::InterfaceAddress`, `AddressMutator`'s input/output,
+/// `EventProvider::Event`) is not
 /// literally `net_lattice_model`'s corresponding type fails to satisfy this
 /// trait and cannot be used with [`Lattice`] — a compile error at the point
 /// the backend is wired in, not a runtime surprise. See ARCHITECTURE.md's
@@ -44,6 +45,7 @@ pub trait LatticeBackend:
     + DnsProvider<DnsConfig = DnsConfig>
     + NeighborProvider<NeighborEntry = NeighborEntry>
     + AddressProvider<InterfaceAddress = InterfaceAddress>
+    + AddressMutator<NewInterfaceAddress = NewInterfaceAddress, InterfaceAddress = InterfaceAddress>
     + EventProvider<Event = Event>
     + CapabilityProvider
 {
@@ -55,7 +57,10 @@ impl<B> LatticeBackend for B where
         + DnsProvider<DnsConfig = DnsConfig>
         + NeighborProvider<NeighborEntry = NeighborEntry>
         + AddressProvider<InterfaceAddress = InterfaceAddress>
-        + EventProvider<Event = Event>
+        + AddressMutator<
+            NewInterfaceAddress = NewInterfaceAddress,
+            InterfaceAddress = InterfaceAddress,
+        > + EventProvider<Event = Event>
         + CapabilityProvider
 {
 }
@@ -92,6 +97,17 @@ impl<B: LatticeBackend> Lattice<B> {
 
     pub fn addresses(&self) -> Result<Vec<InterfaceAddress>> {
         self.backend.addresses()
+    }
+
+    /// Assigns an address to an interface and returns the canonical record
+    /// observed from the operating system after creation.
+    pub fn add_address(&self, address: NewInterfaceAddress) -> Result<InterfaceAddress> {
+        self.backend.add_address(address)
+    }
+
+    /// Removes the observed interface address.
+    pub fn remove_address(&self, address: InterfaceAddress) -> Result<()> {
+        self.backend.remove_address(address)
     }
 
     /// The full set of runtime-dependent [`Capability`] flags the connected
