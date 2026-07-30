@@ -12,13 +12,16 @@
 use std::net::IpAddr;
 
 use net_lattice_core::{Error, Id, PlatformErrorCode, Result};
+use net_lattice_model::dns::DnsConfig;
 use net_lattice_model::interface::{AdminState, Interface, InterfaceKind, OperationalState};
 use net_lattice_model::mac::MacAddress;
 use net_lattice_model::route::{Route, RouteId};
 use net_lattice_model::{IpAddress, Network};
-use net_lattice_platform::{InterfaceProvider, RouteProvider};
+use net_lattice_platform::{DnsProvider, InterfaceProvider, RouteProvider};
 use windows::Win32::NetworkManagement::IpHelper::{
-    CreateIpForwardEntry2, DeleteIpForwardEntry2, FreeMibTable, GetIfTable2, GetIpForwardTable2,
+    CreateIpForwardEntry2, DeleteIpForwardEntry2, FreeMibTable, GAA_FLAG_SKIP_ANYCAST,
+    GAA_FLAG_SKIP_FRIENDLY_NAME, GAA_FLAG_SKIP_MULTICAST, GAA_FLAG_SKIP_UNICAST,
+    GetAdaptersAddresses, GetIfTable2, GetIpForwardTable2, IP_ADAPTER_ADDRESSES_LH,
     InitializeIpForwardEntry, MIB_IF_ROW2, MIB_IF_TABLE2, MIB_IPFORWARD_ROW2, MIB_IPFORWARD_TABLE2,
 };
 use windows::Win32::NetworkManagement::Ndis::{
@@ -27,7 +30,7 @@ use windows::Win32::NetworkManagement::Ndis::{
 };
 use windows::Win32::Networking::WinSock::{
     ADDRESS_FAMILY, AF_INET, AF_INET6, IN_ADDR, IN_ADDR_0, IN_ADDR_0_0, IN6_ADDR, IN6_ADDR_0,
-    SOCKADDR_IN, SOCKADDR_IN6, SOCKADDR_IN6_0, SOCKADDR_INET,
+    SOCKADDR, SOCKADDR_IN, SOCKADDR_IN6, SOCKADDR_IN6_0, SOCKADDR_INET,
 };
 
 const AF_UNSPEC: ADDRESS_FAMILY = ADDRESS_FAMILY(0);
@@ -424,6 +427,121 @@ impl InterfaceProvider for WindowsBackend {
     }
 }
 
+/// Reads the address out of a raw `SOCKADDR`, dispatching on its
+/// `sa_family` — used for `GetAdaptersAddresses`'s DNS server entries,
+/// which point at a `sockaddr_in`/`sockaddr_in6`-sized buffer directly
+/// rather than embedding a `SOCKADDR_INET` union like the routing APIs do.
+///
+/// # Safety
+/// `ptr`, if non-null, must point at a validly initialized
+/// `sockaddr_in`/`sockaddr_in6` for the family it claims (true for anything
+/// returned by `GetAdaptersAddresses`).
+unsafe fn sockaddr_ptr_to_ip(ptr: *const SOCKADDR) -> Option<IpAddr> {
+    if ptr.is_null() {
+        return None;
+    }
+    match unsafe { (*ptr).sa_family } {
+        AF_INET => {
+            let sin = unsafe { &*ptr.cast::<SOCKADDR_IN>() };
+            let b = unsafe { sin.sin_addr.S_un.S_un_b };
+            Some(IpAddr::V4(std::net::Ipv4Addr::new(
+                b.s_b1, b.s_b2, b.s_b3, b.s_b4,
+            )))
+        }
+        AF_INET6 => {
+            let sin6 = unsafe { &*ptr.cast::<SOCKADDR_IN6>() };
+            let bytes = unsafe { sin6.sin6_addr.u.Byte };
+            Some(IpAddr::V6(std::net::Ipv6Addr::from(bytes)))
+        }
+        _ => None,
+    }
+}
+
+/// Calls `GetAdaptersAddresses` with the standard two-call pattern (first
+/// to learn the required buffer size, then to fill it) and returns the raw
+/// buffer, since `IP_ADAPTER_ADDRESSES_LH` is a variable-length structure
+/// chained via `Next` pointers into the buffer itself.
+///
+/// Skips unicast/anycast/multicast address enumeration via `GAA_FLAG_*`:
+/// this backend only reads DNS servers and suffixes, which shrinks the
+/// buffer considerably on machines with many addresses per adapter.
+fn adapter_addresses() -> Result<Vec<u8>> {
+    const FAMILY_UNSPEC: u32 = 0;
+    let flags = GAA_FLAG_SKIP_UNICAST
+        | GAA_FLAG_SKIP_ANYCAST
+        | GAA_FLAG_SKIP_MULTICAST
+        | GAA_FLAG_SKIP_FRIENDLY_NAME;
+
+    let mut size: u32 = 0;
+    unsafe {
+        GetAdaptersAddresses(FAMILY_UNSPEC, flags, None, None, &mut size);
+    }
+    if size == 0 {
+        return Ok(Vec::new());
+    }
+
+    let mut buffer = vec![0u8; size as usize];
+    let status = unsafe {
+        GetAdaptersAddresses(
+            FAMILY_UNSPEC,
+            flags,
+            None,
+            Some(buffer.as_mut_ptr().cast::<IP_ADAPTER_ADDRESSES_LH>()),
+            &mut size,
+        )
+    };
+    if status != 0 {
+        return Err(Error::Platform(PlatformErrorCode::Windows(status)));
+    }
+    Ok(buffer)
+}
+
+impl DnsProvider for WindowsBackend {
+    type DnsConfig = DnsConfig;
+
+    fn dns_config(&self) -> Result<Self::DnsConfig> {
+        let buffer = adapter_addresses()?;
+        let mut config = DnsConfig::new();
+        if buffer.is_empty() {
+            return Ok(config);
+        }
+
+        // Every adapter can list the same DNS server / suffix (e.g. a
+        // router advertised on both the wired and wireless adapter), so
+        // dedupe across the whole machine rather than reporting duplicates.
+        let mut seen_nameservers = std::collections::HashSet::new();
+        let mut seen_suffixes = std::collections::HashSet::new();
+
+        let mut adapter = buffer.as_ptr().cast::<IP_ADAPTER_ADDRESSES_LH>();
+        while !adapter.is_null() {
+            unsafe {
+                let mut dns_server = (*adapter).FirstDnsServerAddress;
+                while !dns_server.is_null() {
+                    let socket_address = (*dns_server).Address;
+                    if let Some(ip) = sockaddr_ptr_to_ip(socket_address.lpSockaddr) {
+                        let ip_address = std_ip_to_ip_address(ip);
+                        if seen_nameservers.insert(ip_address) {
+                            config.nameservers.push(ip_address);
+                        }
+                    }
+                    dns_server = (*dns_server).Next;
+                }
+
+                if !(*adapter).DnsSuffix.is_null()
+                    && let Ok(suffix) = (*adapter).DnsSuffix.to_string()
+                    && !suffix.is_empty()
+                    && seen_suffixes.insert(suffix.clone())
+                {
+                    config.search_domains.push(suffix);
+                }
+
+                adapter = (*adapter).Next;
+            }
+        }
+        Ok(config)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -444,6 +562,20 @@ mod tests {
         // running this test is arbitrary. Reaching here without an error is
         // the assertion.
         let _ = routes;
+    }
+
+    /// Exercises a real round trip through `GetAdaptersAddresses`, no
+    /// privilege required: reading DNS configuration is readable by any
+    /// user. Not asserting on contents since the machine running this test
+    /// may have any DNS configuration (including none, e.g. a sandboxed CI
+    /// runner) — reaching here without an error is the assertion.
+    #[test]
+    fn dns_config_reads_the_real_adapter_dns_settings() {
+        let backend = WindowsBackend::new().expect("failed to create Windows backend");
+        let config = backend
+            .dns_config()
+            .expect("GetAdaptersAddresses should not require privilege");
+        let _ = config;
     }
 
     /// Requires `Administrator` privileges (root, or `sudo -E cargo test -- --ignored`
