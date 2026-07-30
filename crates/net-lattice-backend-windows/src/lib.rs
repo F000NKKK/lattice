@@ -954,6 +954,67 @@ mod tests {
         );
     }
 
+    /// Exercises the complete IP Helper address-mutation path against the
+    /// kernel: create a TEST-NET-1 address on the loopback adapter, read its
+    /// canonical row, then delete that observed row.
+    #[test]
+    #[ignore = "requires Administrator; run from elevated cmd/PowerShell: cargo test -p net-lattice-backend-windows add_then_remove_address_round_trips_through_the_kernel -- --ignored"]
+    fn add_then_remove_address_round_trips_through_the_kernel() {
+        let backend = WindowsBackend::new().expect("failed to create Windows backend");
+        let interface_index = backend
+            .interfaces()
+            .expect("failed to list Windows interfaces")
+            .into_iter()
+            .find(|interface| matches!(interface.kind, InterfaceKind::Loopback))
+            .expect("Windows loopback interface was not found")
+            .index;
+        let network = Network::from(Ipv4Network::new(
+            Ipv4Address::new(192, 0, 2, 9),
+            Ipv4PrefixLength::new(24).unwrap(),
+        ));
+
+        if let Some(existing) = backend
+            .addresses()
+            .expect("addresses() failed before add_address")
+            .into_iter()
+            .find(|address| {
+                address.interface_index == interface_index && address.address == network
+            })
+        {
+            let _ = backend.remove_address(existing);
+        }
+
+        let observed = backend
+            .add_address(NewInterfaceAddress::new(
+                Id::new(interface_index as u64),
+                network,
+            ))
+            .expect("add_address failed - are you running as Administrator?");
+        let present = backend
+            .addresses()
+            .expect("addresses() failed after add_address")
+            .into_iter()
+            .any(|address| address.id == observed.id);
+
+        backend
+            .remove_address(observed.clone())
+            .expect("remove_address failed after successful add_address");
+        let absent = !backend
+            .addresses()
+            .expect("addresses() failed after remove_address")
+            .into_iter()
+            .any(|address| address.id == observed.id);
+
+        assert!(
+            present,
+            "added address was not present in addresses() afterward"
+        );
+        assert!(
+            absent,
+            "removed address was still present in addresses() afterward"
+        );
+    }
+
     /// Exercises a real round trip through `GetIpNetTable2`, no privilege
     /// required: reading the neighbor cache is readable by any user.
     #[test]
