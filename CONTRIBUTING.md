@@ -4,11 +4,11 @@ Thank you for your interest in contributing to Net Lattice. This document descri
 
 ## Project Status
 
-Net Lattice has landed Stage 0.6 of its [architecture](ARCHITECTURE.md)'s Incremental Delivery Plan — route, interface, DNS-read, and neighbor-read providers for Linux, Windows, and BSD/macOS, not a complete library. Most public API surface is still unbuilt. The most valuable contributions right now are:
+Net Lattice has landed Stage 0.7 of its [architecture](ARCHITECTURE.md)'s Incremental Delivery Plan — route, interface, DNS-read, neighbor-read, and address-read providers for Linux, Windows, and BSD/macOS, not a complete library. Most public API surface is still unbuilt. The most valuable contributions right now are:
 
 - Feedback on the project's vision, scope, and roadmap (see [README.md](README.md))
 - Discussion of API design and architecture for upcoming stages
-- Implementation work on the next stages in [ARCHITECTURE.md](ARCHITECTURE.md)'s delivery plan (capability-gated domains, `event` module, declarative configuration, ...)
+- Implementation work on the next stages in [ARCHITECTURE.md](ARCHITECTURE.md)'s delivery plan (`event` module, capability-gated domains, declarative configuration, ...)
 - Documentation and tooling improvements
 
 Please read [ARCHITECTURE.md](ARCHITECTURE.md) before proposing a new crate, module, or provider trait — it documents the dependency rules (e.g. `net-lattice-platform` never depends on `net-lattice-model`) and the staged delivery order this project follows.
