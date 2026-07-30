@@ -22,15 +22,15 @@ use std::{io, mem};
 use net_lattice_core::{Error, Id, PlatformErrorCode, Result};
 use net_lattice_model::dns::DnsConfig;
 use net_lattice_model::event::{ChangeKind, Event};
-use net_lattice_model::ifaddr::{InterfaceAddress, InterfaceAddressId};
+use net_lattice_model::ifaddr::{InterfaceAddress, InterfaceAddressId, NewInterfaceAddress};
 use net_lattice_model::interface::{AdminState, Interface, InterfaceKind, OperationalState};
 use net_lattice_model::mac::MacAddress;
 use net_lattice_model::neighbor::{NeighborEntry, NeighborId, NeighborState};
 use net_lattice_model::route::{Route, RouteId};
 use net_lattice_model::{IpAddress, Network};
 use net_lattice_platform::{
-    AddressProvider, Capability, CapabilityProvider, DnsProvider, EventProvider, EventReceiver,
-    InterfaceProvider, NeighborProvider, RouteProvider,
+    AddressMutator, AddressProvider, Capability, CapabilityProvider, DnsProvider, EventProvider,
+    EventReceiver, InterfaceProvider, NeighborProvider, RouteProvider,
 };
 
 const RTM_VERSION: u8 = 5;
@@ -857,6 +857,49 @@ const IOC_IN: libc::c_ulong = 0x8000_0000;
 const IOC_OUT: libc::c_ulong = 0x4000_0000;
 const IOC_INOUT: libc::c_ulong = IOC_IN | IOC_OUT;
 
+// `libc` deliberately does not expose these two add-address request types on
+// Darwin.  They are stable public BSD user-space ABIs from `<net/if.h>` and
+// `<netinet6/in6_var.h>` respectively.  Keeping the layouts here lets the
+// backend use the native ioctl interface directly rather than shelling out to
+// `ifconfig`.
+#[repr(C)]
+struct IfAliasReq {
+    ifra_name: [libc::c_char; libc::IFNAMSIZ],
+    ifra_addr: libc::sockaddr,
+    ifra_broadaddr: libc::sockaddr,
+    ifra_mask: libc::sockaddr,
+}
+
+#[repr(C)]
+struct In6AliasReq {
+    ifra_name: [libc::c_char; libc::IFNAMSIZ],
+    ifra_addr: libc::sockaddr_in6,
+    ifra_dstaddr: libc::sockaddr_in6,
+    ifra_prefixmask: libc::sockaddr_in6,
+    ifra_flags: libc::c_int,
+    ifra_lifetime: libc::in6_addrlifetime,
+}
+
+fn siocaifaddr() -> libc::c_ulong {
+    let size = mem::size_of::<IfAliasReq>() as libc::c_ulong;
+    IOC_IN | ((size & IOCPARM_MASK) << 16) | ((b'i' as libc::c_ulong) << 8) | 26
+}
+
+fn siocdifaddr() -> libc::c_ulong {
+    let size = mem::size_of::<libc::ifreq>() as libc::c_ulong;
+    IOC_IN | ((size & IOCPARM_MASK) << 16) | ((b'i' as libc::c_ulong) << 8) | 25
+}
+
+fn siocaifaddr_in6() -> libc::c_ulong {
+    let size = mem::size_of::<In6AliasReq>() as libc::c_ulong;
+    IOC_IN | ((size & IOCPARM_MASK) << 16) | ((b'i' as libc::c_ulong) << 8) | 26
+}
+
+fn siocdifaddr_in6() -> libc::c_ulong {
+    let size = mem::size_of::<libc::in6_ifreq>() as libc::c_ulong;
+    IOC_IN | ((size & IOCPARM_MASK) << 16) | ((b'i' as libc::c_ulong) << 8) | 25
+}
+
 fn siocgifmtu() -> libc::c_ulong {
     let size = mem::size_of::<libc::ifreq>() as libc::c_ulong;
     IOC_INOUT | ((size & IOCPARM_MASK) << 16) | ((b'i' as libc::c_ulong) << 8) | 51
@@ -1013,6 +1056,164 @@ impl AddressProvider for DarwinBackend {
             addresses
         };
         Ok(addresses)
+    }
+}
+
+fn address_mutation_error(error: io::Error) -> Error {
+    match error.raw_os_error() {
+        Some(libc::EPERM | libc::EACCES) => Error::PermissionDenied,
+        Some(libc::EEXIST) => Error::AlreadyExists,
+        Some(libc::ENOENT | libc::EADDRNOTAVAIL) => Error::NotFound,
+        _ => Error::Platform(io_error_code(&error)),
+    }
+}
+
+fn interface_name_array(interface_index: u32) -> Result<[libc::c_char; libc::IFNAMSIZ]> {
+    let mut name = [0; libc::IFNAMSIZ];
+    if unsafe { libc::if_indextoname(interface_index, name.as_mut_ptr()) }.is_null() {
+        return Err(address_mutation_error(io::Error::last_os_error()));
+    }
+    Ok(name)
+}
+
+fn sockaddr_in(address: std::net::Ipv4Addr) -> libc::sockaddr_in {
+    libc::sockaddr_in {
+        sin_len: mem::size_of::<libc::sockaddr_in>() as u8,
+        sin_family: libc::AF_INET as libc::sa_family_t,
+        sin_port: 0,
+        sin_addr: libc::in_addr {
+            s_addr: u32::from_ne_bytes(address.octets()).to_be(),
+        },
+        sin_zero: [0; 8],
+    }
+}
+
+fn sockaddr_in6(address: std::net::Ipv6Addr) -> libc::sockaddr_in6 {
+    libc::sockaddr_in6 {
+        sin6_len: mem::size_of::<libc::sockaddr_in6>() as u8,
+        sin6_family: libc::AF_INET6 as libc::sa_family_t,
+        sin6_port: 0,
+        sin6_flowinfo: 0,
+        sin6_addr: libc::in6_addr {
+            s6_addr: address.octets(),
+        },
+        sin6_scope_id: 0,
+    }
+}
+
+fn ipv4_mask(prefix_len: u8) -> std::net::Ipv4Addr {
+    let bits = if prefix_len == 0 {
+        0
+    } else {
+        u32::MAX << (32 - prefix_len)
+    };
+    std::net::Ipv4Addr::from(bits.to_be_bytes())
+}
+
+fn ipv6_mask(prefix_len: u8) -> std::net::Ipv6Addr {
+    let mut octets = [0u8; 16];
+    let whole_bytes = (prefix_len / 8) as usize;
+    let remainder = prefix_len % 8;
+    octets[..whole_bytes].fill(u8::MAX);
+    if whole_bytes < octets.len() && remainder != 0 {
+        octets[whole_bytes] = u8::MAX << (8 - remainder);
+    }
+    std::net::Ipv6Addr::from(octets)
+}
+
+fn socket_for_address(address: IpAddr) -> Result<libc::c_int> {
+    let family = match address {
+        IpAddr::V4(_) => libc::AF_INET,
+        IpAddr::V6(_) => libc::AF_INET6,
+    };
+    let socket = unsafe { libc::socket(family, libc::SOCK_DGRAM, 0) };
+    if socket < 0 {
+        Err(address_mutation_error(io::Error::last_os_error()))
+    } else {
+        Ok(socket)
+    }
+}
+
+fn add_interface_address(address: &NewInterfaceAddress) -> Result<()> {
+    let (ip, prefix_len) = network_to_std(address.address);
+    if matches!(ip, IpAddr::V6(_)) && address.broadcast.is_some() {
+        return Err(Error::InvalidState);
+    }
+    let socket = socket_for_address(ip)?;
+    let name = interface_name_array(address.interface_id.value() as u32)?;
+    let result = match ip {
+        IpAddr::V4(ip) => {
+            let mut request: IfAliasReq = unsafe { mem::zeroed() };
+            request.ifra_name = name;
+            request.ifra_addr = unsafe { mem::transmute(sockaddr_in(ip)) };
+            request.ifra_mask = unsafe { mem::transmute(sockaddr_in(ipv4_mask(prefix_len))) };
+            if let Some(broadcast) = address.broadcast {
+                request.ifra_broadaddr =
+                    unsafe { mem::transmute(sockaddr_in(std::net::Ipv4Addr::from(broadcast))) };
+            }
+            unsafe { libc::ioctl(socket, siocaifaddr(), &mut request) }
+        }
+        IpAddr::V6(ip) => {
+            let mut request: In6AliasReq = unsafe { mem::zeroed() };
+            request.ifra_name = name;
+            request.ifra_addr = sockaddr_in6(ip);
+            request.ifra_prefixmask = sockaddr_in6(ipv6_mask(prefix_len));
+            unsafe { libc::ioctl(socket, siocaifaddr_in6(), &mut request) }
+        }
+    };
+    let error = if result == 0 {
+        None
+    } else {
+        Some(address_mutation_error(io::Error::last_os_error()))
+    };
+    unsafe { libc::close(socket) };
+    error.map_or(Ok(()), Err)
+}
+
+fn remove_interface_address(address: &InterfaceAddress) -> Result<()> {
+    let (ip, _) = network_to_std(address.address);
+    let socket = socket_for_address(ip)?;
+    let name = interface_name_array(address.interface_index)?;
+    let result = match ip {
+        IpAddr::V4(ip) => {
+            let mut request: libc::ifreq = unsafe { mem::zeroed() };
+            request.ifr_name = name;
+            request.ifr_ifru.ifru_addr = unsafe { mem::transmute(sockaddr_in(ip)) };
+            unsafe { libc::ioctl(socket, siocdifaddr(), &mut request) }
+        }
+        IpAddr::V6(ip) => {
+            let mut request: libc::in6_ifreq = unsafe { mem::zeroed() };
+            request.ifr_name = name;
+            request.ifr_ifru.ifru_addr = sockaddr_in6(ip);
+            unsafe { libc::ioctl(socket, siocdifaddr_in6(), &mut request) }
+        }
+    };
+    let error = if result == 0 {
+        None
+    } else {
+        Some(address_mutation_error(io::Error::last_os_error()))
+    };
+    unsafe { libc::close(socket) };
+    error.map_or(Ok(()), Err)
+}
+
+impl AddressMutator for DarwinBackend {
+    type NewInterfaceAddress = NewInterfaceAddress;
+    type InterfaceAddress = InterfaceAddress;
+
+    fn add_address(&self, address: Self::NewInterfaceAddress) -> Result<Self::InterfaceAddress> {
+        add_interface_address(&address)?;
+        self.addresses()?
+            .into_iter()
+            .find(|observed| {
+                observed.interface_index == address.interface_id.value() as u32
+                    && observed.address == address.address
+            })
+            .ok_or(Error::InvalidState)
+    }
+
+    fn remove_address(&self, address: Self::InterfaceAddress) -> Result<()> {
+        remove_interface_address(&address)
     }
 }
 
