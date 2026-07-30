@@ -17,11 +17,11 @@
 
 **Net Lattice** is a modern, cross-platform Rust library for configuring and inspecting operating system networking through a single, strongly typed API.
 
-> **Status:** Net Lattice has shipped through Stage 0.9 of its architecture plan. The repository contains real implementations for listing, adding, and removing IPv4/IPv6 routes and interface IP addresses; listing network interfaces; reading DNS resolver configuration and neighbor (ARP/NDP) tables; and monitoring network changes on Linux, Windows, and BSD/macOS. This is still a minimal vertical slice, not a complete library — see Current Status below.
+> **Status:** Net Lattice provides cross-platform network inspection, route and address mutation, and change monitoring through native operating-system APIs on Linux, Windows, and macOS. Stage 0.9 of the architecture plan has shipped; see Current Status below.
 
 ## Overview
 
-Operating systems expose networking configuration and state through wildly different, low-level, and often platform-specific interfaces: Linux Netlink, the Windows IP Helper API, BSD/macOS route sockets, and various vendor-specific mechanisms. Applications that need to inspect or configure networking — IP addresses, routes, interfaces, neighbors, and more — are typically forced to either shell out to external tools, parse text output, or write and maintain separate platform-specific integrations.
+Operating systems expose networking configuration and state through wildly different, low-level, and often platform-specific interfaces: Linux Netlink, the Windows IP Helper API, and macOS BSD routing facilities, among others. Applications that need to inspect or configure networking — IP addresses, routes, interfaces, neighbors, and more — are typically forced to either shell out to external tools, parse text output, or write and maintain separate platform-specific integrations.
 
 Net Lattice aims to unify these interfaces behind a single, strongly typed, idiomatic Rust API, so that consumers never need to deal with raw platform structures, shell commands, or ad hoc string parsing.
 
@@ -39,22 +39,24 @@ Net Lattice is intended to fill this gap by providing a single, well-designed ab
 - **Correctness and safety first.** Networking configuration is sensitive; the library should make incorrect states difficult to represent.
 - **Incremental, well-considered growth.** Features are added deliberately, with attention to API design and long-term maintainability, rather than rushed to cover every possible use case.
 
-## Long-Term Goals
+## Capability Roadmap
 
-Net Lattice intends to eventually provide support for:
+Implemented:
 
-- IP addresses
-- Network prefixes
-- Routes
-- Interfaces
-- Gateways
-- DNS configuration
+- IPv4/IPv6 addresses and prefixes
+- Route inspection and mutation
+- Interface inspection
+- DNS resolver inspection
 - Neighbor tables (ARP/NDP)
+- Network monitoring and change notifications
+
+Planned:
+
+- DNS mutation
 - VLANs
 - VRFs
 - Network namespaces
 - Firewall integration
-- Network monitoring and change notifications
 - Transactional configuration
 - Declarative networking
 
@@ -74,23 +76,47 @@ Stage 0.9 of the [architecture](ARCHITECTURE.md)'s Incremental Delivery Plan has
 - `net-lattice-platform`'s `RouteProvider`, `InterfaceProvider`, `DnsProvider`, `NeighborProvider`, `AddressProvider`, `AddressMutator`, `CapabilityProvider`, and synchronous `EventProvider`/`EventReceiver`
 - `net-lattice-backend-linux` (routes, interfaces, neighbors, address reads and mutations, and monitoring via Netlink; DNS via `/etc/resolv.conf`)
 - `net-lattice-backend-windows` (routes and interfaces via the Windows IP Helper API, DNS via `GetAdaptersAddresses`, neighbors via `GetIpNetTable2`, address reads and mutations via the unicast-address IP Helper API, monitoring via IP Helper notifications)
-- `net-lattice-backend-darwin` (routes and monitoring via BSD/macOS route sockets, interfaces and address reads via `getifaddrs`, address mutations via native address ioctls, DNS via `/etc/resolv.conf`)
+- `net-lattice-backend-darwin` (routes, neighbors, and monitoring via macOS BSD routing facilities; interfaces and address reads via `getifaddrs`; address mutations via native address ioctls; DNS via `/etc/resolv.conf`)
 - the `net-lattice` facade, including `Lattice::add_address()`, `Lattice::remove_address()`, `Lattice::capabilities()`, `Lattice::supports()`, and `Lattice::watch()`
 
-This gives real route and interface-address management, interface listing, DNS resolver reads, neighbor (ARP/NDP) table reads, and network-change monitoring on Linux, Windows, and BSD/macOS. Address creation accepts `NewInterfaceAddress` and returns the canonical observed `InterfaceAddress`, so callers never invent an address ID. Query `Lattice::supports(Capability::MONITORING)` before calling `Lattice::watch()` in portable code. This is still not a complete library: every other item in the Long-Term Goals above is still ahead; see [ARCHITECTURE.md](ARCHITECTURE.md)'s Incremental Delivery Plan for the staged roadmap and [CHANGELOG.md](CHANGELOG.md) for what has actually shipped.
+This gives real route and interface-address management, interface listing, DNS resolver reads, neighbor (ARP/NDP) table reads, and network-change monitoring on Linux, Windows, and macOS. Address creation accepts `NewInterfaceAddress` and returns the resulting observed `InterfaceAddress`, so callers never invent an address ID. Query `Lattice::supports(Capability::MONITORING)` before calling `Lattice::watch()` in portable code. This is still not a complete library: DNS mutation, VLANs, VRFs, namespaces, firewall integration, transactional configuration, declarative networking, and other advanced capabilities are still ahead; see [ARCHITECTURE.md](ARCHITECTURE.md)'s Incremental Delivery Plan for the staged roadmap and [CHANGELOG.md](CHANGELOG.md) for what has actually shipped.
+
+## Quick Example
+
+```rust
+use net_lattice::{Lattice, Result};
+
+fn main() -> Result<()> {
+    let lattice = Lattice::connect()?;
+
+    for interface in lattice.interfaces()? {
+        println!("{interface:?}");
+    }
+
+    for route in lattice.routes()? {
+        println!("{route:?}");
+    }
+
+    let watcher = lattice.watch()?;
+    loop {
+        let event = watcher.recv()?;
+        println!("{event:?}");
+    }
+}
+```
 
 ## Roadmap
 
 1. **Bootstrap** *(completed)* — repository infrastructure, licensing, community health files, and tooling configuration.
 2. **Design** *(completed)* — define the crate layout, core abstractions, and platform abstraction strategy. See [ARCHITECTURE.md](ARCHITECTURE.md) for the planned workspace structure.
 3. **Foundations** *(completed)* — core IP/route/interface types and all three platform backends shipped.
-4. **Platform parity** *(completed)* — Linux, Windows, and BSD/macOS route and address mutation, interface, DNS-read, neighbor-read, address-read, and monitoring backends shipped.
-5. **Event semantics** — bounded delivery, overflow/resynchronization, filtering, cancellation, and error-propagation guarantees.
-6. **Advanced features** — async adapter, further write parity, transactional configuration, and declarative networking.
+4. **Platform parity** *(completed)* — Linux, Windows, and macOS route and address mutation, interface, DNS-read, neighbor-read, address-read, and monitoring backends shipped.
+5. **Stage 0.10: Event semantics** — bounded delivery, overflow and resynchronization signaling, filtering, cancellation, and error propagation.
+6. **Later stages** — async adapters, further write parity, transactional configuration, and declarative networking.
 
 ## Contributing
 
-Contributions are welcome once design and implementation work begins. See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines, [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community expectations, and [SECURITY.md](SECURITY.md) for reporting security issues.
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines, [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community expectations, and [SECURITY.md](SECURITY.md) for reporting security issues.
 
 ## License
 
