@@ -574,12 +574,127 @@ fn resolv_conf_error(err: &std::io::Error) -> Error {
 impl CapabilityProvider for LinuxBackend {
     /// `IPV6` unconditionally: every provider this backend implements
     /// (routes, interfaces, neighbors, addresses) already handles both
-    /// address families. `VRF`/`NAMESPACES`/`MONITORING` are left unset —
-    /// Linux genuinely supports all three at the kernel level, but Net
-    /// Lattice doesn't implement any of them yet, and a `Capability` this
+    /// address families. `MONITORING` unconditionally too, now that
+    /// `EventProvider` is implemented below. `VRF`/`NAMESPACES` are left
+    /// unset — Linux genuinely supports both at the kernel level, but Net
+    /// Lattice doesn't implement either yet, and a `Capability` this
     /// backend can't actually act on would be a lie to the caller.
     fn capabilities(&self) -> Capability {
-        Capability::IPV6
+        Capability::IPV6 | Capability::MONITORING
+    }
+}
+
+/// Maps one Netlink route/link/neighbour/address notification to an
+/// [`Event`]. Reuses the existing `message_to_*` conversion functions
+/// (built for the one-shot `routes()`/`interfaces()`/... dumps) purely to
+/// derive the same `Id` a consumer would see from those methods — a
+/// notification's `NewFoo`/`DelFoo` variant already tells us the
+/// `ChangeKind`, so only the `Id` needs deriving here.
+///
+/// Returns `None` for Netlink message kinds this backend doesn't turn into
+/// an `Event` (link property changes, neighbour tables, ...) and for any
+/// notification whose attributes don't parse into an `Id` (extremely rare
+/// for the kernel's own unsolicited notifications, but the parsers are
+/// intentionally lenient rather than panicking on unexpected input).
+fn route_netlink_message_to_event(message: RouteNetlinkMessage) -> Option<Event> {
+    match message {
+        RouteNetlinkMessage::NewRoute(msg) => message_to_route(&msg).map(|route| Event::Route {
+            id: route.id,
+            kind: ChangeKind::Added,
+        }),
+        RouteNetlinkMessage::DelRoute(msg) => message_to_route(&msg).map(|route| Event::Route {
+            id: route.id,
+            kind: ChangeKind::Removed,
+        }),
+        RouteNetlinkMessage::NewLink(msg) => Some(Event::Interface {
+            id: Id::new(msg.header.index as u64),
+            kind: ChangeKind::Added,
+        }),
+        RouteNetlinkMessage::DelLink(msg) => Some(Event::Interface {
+            id: Id::new(msg.header.index as u64),
+            kind: ChangeKind::Removed,
+        }),
+        RouteNetlinkMessage::NewNeighbour(msg) => {
+            message_to_neighbor(&msg).map(|entry| Event::Neighbor {
+                id: entry.id,
+                kind: ChangeKind::Added,
+            })
+        }
+        RouteNetlinkMessage::DelNeighbour(msg) => {
+            message_to_neighbor(&msg).map(|entry| Event::Neighbor {
+                id: entry.id,
+                kind: ChangeKind::Removed,
+            })
+        }
+        RouteNetlinkMessage::NewAddress(msg) => {
+            message_to_interface_address(&msg).map(|addr| Event::Address {
+                id: addr.id,
+                kind: ChangeKind::Added,
+            })
+        }
+        RouteNetlinkMessage::DelAddress(msg) => {
+            message_to_interface_address(&msg).map(|addr| Event::Address {
+                id: addr.id,
+                kind: ChangeKind::Removed,
+            })
+        }
+        _ => None,
+    }
+}
+
+impl EventProvider for LinuxBackend {
+    type Event = Event;
+
+    /// Opens a *second*, independent Netlink socket subscribed to the
+    /// `RTNLGRP_LINK`/`RTNLGRP_NEIGH`/`RTNLGRP_IPV4_ROUTE`/
+    /// `RTNLGRP_IPV6_ROUTE`/`RTNLGRP_IPV4_IFADDR`/`RTNLGRP_IPV6_IFADDR`
+    /// multicast groups (`rtnetlink::new_multicast_connection`, the same
+    /// mechanism `ip monitor` uses) — separate from `self.handle`'s socket,
+    /// which only ever sends request/reply traffic. Two background tasks
+    /// are spawned onto `self.runtime`: one drives the new socket's
+    /// connection (required for it to make progress at all, mirroring
+    /// `LinuxBackend::new`'s `connection` task), the other reads
+    /// unsolicited notifications off it and forwards mapped `Event`s into
+    /// the channel `EventReceiver` reads from.
+    ///
+    /// DNS resolver configuration changes (`/etc/resolv.conf`) have no
+    /// Netlink signal — see `Event`'s doc comment — so no `Event::Dns` is
+    /// ever produced by this backend.
+    fn watch(&self) -> Result<EventReceiver<Self::Event>> {
+        let groups = [
+            MulticastGroup::Link,
+            MulticastGroup::Neigh,
+            MulticastGroup::Ipv4Route,
+            MulticastGroup::Ipv6Route,
+            MulticastGroup::Ipv4Ifaddr,
+            MulticastGroup::Ipv6Ifaddr,
+        ];
+        let _guard = self.runtime.enter();
+        let (connection, _handle, mut messages) = rtnetlink::new_multicast_connection(&groups)
+            .map_err(|err| Error::Platform(io_error_code(&err)))?;
+        self.runtime.spawn(connection);
+
+        let (sender, receiver) = std::sync::mpsc::channel();
+        self.runtime.spawn(async move {
+            while let Some((message, _addr)) = messages.next().await {
+                let (_header, payload) = message.into_parts();
+                let rtnetlink::packet_core::NetlinkPayload::InnerMessage(inner) = payload else {
+                    continue;
+                };
+                if let Some(event) = route_netlink_message_to_event(inner)
+                    && sender.send(event).is_err()
+                {
+                    // The `EventReceiver` was dropped — nothing left to
+                    // forward to. `messages` itself is left undrained here
+                    // (see the doc comment above); the connection task
+                    // keeps running harmlessly until `self.runtime` is
+                    // dropped.
+                    break;
+                }
+            }
+        });
+
+        Ok(EventReceiver::new(receiver))
     }
 }
 
