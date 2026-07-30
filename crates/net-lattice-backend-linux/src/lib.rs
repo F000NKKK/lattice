@@ -14,11 +14,12 @@ use std::net::IpAddr;
 
 use futures::TryStreamExt;
 use net_lattice_core::{Error, Id, PlatformErrorCode, Result};
+use net_lattice_model::dns::DnsConfig;
 use net_lattice_model::interface::{AdminState, Interface, InterfaceKind, OperationalState};
 use net_lattice_model::mac::MacAddress;
 use net_lattice_model::route::{Route, RouteId};
 use net_lattice_model::{IpAddress, Network};
-use net_lattice_platform::{InterfaceProvider, RouteProvider};
+use net_lattice_platform::{DnsProvider, InterfaceProvider, RouteProvider};
 use rtnetlink::packet_route::link::{LinkAttribute, LinkLayerType, LinkMessage, State};
 use rtnetlink::packet_route::route::{RouteAddress, RouteAttribute, RouteMessage};
 use rtnetlink::{Handle, RouteMessageBuilder};
@@ -363,6 +364,57 @@ impl InterfaceProvider for LinuxBackend {
     }
 }
 
+/// Parses the `nameserver`/`search`/`domain` directives out of a
+/// `resolv.conf`-format file (`man 5 resolv.conf`) — the same format on
+/// Linux and BSD/macOS, so this parser is shared verbatim by
+/// `net-lattice-backend-darwin`.
+///
+/// `domain` is folded into `search_domains` too: it is the legacy
+/// single-domain predecessor of `search` and every modern resolver treats a
+/// lone `domain` entry as an implicit one-element search list.
+fn parse_resolv_conf(contents: &str) -> DnsConfig {
+    let mut config = DnsConfig::new();
+    for line in contents.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
+            continue;
+        }
+        let mut parts = line.split_whitespace();
+        match parts.next() {
+            Some("nameserver") => {
+                if let Some(addr) = parts.next().and_then(|s| s.parse::<IpAddr>().ok()) {
+                    config.nameservers.push(std_ip_to_ip_address(addr));
+                }
+            }
+            Some("search") | Some("domain") => {
+                config
+                    .search_domains
+                    .extend(parts.map(|domain| domain.to_string()));
+            }
+            _ => {}
+        }
+    }
+    config
+}
+
+fn resolv_conf_error(err: &std::io::Error) -> Error {
+    match err.kind() {
+        std::io::ErrorKind::NotFound => Error::NotFound,
+        std::io::ErrorKind::PermissionDenied => Error::PermissionDenied,
+        _ => Error::Platform(io_error_code(err)),
+    }
+}
+
+impl DnsProvider for LinuxBackend {
+    type DnsConfig = DnsConfig;
+
+    fn dns_config(&self) -> Result<Self::DnsConfig> {
+        let contents =
+            std::fs::read_to_string("/etc/resolv.conf").map_err(|err| resolv_conf_error(&err))?;
+        Ok(parse_resolv_conf(&contents))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -399,6 +451,39 @@ mod tests {
                 .any(|iface| iface.name == "lo" && iface.kind == InterfaceKind::Loopback),
             "expected a `lo` interface classified as Loopback, got: {interfaces:?}"
         );
+    }
+
+    #[test]
+    fn parse_resolv_conf_reads_nameservers_and_search_domains() {
+        let contents = "# comment\n\
+                         nameserver 1.1.1.1\n\
+                         nameserver 2606:4700:4700::1111\n\
+                         search example.com corp.example.com\n";
+        let config = parse_resolv_conf(contents);
+        assert_eq!(
+            config.nameservers,
+            vec![
+                IpAddress::from(Ipv4Address::new(1, 1, 1, 1)),
+                std_ip_to_ip_address("2606:4700:4700::1111".parse().unwrap()),
+            ]
+        );
+        assert_eq!(
+            config.search_domains,
+            vec!["example.com".to_string(), "corp.example.com".to_string()]
+        );
+    }
+
+    /// Reads the real `/etc/resolv.conf` present on this test environment.
+    /// Every Linux system has one (even if empty/symlinked to
+    /// systemd-resolved's stub), so this exercises the real filesystem read
+    /// without requiring any specific content.
+    #[test]
+    fn dns_config_reads_the_real_resolv_conf() {
+        let backend = LinuxBackend::new().expect("failed to open a Netlink connection");
+        let config = backend
+            .dns_config()
+            .expect("/etc/resolv.conf should be readable");
+        let _ = config;
     }
 
     fn loopback_interface_index(backend: &LinuxBackend) -> u32 {
