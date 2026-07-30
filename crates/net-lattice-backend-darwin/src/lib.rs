@@ -378,8 +378,20 @@ fn build_add_message(route: &Route) -> Result<Vec<u8>> {
             // without `RTF_GATEWAY` (that flag specifically means "a real
             // next hop", not "no next hop, just this wire"), is how a
             // direct/on-link route is expressed.
+            //
+            // The interface's *name* matters, not just `sdl_index`: this
+            // mirrors `route.tproj/route.c` (`route add -interface`),
+            // which resolves the interface's real `sockaddr_dl` via
+            // `getifaddrs` and copies it whole (name included) into the
+            // gateway slot — a synthetic `sockaddr_dl` carrying only
+            // `sdl_index` and an empty name is accepted by the kernel
+            // (`rtm_errno == 0`) but doesn't actually resolve to a usable
+            // interface reference, and no route gets created.
+            let Some(name) = interface_name(interface_index) else {
+                return Err(Error::NotFound);
+            };
             hdr.rtm_addrs |= RTA_GATEWAY;
-            offset += push_link_gateway(&mut buf, offset, interface_index);
+            offset += push_link_gateway(&mut buf, offset, interface_index, &name);
         }
         (None, None) => return Err(Error::InvalidState),
     }
@@ -429,42 +441,65 @@ fn build_delete_message(route: &Route) -> Result<Vec<u8>> {
     Ok(buf)
 }
 
-/// Pushes an `AF_LINK` `sockaddr_dl` naming interface `interface_index`,
-/// with no hardware address of its own — this is the gateway-slot shape
-/// used for "send directly out this interface, no next hop" routes (see
-/// `build_add_message`'s `(None, Some(interface_index))` case).
+/// Looks up interface `index`'s name via `if_indextoname` — needed because
+/// the kernel resolves the `AF_LINK` gateway `push_link_gateway` builds by
+/// name, not by `sdl_index` alone (see that function's doc comment).
+fn interface_name(index: u32) -> Option<Vec<u8>> {
+    let mut name_buf = [0 as libc::c_char; libc::IFNAMSIZ];
+    let ptr = unsafe { libc::if_indextoname(index, name_buf.as_mut_ptr()) };
+    if ptr.is_null() {
+        return None;
+    }
+    let cstr = unsafe { std::ffi::CStr::from_ptr(name_buf.as_ptr()) };
+    Some(cstr.to_bytes().to_vec())
+}
+
+/// Pushes an `AF_LINK` `sockaddr_dl` naming interface `interface_index`
+/// (by both index and name), with no hardware address of its own — this
+/// is the gateway-slot shape used for "send directly out this interface,
+/// no next hop" routes (see `build_add_message`'s `(None,
+/// Some(interface_index))` case).
 ///
-/// The on-wire `sdl_len` is the *significant* header length only (8 bytes:
-/// `sdl_len`+`sdl_family`+`sdl_index`+`sdl_type`+`sdl_nlen`+`sdl_alen`+
-/// `sdl_slen`) — not `sizeof(struct sockaddr_dl)` (20, padded with a
-/// 12-byte `sdl_data` array that's unused here since there's no interface
-/// name or link-layer address to attach). This matches
+/// Mirrors `route.tproj/route.c` (`route add -interface`): it resolves the
+/// interface's *real* `sockaddr_dl` via `getifaddrs` — name, index, and
+/// all — and copies that whole struct into the gateway slot. An
+/// index-only `sockaddr_dl` with an empty name is silently accepted by the
+/// kernel (`rtm_errno == 0`) but never resolves to a usable interface
+/// reference, and no route actually gets created — that was this
+/// function's original bug.
+///
+/// The on-wire `sdl_len` is the *significant* header length only (`8 +
+/// name.len()`) — not `sizeof(struct sockaddr_dl)` (20, padded with an
+/// unused 12-byte `sdl_data` array sized for the worst case). This matches
 /// `golang.org/x/net/route`'s `LinkAddr.marshal()` (`lenAndSpace`: `8 +
 /// len(Name) + len(Addr)`), the reference implementation for BSD routing
-/// sockets; declaring the full padded struct size here previously produced
-/// a `sockaddr_dl` bearing `sdl_nlen`/`sdl_alen` of `0` alongside a `sdl_len`
-/// that didn't match `8 + sdl_nlen + sdl_alen`, which the kernel evidently
-/// doesn't resolve to a usable interface reference.
-fn push_link_gateway(buf: &mut [u8], offset: usize, interface_index: u32) -> usize {
-    const SDL_HEADER_LEN: usize = 8;
-    let sdl = libc::sockaddr_dl {
-        sdl_len: SDL_HEADER_LEN as u8,
+/// sockets.
+fn push_link_gateway(buf: &mut [u8], offset: usize, interface_index: u32, name: &[u8]) -> usize {
+    const HEADER_LEN: usize = 8;
+    let nlen = name.len().min(12);
+    let sdl_len = HEADER_LEN + nlen;
+
+    let mut sdl = libc::sockaddr_dl {
+        sdl_len: sdl_len as u8,
         sdl_family: libc::AF_LINK as u8,
         sdl_index: interface_index as u16,
         sdl_type: 0,
-        sdl_nlen: 0,
+        sdl_nlen: nlen as u8,
         sdl_alen: 0,
         sdl_slen: 0,
         sdl_data: [0; 12],
     };
+    for (dst, &src) in sdl.sdl_data[..nlen].iter_mut().zip(name) {
+        *dst = src as libc::c_char;
+    }
     unsafe {
         std::ptr::copy_nonoverlapping(
             &sdl as *const _ as *const u8,
             buf.as_mut_ptr().add(offset),
-            SDL_HEADER_LEN,
+            sdl_len,
         );
     }
-    SDL_HEADER_LEN
+    sdl_len
 }
 
 fn push_sockaddr(buf: &mut [u8], offset: usize, addr: IpAddr) -> usize {

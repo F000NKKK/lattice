@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.4.3] - TBD
+## [0.4.7] - TBD
 
 ### Added
 
@@ -109,7 +109,20 @@ BSD/macOS.
   kernel accepted the malformed request (`rtm_errno == 0`) but never
   actually created the route, which is why `routes()` found nothing under
   that destination at all afterward, on any interface. `sdl_len` and the
-  bytes actually written are now both 8.
+  bytes actually written are now both 8. This alone didn't fix the round
+  trip, though — see the next entry.
+- `net-lattice-backend-darwin`: the `AF_LINK` gateway for interface-only
+  routes carried only `sdl_index`, an empty name (`sdl_nlen = 0`). Checked
+  against `route.tproj/route.c` (Apple's own `route(8)` source, via
+  `apple-oss-distributions/network_cmds`) — `route add -interface`
+  resolves the interface's real `sockaddr_dl` via `getifaddrs` and copies
+  it *whole*, name included, into the gateway slot. An index-only
+  `sockaddr_dl` is accepted by the kernel (`rtm_errno == 0`, matching what
+  CI observed) but doesn't resolve to a usable interface reference, so no
+  route is actually created. `push_link_gateway` now looks up the
+  interface's name via `if_indextoname` and includes it (`sdl_nlen`/
+  `sdl_data`), matching what a real, working `sockaddr_dl` for that
+  interface looks like.
 
 ## [0.3.0] - TBD
 
