@@ -349,40 +349,51 @@ fn dump_routing_table() -> Result<Vec<u8>> {
         0,
     ];
 
-    let mut needed: usize = 0;
-    unsafe {
-        if libc::sysctl(
-            mib.as_mut_ptr(),
-            mib.len() as libc::c_uint,
-            std::ptr::null_mut(),
-            &mut needed,
-            std::ptr::null_mut(),
-            0,
-        ) != 0
-        {
+    // `NET_RT_DUMP` is a live snapshot. Between its size query and the
+    // second call the table may grow (especially while another watcher/test
+    // adds a route), in which case Darwin reports ENOMEM. Re-query rather
+    // than surfacing a spurious failure to `routes()` callers.
+    for _ in 0..4 {
+        let mut needed = 0usize;
+        let status = unsafe {
+            libc::sysctl(
+                mib.as_mut_ptr(),
+                mib.len() as libc::c_uint,
+                std::ptr::null_mut(),
+                &mut needed,
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+        if status != 0 {
             return Err(Error::Platform(io_error_code(&io::Error::last_os_error())));
         }
-    }
-    if needed == 0 {
-        return Ok(Vec::new());
+        if needed == 0 {
+            return Ok(Vec::new());
+        }
+
+        let mut buf = vec![0u8; needed];
+        let status = unsafe {
+            libc::sysctl(
+                mib.as_mut_ptr(),
+                mib.len() as libc::c_uint,
+                buf.as_mut_ptr().cast(),
+                &mut needed,
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+        if status == 0 {
+            buf.truncate(needed);
+            return Ok(buf);
+        }
+        let err = io::Error::last_os_error();
+        if err.raw_os_error() != Some(libc::ENOMEM) {
+            return Err(Error::Platform(io_error_code(&err)));
+        }
     }
 
-    let mut buf = vec![0u8; needed];
-    unsafe {
-        if libc::sysctl(
-            mib.as_mut_ptr(),
-            mib.len() as libc::c_uint,
-            buf.as_mut_ptr().cast(),
-            &mut needed,
-            std::ptr::null_mut(),
-            0,
-        ) != 0
-        {
-            return Err(Error::Platform(io_error_code(&io::Error::last_os_error())));
-        }
-    }
-    buf.truncate(needed);
-    Ok(buf)
+    Err(Error::Platform(PlatformErrorCode::Darwin(libc::ENOMEM)))
 }
 
 fn build_add_message(route: &Route) -> Result<Vec<u8>> {
