@@ -8,10 +8,10 @@
 дизайна, лежащие в её основе. Он отражает предполагаемое направление, а не
 текущее состояние: см. [CHANGELOG.md](CHANGELOG.md) и [README.md](README.md)
 для того, что реально существует в репозитории на данный момент. На момент
-написания реализован этап 0.8 плана поэтапной поставки ниже: `net-lattice-core`,
+написания реализован этап 0.9 плана поэтапной поставки ниже: `net-lattice-core`,
 `net-lattice-ip`, модули `route`, `interface`, `dns`, `neighbor` и `ifaddr` в `net-lattice-model`,
-`RouteProvider`, `InterfaceProvider`, `DnsProvider`, `NeighborProvider`, `AddressProvider`, `CapabilityProvider` и `EventProvider` в `net-lattice-platform`,
-поддержка маршрутов, интерфейсов, DNS, соседей (ARP/NDP), IP-адресов интерфейсов и нативного мониторинга событий в `net-lattice-backend-linux`,
+`RouteProvider`, `InterfaceProvider`, `DnsProvider`, `NeighborProvider`, `AddressProvider`, `AddressMutator`, `CapabilityProvider` и `EventProvider` в `net-lattice-platform`,
+поддержка маршрутов, адресов интерфейсов, DNS, соседей (ARP/NDP) и нативного мониторинга событий в `net-lattice-backend-linux`,
 `net-lattice-backend-windows` и `net-lattice-backend-darwin`, а также фасад
 `net-lattice` — всё, что описано дальше этого этапа, по-прежнему только цель,
 а не текущее состояние.
@@ -138,7 +138,9 @@ workspace появился новый домен (DNS, firewall, VLAN, ...) — 
 - `interface` — `Interface` и тип интерфейса (зависит от `mac`)
 - `neighbor` — записи ARP/NDP (зависит от `net-lattice-ip` и `mac`)
 - `dns` — конфигурация DNS-резолвера (зависит от `net-lattice-ip`)
-- `ifaddr` — IP-адреса, назначенные интерфейсам (зависит от `net-lattice-ip`;
+- `ifaddr` — IP-адреса, назначенные интерфейсам, включая наблюдаемые записи
+  `InterfaceAddress` и намерение назначения `NewInterfaceAddress`
+  (зависит от `net-lattice-ip`;
   назван `ifaddr`, а не `address`, чтобы не конфликтовать с собственными
   примитивами `IpAddress`/`Network` из `net-lattice-ip`/`net-lattice-model` —
   это отдельное понятие адреса, *привязанного к интерфейсу*, а не ещё одно
@@ -240,7 +242,11 @@ Provider-traits, по одному на возможность, а не один
 - `InterfaceProvider` — список/настройка интерфейсов.
 - `NeighborProvider` — список записей ARP/NDP.
 - `DnsProvider` — чтение/запись конфигурации DNS-резолвера.
-- `AddressProvider` — список/настройка IP-адресов, назначенных интерфейсам.
+- `AddressProvider` — список IP-адресов, назначенных интерфейсам.
+- `AddressMutator` — назначение и удаление IP-адресов. Его входной тип
+  отделён от наблюдаемого результата: `NewInterfaceAddress` содержит ID
+  интерфейса, адрес/префикс и необязательный IPv4 broadcast, а
+  `InterfaceAddress` содержит созданный backend'ом ID и атрибуты, сообщённые ОС.
 - `EventProvider` — подписка на уведомления об изменениях, generic
   относительно associated-типа `Event` по той же причине, что и остальные.
 
@@ -476,9 +482,12 @@ runtime-агностичный: `watch() -> Result<EventReceiver<Event>>`.
 возможность использования без async runtime.
 
 Крейты platform и core не получают async-зависимостей. Будущий опциональный
-crate-адаптер сможет представить `EventReceiver` как `futures_core::Stream`,
-не меняя этот контракт и не навязывая Tokio, async-std или smol всем
-потребителям.
+crate `net-lattice-async` сможет представить `futures_core::Stream`, не меняя
+этот контракт и не навязывая Tokio, async-std или smol всем потребителям. Это
+не будет zero-cost обёрткой над `EventReceiver`: `std::sync::mpsc::Receiver`
+не может зарегистрировать waker. Адаптер обязан явно реализовать bridge,
+например worker thread или async-aware канал, а runtime-specific интеграции
+могут оставаться опциональными features.
 
 ## Модель состояния: императивно сейчас, декларативно позже
 
@@ -595,7 +604,10 @@ provider-traits, а не другой контракт backend'а. Дорабо�
 | 0.6 ✅ | модуль `neighbor` + `NeighborProvider` (ARP/NDP) на всех backend'ах |
 | 0.7 ✅ | модуль `ifaddr` + `AddressProvider` (IP-адреса интерфейсов) на всех backend'ах |
 | 0.8 ✅ | модуль `event` + синхронные `EventProvider`/`EventReceiver`; мониторинг через Netlink multicast (Linux), PF_ROUTE (BSD/macOS) и уведомления IP Helper (Windows). |
-| 0.9+ | домены под Capability: VLAN, VRF, интеграция firewall, туннели; декларативная конфигурация `CurrentState`/`DesiredState`/`Diff`/`ApplyPlan` |
+| 0.9 ✅ | `NewInterfaceAddress` + `AddressMutator`; нативное назначение/удаление IPv4/IPv6-адресов через Netlink (Linux), IP Helper (Windows) и address ioctl (BSD/macOS). |
+| 0.10 | Семантика событий: bounded delivery, overflow/resynchronization, filtering, cancellation и распространение ошибок фонового watcher'а. |
+| 0.11 | Runtime-agnostic async-адаптер событий в отдельном crate с явным bridge от синхронного receiver. |
+| 0.12+ | Дальнейший паритет операций записи (включая DNS), примитивы транзакций, декларативные `CurrentState`/`DesiredState`/`Diff`/`ApplyPlan`, затем домены VLAN, VRF, firewall, tunnel и namespace под Capability. |
 
 Ожидается, что каждый этап проверяет архитектуру перед началом следующего;
 более ранние этапы могут повлиять на корректировки более поздних.

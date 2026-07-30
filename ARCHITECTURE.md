@@ -7,13 +7,13 @@
 This document describes the planned workspace structure for Net Lattice and the
 design principles behind it. It reflects intended direction, not current
 state: see [CHANGELOG.md](CHANGELOG.md) and [README.md](README.md) for what
-actually exists in the repository today. As of this writing, Stage 0.8 of
+actually exists in the repository today. As of this writing, Stage 0.9 of
 the Incremental Delivery Plan below has landed: `net-lattice-core`,
 `net-lattice-ip`, `net-lattice-model`'s `route`, `interface`, `dns`,
 `neighbor`, and `ifaddr` modules, `net-lattice-platform`'s `RouteProvider`,
 `InterfaceProvider`, `DnsProvider`, `NeighborProvider`, and
-`AddressProvider`, `CapabilityProvider`, and `EventProvider`,
-route/interface/DNS/neighbor/address support and native event monitoring in
+`AddressProvider`, `AddressMutator`, `CapabilityProvider`, and `EventProvider`,
+route/interface-address/DNS/neighbor support and native event monitoring in
 `net-lattice-backend-linux`, `net-lattice-backend-windows`, and
 `net-lattice-backend-darwin`, and the `net-lattice` facade — everything past
 that stage is still a target, not current state.
@@ -140,7 +140,9 @@ The domain model of operating system networking state, organized as modules:
 - `interface` — `Interface` and interface kind (depends on `mac`)
 - `neighbor` — ARP/NDP entries (depends on `net-lattice-ip` and `mac`)
 - `dns` — DNS resolver configuration (depends on `net-lattice-ip`)
-- `ifaddr` — IP addresses assigned to interfaces (depends on `net-lattice-ip`;
+- `ifaddr` — IP addresses assigned to interfaces, including observed
+  `InterfaceAddress` records and `NewInterfaceAddress` assignment intent
+  (depends on `net-lattice-ip`;
   named `ifaddr` rather than `address` to avoid colliding with
   `net-lattice-ip`/`net-lattice-model`'s own `IpAddress`/`Network`
   primitives — this is the distinct concept of an address *bound to an
@@ -240,7 +242,11 @@ force every backend to stub out methods for features it doesn't have:
 - `InterfaceProvider` — list/configure interfaces.
 - `NeighborProvider` — list ARP/NDP entries.
 - `DnsProvider` — read/write DNS resolver configuration.
-- `AddressProvider` — list/configure IP addresses assigned to interfaces.
+- `AddressProvider` — list IP addresses assigned to interfaces.
+- `AddressMutator` — assign and remove IP addresses. Its input is distinct
+  from its observed output: `NewInterfaceAddress` has an interface ID,
+  address/prefix, and optional IPv4 broadcast, while `InterfaceAddress` has
+  a backend-derived ID and any attributes reported by the OS.
 - `EventProvider` — subscribe to change notifications, generic over an
   associated `Event` type for the same reason as the others.
 
@@ -472,9 +478,12 @@ and runtime-agnostic: `watch() -> Result<EventReceiver<Event>>`.
 core usable by synchronous programs and avoids imposing an async runtime.
 
 The platform and core crates remain free of async dependencies. A future
-optional adapter crate may expose `EventReceiver` as `futures_core::Stream`
-without changing this contract or choosing Tokio, async-std, or smol for
-all consumers.
+optional `net-lattice-async` adapter crate may expose a `futures_core::Stream`
+without changing this contract or choosing Tokio, async-std, or smol for all
+consumers. That is not a zero-cost wrapper around `EventReceiver`: a
+`std::sync::mpsc::Receiver` cannot register a waker. The adapter must make
+its bridge explicit, for example with a worker thread or an async-aware
+channel, while runtime-specific integrations may remain optional features.
 
 ## State Model: Imperative Now, Declarative Later
 
@@ -586,7 +595,10 @@ are introduced only when there is real implementation work for them:
 | 0.6 ✅ | `neighbor` module + `NeighborProvider` (ARP/NDP) across all backends |
 | 0.7 ✅ | `ifaddr` module + `AddressProvider` (IP addresses on interfaces) across all backends |
 | 0.8 ✅ | `event` module + synchronous `EventProvider`/`EventReceiver`; monitoring via Netlink multicast (Linux), PF_ROUTE (BSD/macOS), and IP Helper notifications (Windows). |
-| 0.9+ | capability-gated domains: VLAN, VRF, firewall integration, tunnels; `CurrentState`/`DesiredState`/`Diff`/`ApplyPlan` declarative configuration |
+| 0.9 ✅ | `NewInterfaceAddress` + `AddressMutator`; native IPv4/IPv6 address assignment/removal via Netlink (Linux), IP Helper (Windows), and address ioctls (BSD/macOS). |
+| 0.10 | Event semantics: bounded delivery, overflow/resynchronization, filtering, cancellation, and background-error propagation. |
+| 0.11 | Runtime-agnostic async event adapter in a separate crate, with an explicit bridge from the synchronous receiver. |
+| 0.12+ | Further write parity (including DNS), transaction primitives, declarative `CurrentState`/`DesiredState`/`Diff`/`ApplyPlan`, then capability-gated VLAN, VRF, firewall, tunnel, and namespace domains. |
 
 Each stage is expected to validate the architecture before the next is
 started; earlier stages may inform adjustments to later ones.
