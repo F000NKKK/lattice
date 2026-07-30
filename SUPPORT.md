@@ -10,4 +10,4 @@ Thank you for your interest in Net Lattice.
 
 ## Project Status
 
-Net Lattice has landed Stage 0.7 of its [architecture](ARCHITECTURE.md)'s Incremental Delivery Plan (route, interface, DNS-read, neighbor-read, and address-read providers for Linux, Windows, and BSD/macOS). Usage support is limited to that surface for now — see [README.md](README.md)'s Current Status — but questions about usage, direction, and design are all welcome.
+Net Lattice has landed Stage 0.8 of its [architecture](ARCHITECTURE.md)'s Incremental Delivery Plan (route, interface, DNS-read, neighbor-read, and address-read providers for Linux, Windows, and BSD/macOS, plus Netlink-backed monitoring on Linux). Monitoring is capability-gated and not yet available on Windows or BSD/macOS. Usage support is limited to that surface for now — see [README.md](README.md)'s Current Status — but questions about usage, direction, and design are all welcome.
