@@ -35,9 +35,9 @@ Net Lattice has landed Stage 0.9 of its [architecture](ARCHITECTURE.md)'s
 Incremental Delivery Plan: route, interface, DNS-read, neighbor-read, and
 address-read and address-mutation providers for Linux (`net-lattice-backend-linux`, via Netlink
 and `/etc/resolv.conf`), Windows (`net-lattice-backend-windows`, via the IP
-Helper API), and BSD/macOS (`net-lattice-backend-darwin`, via route sockets,
+Helper API), and macOS (`net-lattice-backend-darwin`, via BSD routing sockets,
 `getifaddrs`, address ioctls, and `/etc/resolv.conf`), plus monitoring via Netlink multicast
-(Linux), PF_ROUTE (BSD/macOS), and IP Helper notifications (Windows). Route
+(Linux), PF_ROUTE (macOS), and IP Helper notifications (Windows). Route
 Route, interface, and address-mutation operations are privileged (see ARCHITECTURE.md's Privilege
 Model) — vulnerability reports involving unintended route manipulation,
 privilege confusion, or memory-safety issues in route, interface, DNS,

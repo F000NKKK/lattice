@@ -27,7 +27,7 @@ cross-platform networking code:
    addresses, routes, interfaces, DNS configuration, ...) that carry no
    operating-system dependency whatsoever.
 2. **Backend** — platform-specific code that reads and writes real operating
-   system state (Linux Netlink, Windows IP Helper API, BSD/macOS route
+   system state (Linux Netlink, Windows IP Helper API, macOS BSD route
    sockets) by producing and consuming the model's types.
 
 Dependencies only ever point from backend toward model, never the reverse.
@@ -292,7 +292,7 @@ can support, using native OS facilities:
 - `net-lattice-backend-linux` — Netlink (via an existing Netlink crate as a
   dependency, not a Net Lattice-owned wrapper crate).
 - `net-lattice-backend-windows` — IP Helper API via Windows bindings.
-- `net-lattice-backend-darwin` — BSD/macOS route sockets and related system
+- `net-lattice-backend-darwin` — macOS BSD route sockets and related system
   APIs.
 
 The `net-lattice-backend-*` naming (rather than bare `net-lattice-linux`, etc.)
@@ -455,7 +455,7 @@ privilege boundary does not line up the same way across them:
   or removing them requires `CAP_NET_ADMIN`.
 - **Windows** — reading is available to normal users; modifying typically
   requires Administrator.
-- **BSD/macOS** — similar read/write asymmetry via route sockets.
+- **macOS** — similar read/write asymmetry via BSD route sockets.
 
 This is not a hypothetical concern: it is the concrete scenario behind the
 `Error::PermissionDenied` variant above, and it means read operations and
@@ -471,7 +471,7 @@ fact that a caller can plausibly have one without the other.
 
 `EventProvider` is inherently push-based on every platform (Netlink
 multicast sockets on Linux, `NotifyRouteChange2`-style callbacks on
-Windows, routing sockets on BSD/macOS). Its Stage 0.8 API is synchronous
+Windows, BSD routing sockets on macOS). Its Stage 0.8 API is synchronous
 and runtime-agnostic: `watch() -> Result<EventReceiver<Event>>`.
 `EventReceiver` mirrors `std::sync::mpsc::Receiver`: it offers `recv`,
 `try_recv`, and `recv_timeout`, and implements `Iterator`. This keeps the
@@ -594,8 +594,8 @@ are introduced only when there is real implementation work for them:
 | 0.5 ✅ | `dns` module + `DnsProvider` across all backends |
 | 0.6 ✅ | `neighbor` module + `NeighborProvider` (ARP/NDP) across all backends |
 | 0.7 ✅ | `ifaddr` module + `AddressProvider` (IP addresses on interfaces) across all backends |
-| 0.8 ✅ | `event` module + synchronous `EventProvider`/`EventReceiver`; monitoring via Netlink multicast (Linux), PF_ROUTE (BSD/macOS), and IP Helper notifications (Windows). |
-| 0.9 ✅ | `NewInterfaceAddress` + `AddressMutator`; native IPv4/IPv6 address assignment/removal via Netlink (Linux), IP Helper (Windows), and address ioctls (BSD/macOS). |
+| 0.8 ✅ | `event` module + synchronous `EventProvider`/`EventReceiver`; monitoring via Netlink multicast (Linux), PF_ROUTE (macOS), and IP Helper notifications (Windows). |
+| 0.9 ✅ | `NewInterfaceAddress` + `AddressMutator`; native IPv4/IPv6 address assignment/removal via Netlink (Linux), IP Helper (Windows), and address ioctls (macOS). |
 | 0.10 | Event semantics: bounded delivery, overflow/resynchronization, filtering, cancellation, and background-error propagation. |
 | 0.11 | Runtime-agnostic async event adapter in a separate crate, with an explicit bridge from the synchronous receiver. |
 | 0.12+ | Further write parity (including DNS), transaction primitives, declarative `CurrentState`/`DesiredState`/`Diff`/`ApplyPlan`, then capability-gated VLAN, VRF, firewall, tunnel, and namespace domains. |

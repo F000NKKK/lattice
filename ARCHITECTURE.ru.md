@@ -25,7 +25,7 @@ Net Lattice разделяет два аспекта, которые легко 
    (IP-адреса, маршруты, интерфейсы, конфигурация DNS, ...), не имеющие
    никакой зависимости от операционной системы.
 2. **Backend (бэкенд)** — платформо-специфичный код, читающий и записывающий
-   реальное состояние ОС (Linux Netlink, Windows IP Helper API, BSD/macOS
+   реальное состояние ОС (Linux Netlink, Windows IP Helper API, macOS BSD
    route sockets), производя и потребляя типы модели.
 
 Зависимости всегда направлены от backend к model, никогда наоборот. Модель
@@ -293,7 +293,7 @@ traits), и от `net-lattice-model` (ради конкретных типов) 
 - `net-lattice-backend-linux` — Netlink (через существующий Netlink-крейт как
   зависимость, а не собственную обёртку Net Lattice).
 - `net-lattice-backend-windows` — IP Helper API через Windows-биндинги.
-- `net-lattice-backend-darwin` — BSD/macOS route sockets и связанные системные
+- `net-lattice-backend-darwin` — macOS BSD route sockets и связанные системные
   API.
 
 Нейминг `net-lattice-backend-*` (вместо голых `net-lattice-linux` и т.п.) делает роль
@@ -458,7 +458,7 @@ boxed `dyn Error`. Любой из вариантов снимает неодн�
   добавление или удаление требует `CAP_NET_ADMIN`.
 - **Windows** — чтение доступно обычным пользователям; изменение обычно
   требует прав администратора.
-- **BSD/macOS** — похожая асимметрия чтения/записи через route sockets.
+- **macOS** — похожая асимметрия чтения/записи через BSD route sockets.
 
 Это не гипотетическая проблема: это конкретный сценарий, стоящий за
 вариантом `Error::PermissionDenied` выше, и это означает, что операции
@@ -475,7 +475,7 @@ trait'а) не должно скрывать тот факт, что у вызы
 
 `EventProvider` по своей природе push-based на каждой платформе (multicast-
 сокеты Netlink в Linux, callback'и в стиле `NotifyRouteChange2` в Windows,
-routing sockets в BSD/macOS). В Stage 0.8 его API синхронный и
+routing sockets BSD в macOS). В Stage 0.8 его API синхронный и
 runtime-агностичный: `watch() -> Result<EventReceiver<Event>>`.
 `EventReceiver` повторяет модель `std::sync::mpsc::Receiver`: предоставляет
 `recv`, `try_recv`, `recv_timeout` и реализует `Iterator`. Это сохраняет
@@ -603,8 +603,8 @@ provider-traits, а не другой контракт backend'а. Дорабо�
 | 0.5 ✅ | модуль `dns` + `DnsProvider` на всех backend'ах |
 | 0.6 ✅ | модуль `neighbor` + `NeighborProvider` (ARP/NDP) на всех backend'ах |
 | 0.7 ✅ | модуль `ifaddr` + `AddressProvider` (IP-адреса интерфейсов) на всех backend'ах |
-| 0.8 ✅ | модуль `event` + синхронные `EventProvider`/`EventReceiver`; мониторинг через Netlink multicast (Linux), PF_ROUTE (BSD/macOS) и уведомления IP Helper (Windows). |
-| 0.9 ✅ | `NewInterfaceAddress` + `AddressMutator`; нативное назначение/удаление IPv4/IPv6-адресов через Netlink (Linux), IP Helper (Windows) и address ioctl (BSD/macOS). |
+| 0.8 ✅ | модуль `event` + синхронные `EventProvider`/`EventReceiver`; мониторинг через Netlink multicast (Linux), PF_ROUTE (macOS) и уведомления IP Helper (Windows). |
+| 0.9 ✅ | `NewInterfaceAddress` + `AddressMutator`; нативное назначение/удаление IPv4/IPv6-адресов через Netlink (Linux), IP Helper (Windows) и address ioctl (macOS). |
 | 0.10 | Семантика событий: bounded delivery, overflow/resynchronization, filtering, cancellation и распространение ошибок фонового watcher'а. |
 | 0.11 | Runtime-agnostic async-адаптер событий в отдельном crate с явным bridge от синхронного receiver. |
 | 0.12+ | Дальнейший паритет операций записи (включая DNS), примитивы транзакций, декларативные `CurrentState`/`DesiredState`/`Diff`/`ApplyPlan`, затем домены VLAN, VRF, firewall, tunnel и namespace под Capability. |
