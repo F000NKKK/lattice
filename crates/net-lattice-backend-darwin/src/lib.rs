@@ -15,12 +15,15 @@ use std::{io, mem};
 
 use net_lattice_core::{Error, Id, PlatformErrorCode, Result};
 use net_lattice_model::dns::DnsConfig;
+use net_lattice_model::ifaddr::{InterfaceAddress, InterfaceAddressId};
 use net_lattice_model::interface::{AdminState, Interface, InterfaceKind, OperationalState};
 use net_lattice_model::mac::MacAddress;
 use net_lattice_model::neighbor::{NeighborEntry, NeighborId, NeighborState};
 use net_lattice_model::route::{Route, RouteId};
 use net_lattice_model::{IpAddress, Network};
-use net_lattice_platform::{DnsProvider, InterfaceProvider, NeighborProvider, RouteProvider};
+use net_lattice_platform::{
+    AddressProvider, DnsProvider, InterfaceProvider, NeighborProvider, RouteProvider,
+};
 
 const RTM_VERSION: u8 = 5;
 const RTM_ADD: u8 = 1;
@@ -867,6 +870,104 @@ impl InterfaceProvider for DarwinBackend {
     }
 }
 
+/// Placeholder identity scheme, same rationale as `synthesize_route_id`: an
+/// interface address has no kernel-assigned numeric ID, so this hashes its
+/// interface and network together.
+fn synthesize_interface_address_id(interface_index: u32, network: &Network) -> InterfaceAddressId {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    interface_index.hash(&mut hasher);
+    network.hash(&mut hasher);
+    InterfaceAddressId::new(hasher.finish())
+}
+
+/// Counts the leading `1` bits of a netmask address, byte by byte — the BSD
+/// equivalent of `mask_bytes_to_prefix_len` but reading a fully-populated
+/// `sockaddr` (as `getifaddrs`'s `ifa_netmask` always is, unlike a
+/// routing-socket message's variable-length `RTA_NETMASK`) rather than a
+/// possibly-truncated byte slice.
+fn mask_ip_to_prefix_len(mask: IpAddr) -> u8 {
+    match mask {
+        IpAddr::V4(addr) => mask_bytes_to_prefix_len(&addr.octets()),
+        IpAddr::V6(addr) => mask_bytes_to_prefix_len(&addr.octets()),
+    }
+}
+
+/// Reads an interface's IP address, netmask, and (for IPv4) broadcast
+/// address out of one `AF_INET`/`AF_INET6` entry in `getifaddrs`'s linked
+/// list. Returns `None` for anything not `AF_INET`/`AF_INET6` (the same list
+/// also carries one `AF_LINK` entry per interface, which
+/// `link_entry_to_interface` reads instead) or where the address/netmask
+/// can't be decoded.
+unsafe fn ifaddr_entry_to_interface_address(entry: &libc::ifaddrs) -> Option<InterfaceAddress> {
+    let sa = entry.ifa_addr;
+    if sa.is_null() {
+        return None;
+    }
+    let family = unsafe { (*sa).sa_family } as i32;
+    if family != libc::AF_INET && family != libc::AF_INET6 {
+        return None;
+    }
+
+    let address_addr = unsafe { sockaddr_to_ip(sa) }?;
+    let netmask_addr = unsafe { sockaddr_to_ip(entry.ifa_netmask) }?;
+    let prefix_len = mask_ip_to_prefix_len(netmask_addr);
+
+    let network = match address_addr {
+        IpAddr::V4(addr) => {
+            let prefix = net_lattice_ip::Ipv4PrefixLength::new(prefix_len)?;
+            Network::from(net_lattice_ip::Ipv4Network::new(addr.into(), prefix))
+        }
+        IpAddr::V6(addr) => {
+            let prefix = net_lattice_ip::Ipv6PrefixLength::new(prefix_len)?;
+            Network::from(net_lattice_ip::Ipv6Network::new(addr.into(), prefix))
+        }
+    };
+
+    let interface_index = unsafe { libc::if_nametoindex(entry.ifa_name) };
+    let mut interface_address = InterfaceAddress::new(
+        synthesize_interface_address_id(interface_index, &network),
+        interface_index,
+        network,
+    );
+
+    // `ifa_dstaddr`/`ifa_broadaddr` are the same union field in
+    // `<ifaddrs.h>` (`ifa_ifu.ifu_broadaddr`/`ifu_dstaddr`) — for a
+    // broadcast-capable IPv4 interface (`IFF_BROADCAST`) it holds the
+    // subnet broadcast address; IPv6 has no broadcast concept, so this is
+    // skipped for that family even if the flag happens to be set.
+    if family == libc::AF_INET
+        && entry.ifa_flags & (libc::IFF_BROADCAST as u32) != 0
+        && let Some(broadcast) = unsafe { sockaddr_to_ip(entry.ifa_dstaddr) }
+    {
+        interface_address = interface_address.with_broadcast(std_ip_to_ip_address(broadcast));
+    }
+
+    Some(interface_address)
+}
+
+impl AddressProvider for DarwinBackend {
+    type InterfaceAddress = InterfaceAddress;
+
+    fn addresses(&self) -> Result<Vec<Self::InterfaceAddress>> {
+        let mut head: *mut libc::ifaddrs = std::ptr::null_mut();
+        let addresses = unsafe {
+            if libc::getifaddrs(&mut head) != 0 {
+                return Err(Error::Platform(io_error_code(&io::Error::last_os_error())));
+            }
+
+            let mut addresses = Vec::new();
+            let mut cursor = head;
+            while !cursor.is_null() {
+                addresses.extend(ifaddr_entry_to_interface_address(&*cursor));
+                cursor = (*cursor).ifa_next;
+            }
+            libc::freeifaddrs(head);
+            addresses
+        };
+        Ok(addresses)
+    }
+}
+
 /// Placeholder identity scheme, same rationale as `synthesize_route_id`: a
 /// neighbor entry has no kernel-assigned numeric ID, so this hashes its
 /// interface and address together.
@@ -1098,6 +1199,23 @@ impl DnsProvider for DarwinBackend {
 mod tests {
     use super::*;
     use net_lattice_ip::{Ipv4Address, Ipv4Network, Ipv4PrefixLength};
+
+    /// Exercises a real round trip through `getifaddrs`, no privilege
+    /// required: every macOS system has `lo0`'s `127.0.0.1/8`.
+    #[test]
+    fn addresses_includes_loopbacks_address() {
+        let backend = DarwinBackend::new().expect("failed to open a route socket");
+        let addresses = backend
+            .addresses()
+            .expect("getifaddrs should not require privilege");
+        assert!(
+            addresses.iter().any(|addr| matches!(
+                addr.address,
+                Network::V4(net) if net.address() == Ipv4Address::new(127, 0, 0, 1)
+            )),
+            "expected `127.0.0.1` among the assigned addresses, got: {addresses:?}"
+        );
+    }
 
     /// Exercises a real round trip through the route socket, no privilege
     /// required: `NET_RT_FLAGS` dumps are readable by any user.
