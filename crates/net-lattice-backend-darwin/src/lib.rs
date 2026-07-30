@@ -1759,9 +1759,18 @@ mod tests {
     /// system state. The ignored test below verifies delivery end-to-end.
     #[test]
     fn watch_opens_a_real_route_socket() {
+        use std::time::Duration;
+
         let backend = DarwinBackend::new().expect("failed to open a route socket");
         assert!(backend.capabilities().contains(Capability::MONITORING));
         drop(backend.watch().expect("failed to open PF_ROUTE watcher"));
+        let filtered = backend
+            .watch_filtered(EventFilter::none())
+            .expect("failed to open filtered PF_ROUTE watcher");
+        assert_eq!(
+            filtered.recv_timeout(Duration::from_millis(1)).unwrap(),
+            None
+        );
     }
 
     /// Diagnostic-only: formats `bytes` as a space-separated hex dump.

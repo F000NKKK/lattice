@@ -17,7 +17,7 @@
 
 **Net Lattice** — это современная кроссплатформенная библиотека для Rust, предназначенная для настройки и анализа сетевой конфигурации операционной системы через единый строго типизированный API.
 
-> **Статус:** Net Lattice предоставляет кроссплатформенный просмотр сети, изменение маршрутов и адресов и мониторинг изменений через нативные API операционных систем в Linux, Windows и macOS. Реализован Stage 0.9 плана архитектуры; см. «Текущий статус» ниже.
+> **Статус:** Net Lattice предоставляет кроссплатформенный просмотр сети, изменение маршрутов и адресов и мониторинг изменений через нативные API операционных систем в Linux, Windows и macOS. Реализован Stage 0.10 плана архитектуры; см. «Текущий статус» ниже.
 
 ## Обзор
 
@@ -69,17 +69,17 @@ Net Lattice призвана закрыть этот пробел, предос�
 
 ## Текущий статус
 
-Реализован этап 0.9 плана поэтапной поставки из [архитектуры](ARCHITECTURE.ru.md):
+Реализован этап 0.10 плана поэтапной поставки из [архитектуры](ARCHITECTURE.ru.md):
 
 - `net-lattice-core`, `net-lattice-ip`
 - модули `route`, `mac`, `interface`, `dns`, `neighbor`, `ifaddr` и `event` в `net-lattice-model`; `NewInterfaceAddress` выражает намерение назначить адрес отдельно от наблюдаемого `InterfaceAddress`
-- `RouteProvider`, `InterfaceProvider`, `DnsProvider`, `NeighborProvider`, `AddressProvider`, `AddressMutator`, `CapabilityProvider` и синхронные `EventProvider`/`EventReceiver` в `net-lattice-platform`
+- `RouteProvider`, `InterfaceProvider`, `DnsProvider`, `NeighborProvider`, `AddressProvider`, `AddressMutator`, `CapabilityProvider` и синхронные `EventProvider`/bounded `EventReceiver` в `net-lattice-platform`
 - `net-lattice-backend-linux` (маршруты, интерфейсы, соседи, чтение и изменение адресов и мониторинг через Netlink; DNS через `/etc/resolv.conf`)
 - `net-lattice-backend-windows` (маршруты и интерфейсы через Windows IP Helper API, DNS через `GetAdaptersAddresses`, соседи через `GetIpNetTable2`, чтение и изменение адресов через unicast-address API IP Helper, мониторинг через уведомления IP Helper)
 - `net-lattice-backend-darwin` (маршруты, соседи и мониторинг через BSD routing facilities в macOS; интерфейсы и чтение адресов через `getifaddrs`; изменение адресов через нативные address ioctl; DNS через `/etc/resolv.conf`)
 - фасад `net-lattice`, включая `Lattice::add_address()`, `Lattice::remove_address()`, `Lattice::capabilities()`, `Lattice::supports()` и `Lattice::watch()`
 
-Это даёт реальное управление маршрутами и IP-адресами интерфейсов, просмотр интерфейсов, чтение DNS-конфигурации резолвера, чтение таблиц соседей (ARP/NDP) и мониторинг сетевых изменений на Linux, Windows и macOS. Создание адреса принимает `NewInterfaceAddress` и возвращает результирующий наблюдаемый `InterfaceAddress`, поэтому потребитель не конструирует ID адреса самостоятельно. В переносимом коде перед `Lattice::watch()` проверяйте `Lattice::supports(Capability::MONITORING)`. Это всё ещё не полноценная библиотека: изменение DNS, VLAN, VRF, namespaces, интеграция с firewall, транзакционная конфигурация, декларативная настройка сети и другие продвинутые возможности ещё впереди; см. [ARCHITECTURE.ru.md](ARCHITECTURE.ru.md) для поэтапной дорожной карты и [CHANGELOG.md](CHANGELOG.md) для того, что реально вышло.
+Это даёт реальное управление маршрутами и IP-адресами интерфейсов, просмотр интерфейсов, чтение DNS-конфигурации резолвера, чтение таблиц соседей (ARP/NDP) и bounded-мониторинг сетевых изменений на Linux, Windows и macOS. Создание адреса принимает `NewInterfaceAddress` и возвращает результирующий наблюдаемый `InterfaceAddress`, поэтому потребитель не конструирует ID адреса самостоятельно. `Lattice::watch_filtered(EventFilter::none().routes())` ограничивает доставляемые домены; при `Event::ResyncRequired` перечитайте затронутое состояние, потому что медленный consumer переполнил bounded-очередь. В переносимом коде перед watching проверяйте `Lattice::supports(Capability::MONITORING)`. Это всё ещё не полноценная библиотека: изменение DNS, VLAN, VRF, namespaces, интеграция с firewall, транзакционная конфигурация, декларативная настройка сети и другие продвинутые возможности ещё впереди; см. [ARCHITECTURE.ru.md](ARCHITECTURE.ru.md) для поэтапной дорожной карты и [CHANGELOG.md](CHANGELOG.md) для того, что реально вышло.
 
 ## Краткий пример
 
@@ -111,7 +111,7 @@ fn main() -> Result<()> {
 2. **Проектирование** *(завершено)* — структура крейтов, базовые абстракции и стратегия абстрагирования платформ реализованы на этапе 0.1. См. [ARCHITECTURE.ru.md](ARCHITECTURE.ru.md).
 3. **Фундамент** *(завершено)* — реализованы базовые типы IP/маршрутов/интерфейсов и все три платформенных бэкенда.
 4. **Паритет платформ** *(завершён)* — реализованы Linux/Windows/macOS backend'ы для изменения маршрутов и адресов, интерфейсов, чтения DNS, чтения соседей, чтения адресов и мониторинга.
-5. **Stage 0.10: Семантика событий** — bounded delivery, сигнализация overflow и resynchronization, filtering, cancellation и распространение ошибок.
+5. **Stage 0.10: Семантика событий** *(завершён)* — bounded delivery, сигнализация overflow и resynchronization, filtering, cancellation и распространение ошибок.
 6. **Поздние этапы** — async-адаптеры, дальнейший паритет операций записи, транзакционная конфигурация и декларативная настройка сети.
 
 ## Участие в проекте

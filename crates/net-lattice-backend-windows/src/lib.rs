@@ -1058,12 +1058,21 @@ mod tests {
     /// verifies a real route notification end-to-end.
     #[test]
     fn watch_registers_ip_helper_notifications() {
+        use std::time::Duration;
+
         let backend = WindowsBackend::new().expect("failed to create Windows backend");
         assert!(backend.capabilities().contains(Capability::MONITORING));
         drop(
             backend
                 .watch()
                 .expect("failed to register IP Helper notifications"),
+        );
+        let filtered = backend
+            .watch_filtered(EventFilter::none())
+            .expect("failed to register filtered IP Helper notifications");
+        assert_eq!(
+            filtered.recv_timeout(Duration::from_millis(1)).unwrap(),
+            None
         );
     }
 

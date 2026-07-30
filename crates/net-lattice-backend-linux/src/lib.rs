@@ -881,6 +881,13 @@ mod tests {
             .watch()
             .expect("failed to subscribe to Netlink multicast groups");
         assert!(watcher.recv_timeout(Duration::from_millis(1)).is_ok());
+        let filtered = backend
+            .watch_filtered(EventFilter::none())
+            .expect("failed to subscribe to filtered Netlink events");
+        assert_eq!(
+            filtered.recv_timeout(Duration::from_millis(1)).unwrap(),
+            None
+        );
     }
 
     #[test]
