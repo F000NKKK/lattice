@@ -17,7 +17,6 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 use std::thread;
-use std::time::Duration;
 use std::{io, mem};
 
 use net_lattice_core::{Error, Id, PlatformErrorCode, Result};
