@@ -8,12 +8,12 @@
 дизайна, лежащие в её основе. Он отражает предполагаемое направление, а не
 текущее состояние: см. [CHANGELOG.md](CHANGELOG.md) и [README.md](README.md)
 для того, что реально существует в репозитории на данный момент. На момент
-написания реализован этап 0.7 плана поэтапной поставки ниже: `net-lattice-core`,
+написания реализован этап 0.8 плана поэтапной поставки ниже: `net-lattice-core`,
 `net-lattice-ip`, модули `route`, `interface`, `dns`, `neighbor` и `ifaddr` в `net-lattice-model`,
-`RouteProvider`, `InterfaceProvider`, `DnsProvider`, `NeighborProvider` и `AddressProvider` в `net-lattice-platform`,
+`RouteProvider`, `InterfaceProvider`, `DnsProvider`, `NeighborProvider`, `AddressProvider`, `CapabilityProvider` и `EventProvider` в `net-lattice-platform`,
 поддержка маршрутов, интерфейсов, DNS, соседей (ARP/NDP) и IP-адресов интерфейсов в `net-lattice-backend-linux`,
 `net-lattice-backend-windows` и `net-lattice-backend-darwin`, а также фасад
-`net-lattice` — всё, что описано дальше этого этапа, по-прежнему только цель,
+`net-lattice`, а также мониторинг событий Netlink в Linux — всё, что описано дальше этого этапа, по-прежнему только цель,
 а не текущее состояние.
 
 ## Руководящий принцип
@@ -469,30 +469,16 @@ trait'а) не должно скрывать тот факт, что у вызы
 
 `EventProvider` по своей природе push-based на каждой платформе (multicast-
 сокеты Netlink в Linux, callback'и в стиле `NotifyRouteChange2` в Windows,
-routing sockets в BSD/macOS), а значит его нельзя реализовать как обычный
-блокирующий метод, как `RouteProvider` или `InterfaceProvider`. Свяжет ли
-Net Lattice себя с асинхронным runtime, предоставит ли runtime-агностичную
-абстракцию потока, или предложит блокирующий callback-based API для
-`EventProvider` — это открытое решение, влияющее на публичную поверхность
-API и на зависимости (например, `futures`/`tokio`) каждого крейта, который
-касается событий.
+routing sockets в BSD/macOS). В Stage 0.8 его API синхронный и
+runtime-агностичный: `watch() -> Result<EventReceiver<Event>>`.
+`EventReceiver` повторяет модель `std::sync::mpsc::Receiver`: предоставляет
+`recv`, `try_recv`, `recv_timeout` и реализует `Iterator`. Это сохраняет
+возможность использования без async runtime.
 
-Это решение должно быть принято явно как часть черновика API Stage 0.1 (или
-того этапа, на котором впервые реализуется `EventProvider`, согласно плану
-поставки ниже), до того как `EventProvider` будет реализован хоть для одного
-backend'а — а не обнаружено ситуативно через первый backend, который
-случайно его реализует. Этот документ намеренно не предписывает ответ.
-
-**Одно ограничение фиксировано вне зависимости от этого решения: никакой
-асинхронный runtime не привязывается к `net-lattice-platform` или
-`net-lattice-core`.** Net Lattice — это библиотека, предназначенная для встраивания
-в приложения, уже определившиеся с Tokio, async-std, smol, или вообще без
-асинхронного runtime, и зависимость от runtime в любом из этих крейтов,
-против которых обязаны компилироваться каждый backend и каждый потребитель,
-навязала бы этот выбор всем им. Если `EventProvider` в итоге предоставит
-поток, он будет выражен через `futures-core::Stream` (или столь же
-минимальную, executor-агностичную абстракцию) — никогда через
-`tokio::Stream` или что-либо, тянущее конкретный executor.
+Крейты platform и core не получают async-зависимостей. Будущий опциональный
+crate-адаптер сможет представить `EventReceiver` как `futures_core::Stream`,
+не меняя этот контракт и не навязывая Tokio, async-std или smol всем
+потребителям.
 
 ## Модель состояния: императивно сейчас, декларативно позже
 
@@ -608,7 +594,8 @@ provider-traits, а не другой контракт backend'а. Дорабо�
 | 0.5 ✅ | модуль `dns` + `DnsProvider` на всех backend'ах |
 | 0.6 ✅ | модуль `neighbor` + `NeighborProvider` (ARP/NDP) на всех backend'ах |
 | 0.7 ✅ | модуль `ifaddr` + `AddressProvider` (IP-адреса интерфейсов) на всех backend'ах |
-| 0.8+ | модуль `event` + `EventProvider`; домены под Capability: VLAN, VRF, интеграция firewall, туннели; декларативная конфигурация `CurrentState`/`DesiredState`/`Diff`/`ApplyPlan` |
+| 0.8 ✅ | модуль `event` + синхронные `EventProvider`/`EventReceiver`; мониторинг Linux через Netlink multicast. Остальные backend'ы предоставляют trait, но возвращают `Unsupported` и не объявляют `Capability::MONITORING`, пока не реализован безопасный жизненный цикл нативного watcher'а. |
+| 0.9+ | домены под Capability: VLAN, VRF, интеграция firewall, туннели; декларативная конфигурация `CurrentState`/`DesiredState`/`Diff`/`ApplyPlan` |
 
 Ожидается, что каждый этап проверяет архитектуру перед началом следующего;
 более ранние этапы могут повлиять на корректировки более поздних.

@@ -7,15 +7,16 @@
 This document describes the planned workspace structure for Net Lattice and the
 design principles behind it. It reflects intended direction, not current
 state: see [CHANGELOG.md](CHANGELOG.md) and [README.md](README.md) for what
-actually exists in the repository today. As of this writing, Stage 0.7 of
+actually exists in the repository today. As of this writing, Stage 0.8 of
 the Incremental Delivery Plan below has landed: `net-lattice-core`,
 `net-lattice-ip`, `net-lattice-model`'s `route`, `interface`, `dns`,
 `neighbor`, and `ifaddr` modules, `net-lattice-platform`'s `RouteProvider`,
 `InterfaceProvider`, `DnsProvider`, `NeighborProvider`, and
-`AddressProvider`, route/interface/DNS/neighbor/address support in
+`AddressProvider`, `CapabilityProvider`, and `EventProvider`, route/interface/DNS/neighbor/address support in
 `net-lattice-backend-linux`, `net-lattice-backend-windows`, and
-`net-lattice-backend-darwin`, and the `net-lattice` facade — everything past
-that stage is still a target, not current state.
+`net-lattice-backend-darwin`, the `net-lattice` facade, and Netlink event
+monitoring on Linux — everything past that stage is still a target, not
+current state.
 
 ## Guiding Principle
 
@@ -176,7 +177,7 @@ The domain model of operating system networking state, organized as modules:
   Without it, a consumer that only cares about gateway changes still has
   to re-fetch and diff the whole object on every unrelated metric update,
   which defeats much of the point of a signal-shaped event. The exact
-  field-mask representation is a Stage 0.1 (or whenever `EventProvider`
+  field-mask representation is a Stage 0.8 (or whenever `EventProvider`
   ships) API detail; what this document fixes is that `Changed` is
   expected to carry this information eventually, so the enum shape isn't
   designed to preclude it.
@@ -464,29 +465,16 @@ fact that a caller can plausibly have one without the other.
 
 `EventProvider` is inherently push-based on every platform (Netlink
 multicast sockets on Linux, `NotifyRouteChange2`-style callbacks on
-Windows, routing sockets on BSD/macOS), which means it cannot be
-implemented as a plain blocking method the way `RouteProvider` or
-`InterfaceProvider` can. Whether Net Lattice commits to an async runtime,
-exposes a runtime-agnostic stream abstraction, or offers a blocking
-callback-based API for `EventProvider` is an open decision that affects
-the public API surface and dependency footprint (e.g. `futures`/`tokio`)
-of every crate that touches events.
+Windows, routing sockets on BSD/macOS). Its Stage 0.8 API is synchronous
+and runtime-agnostic: `watch() -> Result<EventReceiver<Event>>`.
+`EventReceiver` mirrors `std::sync::mpsc::Receiver`: it offers `recv`,
+`try_recv`, and `recv_timeout`, and implements `Iterator`. This keeps the
+core usable by synchronous programs and avoids imposing an async runtime.
 
-This decision must be made explicitly as part of the Stage 0.1 (or
-whichever stage first implements `EventProvider`, per the delivery plan
-below) API draft, before `EventProvider` is implemented for any backend —
-not discovered ad hoc through the first backend that happens to implement
-it. This document deliberately does not prescribe the answer.
-
-**One constraint is fixed regardless of that decision: no async runtime is
-tied to `net-lattice-platform` or `net-lattice-core`.** Net Lattice is a library meant
-to be embedded inside applications that have already committed to Tokio,
-async-std, smol, or no async runtime at all, and to a runtime dependency to
-either of the crates that every backend and every consumer must compile
-against would force that choice onto all of them. If `EventProvider` ends
-up exposing a stream, it is expressed against `futures-core::Stream` (or an
-equally minimal, executor-agnostic abstraction) — never `tokio::Stream` or
-anything that pulls in a specific executor.
+The platform and core crates remain free of async dependencies. A future
+optional adapter crate may expose `EventReceiver` as `futures_core::Stream`
+without changing this contract or choosing Tokio, async-std, or smol for
+all consumers.
 
 ## State Model: Imperative Now, Declarative Later
 
@@ -597,7 +585,8 @@ are introduced only when there is real implementation work for them:
 | 0.5 ✅ | `dns` module + `DnsProvider` across all backends |
 | 0.6 ✅ | `neighbor` module + `NeighborProvider` (ARP/NDP) across all backends |
 | 0.7 ✅ | `ifaddr` module + `AddressProvider` (IP addresses on interfaces) across all backends |
-| 0.8+ | `event` module + `EventProvider`; capability-gated domains: VLAN, VRF, firewall integration, tunnels; `CurrentState`/`DesiredState`/`Diff`/`ApplyPlan` declarative configuration |
+| 0.8 ✅ | `event` module + synchronous `EventProvider`/`EventReceiver`; Linux monitoring via Netlink multicast. Other backends expose the trait but return `Unsupported` and do not advertise `Capability::MONITORING` until their native watcher lifecycle is implemented. |
+| 0.9+ | capability-gated domains: VLAN, VRF, firewall integration, tunnels; `CurrentState`/`DesiredState`/`Diff`/`ApplyPlan` declarative configuration |
 
 Each stage is expected to validate the architecture before the next is
 started; earlier stages may inform adjustments to later ones.
