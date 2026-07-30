@@ -19,6 +19,13 @@ pub enum Error {
     Unsupported,
     /// The operation is not valid given the object's current state.
     InvalidState,
+    /// An event channel's producer (the backend's background watcher) has
+    /// shut down — no further events will ever arrive. Distinct from a
+    /// timeout (which is not an error at all — see
+    /// `EventReceiver::recv_timeout`): this means the stream is over for
+    /// good, typically because the backend itself, or the connection it
+    /// watches over, was dropped.
+    Disconnected,
     /// Escape hatch preserving the raw backend-specific error for
     /// diagnostics. Not the primary way consumers are expected to match on
     /// failures.
@@ -46,6 +53,7 @@ impl fmt::Display for Error {
             Error::AlreadyExists => write!(f, "already exists"),
             Error::Unsupported => write!(f, "unsupported operation"),
             Error::InvalidState => write!(f, "invalid state"),
+            Error::Disconnected => write!(f, "event channel disconnected"),
             Error::Platform(code) => write!(f, "platform error: {code:?}"),
         }
     }
