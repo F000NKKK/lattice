@@ -734,7 +734,9 @@ mod tests {
         GUARD
             .get_or_init(|| Mutex::new(()))
             .lock()
-            .expect("a previous kernel test panicked while holding the lock")
+            // A failed kernel assertion must not hide every later test behind
+            // `PoisonError`; they should each report their own OS failure.
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// Exercises a real round trip through Netlink, no privilege required:
