@@ -6,16 +6,18 @@
 //! ARCHITECTURE.md for the full rationale, including how model
 //! convergence is enforced one layer up, in `lattice`.
 //!
-//! Stage 0.4 added `InterfaceProvider`; Stage 0.5 adds `DnsProvider` —
-//! `NeighborProvider` and `EventProvider` are added in later stages per
-//! ARCHITECTURE.md's Incremental Delivery Plan.
+//! Stage 0.4 added `InterfaceProvider`; Stage 0.5 added `DnsProvider`;
+//! Stage 0.6 adds `NeighborProvider` — `EventProvider` is added in a later
+//! stage per ARCHITECTURE.md's Incremental Delivery Plan.
 
 mod capability;
 mod dns_provider;
 mod interface_provider;
+mod neighbor_provider;
 mod route_provider;
 
 pub use capability::Capability;
 pub use dns_provider::DnsProvider;
 pub use interface_provider::InterfaceProvider;
+pub use neighbor_provider::NeighborProvider;
 pub use route_provider::RouteProvider;
