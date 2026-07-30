@@ -1145,11 +1145,19 @@ fn add_interface_address(address: &NewInterfaceAddress) -> Result<()> {
         IpAddr::V4(ip) => {
             let mut request: IfAliasReq = unsafe { mem::zeroed() };
             request.ifra_name = name;
-            request.ifra_addr = unsafe { mem::transmute(sockaddr_in(ip)) };
-            request.ifra_mask = unsafe { mem::transmute(sockaddr_in(ipv4_mask(prefix_len))) };
+            request.ifra_addr =
+                unsafe { mem::transmute::<libc::sockaddr_in, libc::sockaddr>(sockaddr_in(ip)) };
+            request.ifra_mask = unsafe {
+                mem::transmute::<libc::sockaddr_in, libc::sockaddr>(sockaddr_in(ipv4_mask(
+                    prefix_len,
+                )))
+            };
             if let Some(broadcast) = address.broadcast {
-                request.ifra_broadaddr =
-                    unsafe { mem::transmute(sockaddr_in(std::net::Ipv4Addr::from(broadcast))) };
+                request.ifra_broadaddr = unsafe {
+                    mem::transmute::<libc::sockaddr_in, libc::sockaddr>(sockaddr_in(
+                        std::net::Ipv4Addr::from(broadcast),
+                    ))
+                };
             }
             unsafe { libc::ioctl(socket, siocaifaddr(), &mut request) }
         }
@@ -1178,7 +1186,8 @@ fn remove_interface_address(address: &InterfaceAddress) -> Result<()> {
         IpAddr::V4(ip) => {
             let mut request: libc::ifreq = unsafe { mem::zeroed() };
             request.ifr_name = name;
-            request.ifr_ifru.ifru_addr = unsafe { mem::transmute(sockaddr_in(ip)) };
+            request.ifr_ifru.ifru_addr =
+                unsafe { mem::transmute::<libc::sockaddr_in, libc::sockaddr>(sockaddr_in(ip)) };
             unsafe { libc::ioctl(socket, siocdifaddr(), &mut request) }
         }
         IpAddr::V6(ip) => {
