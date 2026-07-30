@@ -15,7 +15,7 @@ use std::net::IpAddr;
 use futures::{StreamExt, TryStreamExt};
 use net_lattice_core::{Error, Id, PlatformErrorCode, Result};
 use net_lattice_model::dns::DnsConfig;
-use net_lattice_model::event::{ChangeKind, Event};
+use net_lattice_model::event::{ChangeKind, Event, EventFilter};
 use net_lattice_model::ifaddr::{InterfaceAddress, InterfaceAddressId, NewInterfaceAddress};
 use net_lattice_model::interface::{AdminState, Interface, InterfaceKind, OperationalState};
 use net_lattice_model::mac::MacAddress;
@@ -715,6 +715,7 @@ fn route_netlink_message_to_event(message: RouteNetlinkMessage) -> Option<Event>
 
 impl EventProvider for LinuxBackend {
     type Event = Event;
+    type EventFilter = EventFilter;
 
     /// Opens a *second*, independent Netlink socket subscribed to the
     /// `RTNLGRP_LINK`/`RTNLGRP_NEIGH`/`RTNLGRP_IPV4_ROUTE`/
@@ -732,6 +733,9 @@ impl EventProvider for LinuxBackend {
     /// Netlink signal — see `Event`'s doc comment — so no `Event::Dns` is
     /// ever produced by this backend.
     fn watch(&self) -> Result<EventReceiver<Self::Event>> {
+        self.watch_filtered(EventFilter::ALL)
+    }
+    fn watch_filtered(&self, filter: Self::EventFilter) -> Result<EventReceiver<Self::Event>> {
         let groups = [
             MulticastGroup::Link,
             MulticastGroup::Neigh,
@@ -745,7 +749,7 @@ impl EventProvider for LinuxBackend {
             .map_err(|err| Error::Platform(io_error_code(&err)))?;
         let connection = self.runtime.spawn(connection);
 
-        let (sender, receiver) = std::sync::mpsc::channel();
+        let (sender, receiver) = EventReceiver::bounded();
         let events = self.runtime.spawn(async move {
             while let Some((message, _addr)) = messages.next().await {
                 let (_header, payload) = message.into_parts();
@@ -753,17 +757,15 @@ impl EventProvider for LinuxBackend {
                     continue;
                 };
                 if let Some(event) = route_netlink_message_to_event(inner)
-                    && sender.send(event).is_err()
+                    && filter.matches(event)
+                    && !sender.send(event, Event::resync_all())
                 {
                     break;
                 }
             }
         });
 
-        Ok(EventReceiver::with_subscription(
-            receiver,
-            LinuxWatch { connection, events },
-        ))
+        Ok(receiver.with_subscription(LinuxWatch { connection, events }))
     }
 }
 

@@ -11,7 +11,6 @@
 
 use std::hash::{Hash, Hasher};
 use std::net::IpAddr;
-use std::sync::mpsc;
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
@@ -21,7 +20,7 @@ use std::{io, mem};
 
 use net_lattice_core::{Error, Id, PlatformErrorCode, Result};
 use net_lattice_model::dns::DnsConfig;
-use net_lattice_model::event::{ChangeKind, Event};
+use net_lattice_model::event::{ChangeKind, Event, EventFilter};
 use net_lattice_model::ifaddr::{InterfaceAddress, InterfaceAddressId, NewInterfaceAddress};
 use net_lattice_model::interface::{AdminState, Interface, InterfaceKind, OperationalState};
 use net_lattice_model::mac::MacAddress;
@@ -1594,8 +1593,12 @@ impl CapabilityProvider for DarwinBackend {
 
 impl EventProvider for DarwinBackend {
     type Event = Event;
+    type EventFilter = EventFilter;
 
     fn watch(&self) -> Result<EventReceiver<Self::Event>> {
+        self.watch_filtered(EventFilter::ALL)
+    }
+    fn watch_filtered(&self, filter: Self::EventFilter) -> Result<EventReceiver<Self::Event>> {
         // Never read from `self.fd`: it carries replies to this backend's
         // route mutations as well as system broadcasts. A dedicated socket
         // makes this subscription independent and avoids stealing replies
@@ -1605,7 +1608,7 @@ impl EventProvider for DarwinBackend {
             return Err(Error::Platform(io_error_code(&io::Error::last_os_error())));
         }
 
-        let (sender, receiver) = mpsc::channel();
+        let (sender, receiver) = EventReceiver::bounded();
         let stop = Arc::new(AtomicBool::new(false));
         let thread_stop = Arc::clone(&stop);
         let thread = thread::spawn(move || {
@@ -1652,7 +1655,8 @@ impl EventProvider for DarwinBackend {
                     }
                     if common.version == RTM_VERSION
                         && let Some(event) = unsafe { route_socket_message_to_event(message, len) }
-                        && sender.send(event).is_err()
+                        && filter.matches(event)
+                        && !sender.send(event, Event::resync_all())
                     {
                         unsafe { libc::close(fd) };
                         return;
@@ -1663,13 +1667,10 @@ impl EventProvider for DarwinBackend {
             unsafe { libc::close(fd) };
         });
 
-        Ok(EventReceiver::with_subscription(
-            receiver,
-            DarwinWatch {
-                stop,
-                thread: Some(thread),
-            },
-        ))
+        Ok(receiver.with_subscription(DarwinWatch {
+            stop,
+            thread: Some(thread),
+        }))
     }
 }
 

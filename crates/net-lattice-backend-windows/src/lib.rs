@@ -11,11 +11,10 @@
 
 use std::ffi::c_void;
 use std::net::IpAddr;
-use std::sync::mpsc;
 
 use net_lattice_core::{Error, Id, PlatformErrorCode, Result};
 use net_lattice_model::dns::DnsConfig;
-use net_lattice_model::event::{ChangeKind, Event};
+use net_lattice_model::event::{ChangeKind, Event, EventFilter};
 use net_lattice_model::ifaddr::{InterfaceAddress, InterfaceAddressId, NewInterfaceAddress};
 use net_lattice_model::interface::{AdminState, Interface, InterfaceKind, OperationalState};
 use net_lattice_model::mac::MacAddress;
@@ -24,7 +23,7 @@ use net_lattice_model::route::{Route, RouteId};
 use net_lattice_model::{IpAddress, Network};
 use net_lattice_platform::{
     AddressMutator, AddressProvider, Capability, CapabilityProvider, DnsProvider, EventProvider,
-    EventReceiver, InterfaceProvider, NeighborProvider, RouteProvider,
+    EventReceiver, EventSender, InterfaceProvider, NeighborProvider, RouteProvider,
 };
 use windows::Win32::Foundation::HANDLE;
 use windows::Win32::NetworkManagement::IpHelper::{
@@ -689,7 +688,8 @@ impl NeighborProvider for WindowsBackend {
 }
 
 struct WindowsWatchState {
-    sender: mpsc::Sender<Event>,
+    sender: EventSender<Event>,
+    filter: EventFilter,
 }
 
 /// Owns all native notification handles and their callback context. IP Helper
@@ -746,10 +746,13 @@ unsafe extern "system" fn route_change_callback(
     }
     let state = unsafe { &*(context.cast::<WindowsWatchState>()) };
     if let Ok(Some(route)) = row_to_route(unsafe { &*row }) {
-        let _ = state.sender.send(Event::Route {
+        let event = Event::Route {
             id: route.id,
             kind: change_kind(notification),
-        });
+        };
+        if state.filter.matches(event) {
+            let _ = state.sender.send(event, Event::resync_all());
+        }
     }
 }
 
@@ -763,10 +766,13 @@ unsafe extern "system" fn interface_change_callback(
     }
     let state = unsafe { &*(context.cast::<WindowsWatchState>()) };
     let row = unsafe { &*row };
-    let _ = state.sender.send(Event::Interface {
+    let event = Event::Interface {
         id: Id::new(row.InterfaceIndex as u64),
         kind: change_kind(notification),
-    });
+    };
+    if state.filter.matches(event) {
+        let _ = state.sender.send(event, Event::resync_all());
+    }
 }
 
 unsafe extern "system" fn address_change_callback(
@@ -779,10 +785,13 @@ unsafe extern "system" fn address_change_callback(
     }
     let state = unsafe { &*(context.cast::<WindowsWatchState>()) };
     if let Some(address) = row_to_interface_address(unsafe { &*row }) {
-        let _ = state.sender.send(Event::Address {
+        let event = Event::Address {
             id: address.id,
             kind: change_kind(notification),
-        });
+        };
+        if state.filter.matches(event) {
+            let _ = state.sender.send(event, Event::resync_all());
+        }
     }
 }
 
@@ -799,10 +808,14 @@ impl CapabilityProvider for WindowsBackend {
 
 impl EventProvider for WindowsBackend {
     type Event = Event;
+    type EventFilter = EventFilter;
 
     fn watch(&self) -> Result<EventReceiver<Self::Event>> {
-        let (sender, receiver) = mpsc::channel();
-        let state = Box::into_raw(Box::new(WindowsWatchState { sender }));
+        self.watch_filtered(EventFilter::ALL)
+    }
+    fn watch_filtered(&self, filter: Self::EventFilter) -> Result<EventReceiver<Self::Event>> {
+        let (sender, receiver) = EventReceiver::bounded();
+        let state = Box::into_raw(Box::new(WindowsWatchState { sender, filter }));
         let mut route = HANDLE::default();
         let mut interface = HANDLE::default();
         let mut address = HANDLE::default();
@@ -856,15 +869,12 @@ impl EventProvider for WindowsBackend {
             return Err(Error::Platform(PlatformErrorCode::Windows(status.0)));
         }
 
-        Ok(EventReceiver::with_subscription(
-            receiver,
-            WindowsWatch {
-                state,
-                route,
-                interface,
-                address,
-            },
-        ))
+        Ok(receiver.with_subscription(WindowsWatch {
+            state,
+            route,
+            interface,
+            address,
+        }))
     }
 }
 
