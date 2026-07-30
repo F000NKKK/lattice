@@ -11,9 +11,9 @@
 написания реализован этап 0.8 плана поэтапной поставки ниже: `net-lattice-core`,
 `net-lattice-ip`, модули `route`, `interface`, `dns`, `neighbor` и `ifaddr` в `net-lattice-model`,
 `RouteProvider`, `InterfaceProvider`, `DnsProvider`, `NeighborProvider`, `AddressProvider`, `CapabilityProvider` и `EventProvider` в `net-lattice-platform`,
-поддержка маршрутов, интерфейсов, DNS, соседей (ARP/NDP) и IP-адресов интерфейсов в `net-lattice-backend-linux`,
+поддержка маршрутов, интерфейсов, DNS, соседей (ARP/NDP), IP-адресов интерфейсов и нативного мониторинга событий в `net-lattice-backend-linux`,
 `net-lattice-backend-windows` и `net-lattice-backend-darwin`, а также фасад
-`net-lattice`, а также мониторинг событий Netlink в Linux — всё, что описано дальше этого этапа, по-прежнему только цель,
+`net-lattice` — всё, что описано дальше этого этапа, по-прежнему только цель,
 а не текущее состояние.
 
 ## Руководящий принцип

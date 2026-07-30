@@ -84,7 +84,7 @@ This gives real route management, interface listing, DNS resolver reads, neighbo
 1. **Bootstrap** *(completed)* — repository infrastructure, licensing, community health files, and tooling configuration.
 2. **Design** *(completed)* — define the crate layout, core abstractions, and platform abstraction strategy. See [ARCHITECTURE.md](ARCHITECTURE.md) for the planned workspace structure.
 3. **Foundations** *(completed)* — core IP/route/interface types and all three platform backends shipped.
-4. **Platform parity** *(completed)* — Linux, Windows, and BSD/macOS route, interface, DNS-read, neighbor-read, and address-read backends shipped.
+4. **Platform parity** *(completed)* — Linux, Windows, and BSD/macOS route, interface, DNS-read, neighbor-read, address-read, and monitoring backends shipped.
 5. **Advanced features** — monitoring, notifications, transactional configuration, and declarative networking.
 
 ## Contributing

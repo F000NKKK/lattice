@@ -36,9 +36,10 @@ Incremental Delivery Plan: route, interface, DNS-read, neighbor-read, and
 address-read providers for Linux (`net-lattice-backend-linux`, via Netlink
 and `/etc/resolv.conf`), Windows (`net-lattice-backend-windows`, via the IP
 Helper API), and BSD/macOS (`net-lattice-backend-darwin`, via route sockets,
-`getifaddrs`, and `/etc/resolv.conf`), plus Netlink multicast monitoring on
-Linux. Route and interface operations are privileged (see ARCHITECTURE.md's
-Privilege Model) — vulnerability reports involving unintended route
-manipulation, privilege confusion, or memory-safety issues in route,
-interface, DNS, neighbor, address, or monitoring message/data handling are
-in scope. No other domain (firewall, ...) exists yet.
+`getifaddrs`, and `/etc/resolv.conf`), plus monitoring via Netlink multicast
+(Linux), PF_ROUTE (BSD/macOS), and IP Helper notifications (Windows). Route
+and interface operations are privileged (see ARCHITECTURE.md's Privilege
+Model) — vulnerability reports involving unintended route manipulation,
+privilege confusion, or memory-safety issues in route, interface, DNS,
+neighbor, address, or monitoring message/data handling are in scope. No
+other domain (firewall, ...) exists yet.

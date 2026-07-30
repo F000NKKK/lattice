@@ -12,11 +12,11 @@ the Incremental Delivery Plan below has landed: `net-lattice-core`,
 `net-lattice-ip`, `net-lattice-model`'s `route`, `interface`, `dns`,
 `neighbor`, and `ifaddr` modules, `net-lattice-platform`'s `RouteProvider`,
 `InterfaceProvider`, `DnsProvider`, `NeighborProvider`, and
-`AddressProvider`, `CapabilityProvider`, and `EventProvider`, route/interface/DNS/neighbor/address support in
+`AddressProvider`, `CapabilityProvider`, and `EventProvider`,
+route/interface/DNS/neighbor/address support and native event monitoring in
 `net-lattice-backend-linux`, `net-lattice-backend-windows`, and
-`net-lattice-backend-darwin`, the `net-lattice` facade, and Netlink event
-monitoring on Linux — everything past that stage is still a target, not
-current state.
+`net-lattice-backend-darwin`, and the `net-lattice` facade — everything past
+that stage is still a target, not current state.
 
 ## Guiding Principle
 

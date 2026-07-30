@@ -51,14 +51,13 @@ jobs:
       - name: cargo doc --no-deps --workspace
         run: cargo doc --no-deps --workspace
 
-      # The add/remove-route round-trip test in each backend is #[ignore]d
-      # by default (see each crate's test module) because it needs elevated
+      # The add/remove-route and `watch()` route-delivery round-trip tests in
+      # each backend are #[ignore]d by default because they need elevated
       # privileges to actually touch the routing table — CAP_NET_ADMIN on
-      # Linux, root on macOS, Administrator on Windows. Each one is scoped
-      # to a documentation-only prefix (RFC 5737 TEST-NET-3) on the
-      # loopback interface and cleans up after itself regardless of
-      # assertion outcome, so it's safe to run against the runner's real
-      # routing table.
+      # Linux, root on macOS, Administrator on Windows. They use a
+      # documentation-only prefix (RFC 5737 TEST-NET-3) on loopback and
+      # clean up after themselves, so each native runner proves both route
+      # mutation and delivery through its real event provider.
       - name: cargo test --ignored (privileged, Linux — sudo for CAP_NET_ADMIN)
         if: matrix.os == 'ubuntu-latest'
         run: sudo env "PATH=$PATH" "HOME=$HOME" cargo test -p net-lattice-backend-linux -- --ignored
