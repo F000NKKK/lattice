@@ -898,4 +898,49 @@ mod tests {
             "removed route was still present in routes() afterward"
         );
     }
+
+    /// End-to-end monitoring verification: a route mutation must travel from
+    /// the kernel's Netlink multicast group through `watch()` to the caller.
+    /// It is ignored by default because creating the route requires
+    /// `CAP_NET_ADMIN`.
+    #[test]
+    #[ignore = "requires CAP_NET_ADMIN; run with `sudo -E cargo test -p net-lattice-backend-linux watch_observes_route_changes -- --ignored`"]
+    fn watch_observes_route_changes() {
+        use std::time::Duration;
+
+        let backend = LinuxBackend::new().expect("failed to open a Netlink connection");
+        assert!(backend.capabilities().contains(Capability::MONITORING));
+        let watcher = backend
+            .watch()
+            .expect("failed to subscribe to Netlink events");
+        let interface_index = loopback_interface_index(&backend);
+        let destination = Network::from(Ipv4Network::new(
+            Ipv4Address::new(203, 0, 113, 0),
+            Ipv4PrefixLength::new(24).unwrap(),
+        ));
+        let route = Route::new(RouteId::new(0), destination).with_interface_index(interface_index);
+
+        backend
+            .add_route(route.clone())
+            .expect("failed to add monitoring test route");
+        let watched_id = backend
+            .routes()
+            .expect("failed to read routes after adding test route")
+            .into_iter()
+            .find(|candidate| {
+                candidate.destination == destination
+                    && candidate.interface_index == Some(interface_index)
+            })
+            .expect("test route was not present after it was added")
+            .id;
+
+        let observed = (0..12).any(|_| {
+            matches!(
+                watcher.recv_timeout(Duration::from_millis(250)),
+                Ok(Some(Event::Route { id, .. })) if id == watched_id
+            )
+        });
+        let _ = backend.remove_route(route);
+        assert!(observed, "watch() did not report the route mutation");
+    }
 }

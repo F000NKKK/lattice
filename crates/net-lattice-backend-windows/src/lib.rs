@@ -986,4 +986,54 @@ mod tests {
             "removed route was still present in routes() afterward"
         );
     }
+
+    /// End-to-end monitoring verification using a temporary route. This
+    /// requires an elevated Windows token because `CreateIpForwardEntry2`
+    /// modifies kernel routing state.
+    #[test]
+    #[ignore = "requires Administrator; run from elevated cmd/PowerShell: cargo test -p net-lattice-backend-windows watch_observes_route_changes -- --ignored"]
+    fn watch_observes_route_changes() {
+        use std::time::Duration;
+
+        let backend = WindowsBackend::new().expect("failed to create Windows backend");
+        assert!(backend.capabilities().contains(Capability::MONITORING));
+        let watcher = backend
+            .watch()
+            .expect("failed to register IP Helper notifications");
+        let interface_index = backend
+            .interfaces()
+            .expect("failed to list Windows interfaces")
+            .into_iter()
+            .find(|interface| matches!(interface.kind, InterfaceKind::Loopback))
+            .expect("Windows loopback interface was not found")
+            .index;
+        let destination = Network::from(Ipv4Network::new(
+            Ipv4Address::new(203, 0, 113, 0),
+            Ipv4PrefixLength::new(24).unwrap(),
+        ));
+        let route = Route::new(RouteId::new(0), destination).with_interface_index(interface_index);
+
+        backend
+            .add_route(route.clone())
+            .expect("failed to add monitoring test route");
+        let watched_id = backend
+            .routes()
+            .expect("failed to read routes after adding test route")
+            .into_iter()
+            .find(|candidate| {
+                candidate.destination == destination
+                    && candidate.interface_index == Some(interface_index)
+            })
+            .expect("test route was not present after it was added")
+            .id;
+
+        let observed = (0..12).any(|_| {
+            matches!(
+                watcher.recv_timeout(Duration::from_millis(250)),
+                Ok(Some(Event::Route { id, .. })) if id == watched_id
+            )
+        });
+        let _ = backend.remove_route(route);
+        assert!(observed, "watch() did not report the route mutation");
+    }
 }
