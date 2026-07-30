@@ -992,6 +992,64 @@ mod tests {
         );
     }
 
+    /// Exercises the complete address-mutation path against the real
+    /// kernel: create an IPv4 address on `lo`, read the canonical observed
+    /// record, then remove that exact record. TEST-NET-1 is reserved for
+    /// documentation and is distinct from the route tests' prefixes.
+    #[test]
+    #[ignore = "requires CAP_NET_ADMIN; run with `sudo -E cargo test -p net-lattice-backend-linux add_then_remove_address_round_trips_through_the_kernel -- --ignored`"]
+    fn add_then_remove_address_round_trips_through_the_kernel() {
+        let _guard = kernel_test_guard();
+        let backend = LinuxBackend::new().expect("failed to open a Netlink connection");
+        let interface_index = loopback_interface_index(&backend);
+        let network = Network::from(Ipv4Network::new(
+            Ipv4Address::new(192, 0, 2, 9),
+            Ipv4PrefixLength::new(24).unwrap(),
+        ));
+        let requested = NewInterfaceAddress::new(Id::new(interface_index as u64), network);
+
+        // A prior interrupted ignored-test run must not turn this run into a
+        // false duplicate. The address range is test-only and cleanup is
+        // deliberately best-effort before the actual assertion path.
+        if let Some(existing) = backend
+            .addresses()
+            .expect("addresses() failed before add_address")
+            .into_iter()
+            .find(|address| {
+                address.interface_index == interface_index && address.address == network
+            })
+        {
+            let _ = backend.remove_address(existing);
+        }
+
+        let observed = backend
+            .add_address(requested)
+            .expect("add_address failed - are you running with CAP_NET_ADMIN?");
+        let present = backend
+            .addresses()
+            .expect("addresses() failed after add_address")
+            .into_iter()
+            .any(|address| address.id == observed.id);
+
+        backend
+            .remove_address(observed.clone())
+            .expect("remove_address failed after successful add_address");
+        let absent = !backend
+            .addresses()
+            .expect("addresses() failed after remove_address")
+            .into_iter()
+            .any(|address| address.id == observed.id);
+
+        assert!(
+            present,
+            "added address was not present in addresses() afterward"
+        );
+        assert!(
+            absent,
+            "removed address was still present in addresses() afterward"
+        );
+    }
+
     /// End-to-end monitoring verification: a route mutation must travel from
     /// the kernel's Netlink multicast group through `watch()` to the caller.
     /// It is ignored by default because creating the route requires
