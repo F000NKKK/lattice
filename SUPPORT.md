@@ -10,4 +10,4 @@ Thank you for your interest in Net Lattice.
 
 ## Project Status
 
-Net Lattice has landed Stage 0.5 of its [architecture](ARCHITECTURE.md)'s Incremental Delivery Plan (route, interface, and DNS-read providers for Linux, Windows, and BSD/macOS). Usage support is limited to that surface for now — see [README.md](README.md)'s Current Status — but questions about usage, direction, and design are all welcome.
+Net Lattice has landed Stage 0.6 of its [architecture](ARCHITECTURE.md)'s Incremental Delivery Plan (route, interface, DNS-read, and neighbor-read providers for Linux, Windows, and BSD/macOS). Usage support is limited to that surface for now — see [README.md](README.md)'s Current Status — but questions about usage, direction, and design are all welcome.
