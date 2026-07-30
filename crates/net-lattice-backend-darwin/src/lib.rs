@@ -1082,7 +1082,11 @@ fn sockaddr_in(address: std::net::Ipv4Addr) -> libc::sockaddr_in {
         sin_family: libc::AF_INET as libc::sa_family_t,
         sin_port: 0,
         sin_addr: libc::in_addr {
-            s_addr: u32::from_ne_bytes(address.octets()).to_be(),
+            // `s_addr` is stored in network byte order. Match the existing
+            // route-socket encoder: construct the numeric value from network
+            // octets, then convert it to the target's in-memory network-order
+            // representation.
+            s_addr: u32::from_be_bytes(address.octets()).to_be(),
         },
         sin_zero: [0; 8],
     }
@@ -1683,6 +1687,16 @@ impl DnsProvider for DarwinBackend {
 mod tests {
     use super::*;
     use net_lattice_ip::{Ipv4Address, Ipv4Network, Ipv4PrefixLength};
+
+    #[test]
+    fn sockaddr_in_preserves_ipv4_octet_order() {
+        let input = std::net::Ipv4Addr::new(192, 0, 2, 9);
+        let sockaddr = sockaddr_in(input);
+        let decoded = unsafe {
+            sockaddr_to_ip((&sockaddr as *const libc::sockaddr_in).cast::<libc::sockaddr>())
+        };
+        assert_eq!(decoded, Some(IpAddr::V4(input)));
+    }
 
     /// Exercises a real round trip through `getifaddrs`, no privilege
     /// required: every macOS system has `lo0`'s `127.0.0.1/8`.
