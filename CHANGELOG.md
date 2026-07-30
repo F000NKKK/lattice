@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-07-30
+
 ### Added
 
 - `net-lattice-platform`: `CapabilityProvider`, reporting the runtime-
@@ -20,6 +22,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `net-lattice` facade: `Lattice::capabilities()` and
   `Lattice::supports(capability)`, and `LatticeBackend` now additionally
   requires `CapabilityProvider`.
+- `net-lattice-model`: `event` module with signal-shaped `Event` and
+  `ChangeKind` values for routes, interfaces, neighbors, and interface
+  addresses.
+- `net-lattice-platform`: synchronous `EventProvider` and `EventReceiver`.
+  The receiver provides `recv`, `try_recv`, `recv_timeout`, and `Iterator`,
+  without adding an async-runtime dependency to the core API.
+- `net-lattice-backend-linux`: monitoring through an independent Netlink
+  multicast socket for link, route, neighbor, and address notifications;
+  advertises `Capability::MONITORING`.
+- `net-lattice` facade: `Lattice::watch()` plus event-related re-exports.
+
+### Changed
+
+- `net-lattice-backend-windows` and `-darwin` implement the new provider
+  trait but return `Error::Unsupported` from `watch()` and do not advertise
+  `Capability::MONITORING` until their native watcher lifecycles are ready.
+- `net-lattice-core`: `Error::Disconnected` distinguishes a stopped watcher
+  from an empty event queue or a timeout.
 
 ## [0.7.0] - 2026-07-30
 
