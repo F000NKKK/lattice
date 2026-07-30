@@ -17,9 +17,10 @@ use net_lattice_core::{Error, Id, PlatformErrorCode, Result};
 use net_lattice_model::dns::DnsConfig;
 use net_lattice_model::interface::{AdminState, Interface, InterfaceKind, OperationalState};
 use net_lattice_model::mac::MacAddress;
+use net_lattice_model::neighbor::{NeighborEntry, NeighborId, NeighborState};
 use net_lattice_model::route::{Route, RouteId};
 use net_lattice_model::{IpAddress, Network};
-use net_lattice_platform::{DnsProvider, InterfaceProvider, RouteProvider};
+use net_lattice_platform::{DnsProvider, InterfaceProvider, NeighborProvider, RouteProvider};
 
 const RTM_VERSION: u8 = 5;
 const RTM_ADD: u8 = 1;
@@ -51,6 +52,10 @@ const RTF_UP: libc::c_int = 0x0001;
 const RTF_GATEWAY: libc::c_int = 0x0002;
 const RTF_HOST: libc::c_int = 0x0004;
 const RTF_STATIC: libc::c_int = 0x0800;
+
+// `<net/route.h>`'s `RTF_REJECT` (unreachable, resolution failed) — not
+// exposed as a named constant by the `libc` crate for `apple`.
+const RTF_REJECT: libc::c_int = 0x0008;
 
 const RTM_MAXSIZE: usize = 2048;
 
@@ -862,6 +867,179 @@ impl InterfaceProvider for DarwinBackend {
     }
 }
 
+/// Placeholder identity scheme, same rationale as `synthesize_route_id`: a
+/// neighbor entry has no kernel-assigned numeric ID, so this hashes its
+/// interface and address together.
+fn synthesize_neighbor_id(interface_index: u32, address: &IpAddress) -> NeighborId {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    interface_index.hash(&mut hasher);
+    address.hash(&mut hasher);
+    NeighborId::new(hasher.finish())
+}
+
+/// Reads the link-layer address out of an `AF_LINK` `sockaddr_dl`, the same
+/// shape `link_entry_to_interface` reads a MAC out of, but for the gateway
+/// slot of an ARP/NDP entry (`RTA_GATEWAY`) rather than an interface address.
+unsafe fn sockaddr_dl_to_mac(sa: *const libc::sockaddr) -> Option<MacAddress> {
+    if sa.is_null() || unsafe { (*sa).sa_family } as i32 != libc::AF_LINK {
+        return None;
+    }
+    let sdl = unsafe { &*(sa as *const libc::sockaddr_dl) };
+    if sdl.sdl_alen != 6 {
+        return None;
+    }
+    let start = sdl.sdl_nlen as usize;
+    let data = &sdl.sdl_data;
+    if start + 6 > data.len() {
+        return None;
+    }
+    let mut octets = [0u8; 6];
+    for (i, octet) in octets.iter_mut().enumerate() {
+        *octet = data[start + i] as u8;
+    }
+    Some(MacAddress::new(octets))
+}
+
+/// Derives a [`NeighborState`] from an ARP/NDP `rt_msghdr`'s flags. BSD/macOS
+/// route sockets don't expose the full Neighbor Unreachability Detection
+/// state machine (`Stale`/`Delay`/`Probe`) the way Linux's Netlink does —
+/// only whether resolution has completed (a link-layer address is present)
+/// and whether it failed (`RTF_REJECT`).
+fn neighbor_flags_to_state(flags: libc::c_int, has_mac: bool) -> NeighborState {
+    if flags & RTF_REJECT != 0 {
+        NeighborState::Failed
+    } else if !has_mac {
+        NeighborState::Incomplete
+    } else if flags & RTF_STATIC != 0 {
+        NeighborState::Permanent
+    } else {
+        NeighborState::Reachable
+    }
+}
+
+unsafe fn message_to_neighbor(hdr: &libc::rt_msghdr) -> Option<NeighborEntry> {
+    let mut address = None;
+    let mut mac = None;
+
+    let mut ptr = unsafe { (hdr as *const libc::rt_msghdr).add(1) as *const u8 };
+    let mut remaining = hdr.rtm_msglen as usize - mem::size_of::<libc::rt_msghdr>();
+    let mut bit: libc::c_int = 1;
+    while bit <= hdr.rtm_addrs && remaining >= 1 {
+        if hdr.rtm_addrs & bit == 0 {
+            bit <<= 1;
+            continue;
+        }
+        let sa_len = unsafe { *ptr } as usize;
+        let aligned_len = if sa_len == 0 { 4 } else { (sa_len + 3) & !3 };
+        if aligned_len > remaining {
+            break;
+        }
+        match bit {
+            RTA_DST => {
+                address = unsafe { sockaddr_to_ip(ptr as *const libc::sockaddr) }
+                    .map(std_ip_to_ip_address);
+            }
+            RTA_GATEWAY => {
+                mac = unsafe { sockaddr_dl_to_mac(ptr as *const libc::sockaddr) };
+            }
+            _ => {}
+        }
+        ptr = unsafe { ptr.add(aligned_len) };
+        remaining -= aligned_len;
+        bit <<= 1;
+    }
+
+    let address = address?;
+    let interface_index = hdr.rtm_index as u32;
+    let state = neighbor_flags_to_state(hdr.rtm_flags, mac.is_some());
+
+    let mut entry = NeighborEntry::new(
+        synthesize_neighbor_id(interface_index, &address),
+        interface_index,
+        address,
+    )
+    .with_state(state);
+    if let Some(mac) = mac {
+        entry = entry.with_mac(mac);
+    }
+    Some(entry)
+}
+
+/// Dumps the ARP (`AF_INET`) or NDP (`AF_INET6`) neighbor cache via
+/// `sysctl(CTL_NET, PF_ROUTE, 0, family, NET_RT_FLAGS, RTF_LLINFO)` — the
+/// same mechanism `arp -a`/`ndp -an` use. `RTF_LLINFO` filters the dump down
+/// to link-layer-info (neighbor cache) entries, the same wire format
+/// `dump_routing_table` returns for `NET_RT_DUMP`.
+fn dump_neighbor_table(family: libc::c_int) -> Result<Vec<u8>> {
+    let mut mib: [libc::c_int; 6] = [
+        libc::CTL_NET,
+        libc::PF_ROUTE,
+        0,
+        family,
+        libc::NET_RT_FLAGS,
+        libc::RTF_LLINFO,
+    ];
+
+    let mut needed: usize = 0;
+    unsafe {
+        if libc::sysctl(
+            mib.as_mut_ptr(),
+            mib.len() as libc::c_uint,
+            std::ptr::null_mut(),
+            &mut needed,
+            std::ptr::null_mut(),
+            0,
+        ) != 0
+        {
+            return Err(Error::Platform(io_error_code(&io::Error::last_os_error())));
+        }
+    }
+    if needed == 0 {
+        return Ok(Vec::new());
+    }
+
+    let mut buf = vec![0u8; needed];
+    unsafe {
+        if libc::sysctl(
+            mib.as_mut_ptr(),
+            mib.len() as libc::c_uint,
+            buf.as_mut_ptr().cast(),
+            &mut needed,
+            std::ptr::null_mut(),
+            0,
+        ) != 0
+        {
+            return Err(Error::Platform(io_error_code(&io::Error::last_os_error())));
+        }
+    }
+    buf.truncate(needed);
+    Ok(buf)
+}
+
+impl NeighborProvider for DarwinBackend {
+    type NeighborEntry = NeighborEntry;
+
+    fn neighbors(&self) -> Result<Vec<Self::NeighborEntry>> {
+        let mut neighbors = Vec::new();
+        for family in [libc::AF_INET, libc::AF_INET6] {
+            let buf = dump_neighbor_table(family)?;
+            let mut offset = 0usize;
+            while offset + mem::size_of::<libc::rt_msghdr>() <= buf.len() {
+                let hdr = unsafe { &*(buf.as_ptr().add(offset) as *const libc::rt_msghdr) };
+                let step = hdr.rtm_msglen as usize;
+                if step == 0 {
+                    break;
+                }
+                if let Some(entry) = unsafe { message_to_neighbor(hdr) } {
+                    neighbors.push(entry);
+                }
+                offset += step;
+            }
+        }
+        Ok(neighbors)
+    }
+}
+
 /// Parses the `nameserver`/`search`/`domain` directives out of a
 /// `resolv.conf`-format file (`man 5 resolv.conf`) — identical format to
 /// Linux's, so this parser is shared verbatim with
@@ -920,6 +1098,20 @@ impl DnsProvider for DarwinBackend {
 mod tests {
     use super::*;
     use net_lattice_ip::{Ipv4Address, Ipv4Network, Ipv4PrefixLength};
+
+    /// Exercises a real round trip through the route socket, no privilege
+    /// required: `NET_RT_FLAGS` dumps are readable by any user.
+    #[test]
+    fn neighbors_reads_the_real_kernel_neighbor_table() {
+        let backend = DarwinBackend::new().expect("failed to open a route socket");
+        let neighbors = backend
+            .neighbors()
+            .expect("NET_RT_FLAGS dump should not require privilege");
+        // Not asserting on contents: the neighbor table of the machine
+        // running this test is arbitrary (may even be empty). Reaching here
+        // without an error is the assertion.
+        let _ = neighbors;
+    }
 
     #[test]
     fn parse_resolv_conf_reads_nameservers_and_search_domains() {
