@@ -17,10 +17,14 @@ use net_lattice_core::{Error, Id, PlatformErrorCode, Result};
 use net_lattice_model::dns::DnsConfig;
 use net_lattice_model::interface::{AdminState, Interface, InterfaceKind, OperationalState};
 use net_lattice_model::mac::MacAddress;
+use net_lattice_model::neighbor::{NeighborEntry, NeighborId, NeighborState};
 use net_lattice_model::route::{Route, RouteId};
 use net_lattice_model::{IpAddress, Network};
-use net_lattice_platform::{DnsProvider, InterfaceProvider, RouteProvider};
+use net_lattice_platform::{DnsProvider, InterfaceProvider, NeighborProvider, RouteProvider};
 use rtnetlink::packet_route::link::{LinkAttribute, LinkLayerType, LinkMessage, State};
+use rtnetlink::packet_route::neighbour::{
+    NeighbourAddress, NeighbourAttribute, NeighbourMessage, NeighbourState as RtNeighbourState,
+};
 use rtnetlink::packet_route::route::{RouteAddress, RouteAttribute, RouteMessage};
 use rtnetlink::{Handle, RouteMessageBuilder};
 
@@ -364,6 +368,86 @@ impl InterfaceProvider for LinuxBackend {
     }
 }
 
+/// Placeholder identity scheme, same rationale as `synthesize_route_id`: a
+/// neighbor entry has no kernel-assigned numeric ID, so this hashes its
+/// interface and address together (the pair the kernel itself keys entries
+/// by, via `RTM_GETNEIGH`).
+fn synthesize_neighbor_id(interface_index: u32, address: &IpAddress) -> NeighborId {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    interface_index.hash(&mut hasher);
+    address.hash(&mut hasher);
+    NeighborId::new(hasher.finish())
+}
+
+/// Maps Linux `NUD_*` neighbor states (`NeighbourState`) to the
+/// cross-platform [`NeighborState`].
+fn neighbour_state_to_state(state: RtNeighbourState) -> NeighborState {
+    match state {
+        RtNeighbourState::Incomplete => NeighborState::Incomplete,
+        RtNeighbourState::Reachable => NeighborState::Reachable,
+        RtNeighbourState::Stale => NeighborState::Stale,
+        RtNeighbourState::Delay => NeighborState::Delay,
+        RtNeighbourState::Probe => NeighborState::Probe,
+        RtNeighbourState::Failed => NeighborState::Failed,
+        RtNeighbourState::Permanent => NeighborState::Permanent,
+        _ => NeighborState::Unknown,
+    }
+}
+
+fn message_to_neighbor(message: &NeighbourMessage) -> Option<NeighborEntry> {
+    let interface_index = message.header.ifindex;
+    let mut address = None;
+    let mut mac = None;
+
+    for attribute in &message.attributes {
+        match attribute {
+            NeighbourAttribute::Destination(NeighbourAddress::Inet(addr)) => {
+                address = Some(std_ip_to_ip_address(IpAddr::V4(*addr)));
+            }
+            NeighbourAttribute::Destination(NeighbourAddress::Inet6(addr)) => {
+                address = Some(std_ip_to_ip_address(IpAddr::V6(*addr)));
+            }
+            NeighbourAttribute::LinkLayerAddress(bytes) if bytes.len() == 6 => {
+                let mut octets = [0u8; 6];
+                octets.copy_from_slice(bytes);
+                mac = Some(MacAddress::new(octets));
+            }
+            _ => {}
+        }
+    }
+
+    let address = address?;
+    let mut entry = NeighborEntry::new(
+        synthesize_neighbor_id(interface_index, &address),
+        interface_index,
+        address,
+    )
+    .with_state(neighbour_state_to_state(message.header.state));
+    if let Some(mac) = mac {
+        entry = entry.with_mac(mac);
+    }
+    Some(entry)
+}
+
+impl NeighborProvider for LinuxBackend {
+    type NeighborEntry = NeighborEntry;
+
+    fn neighbors(&self) -> Result<Vec<Self::NeighborEntry>> {
+        self.runtime.block_on(async {
+            let mut messages = self.handle.neighbours().get().execute();
+            let mut neighbors = Vec::new();
+            while let Some(message) = messages
+                .try_next()
+                .await
+                .map_err(|err| Error::Platform(rtnetlink_error_code(&err)))?
+            {
+                neighbors.extend(message_to_neighbor(&message));
+            }
+            Ok(neighbors)
+        })
+    }
+}
+
 /// Parses the `nameserver`/`search`/`domain` directives out of a
 /// `resolv.conf`-format file (`man 5 resolv.conf`) — the same format on
 /// Linux and BSD/macOS, so this parser is shared verbatim by
@@ -451,6 +535,20 @@ mod tests {
                 .any(|iface| iface.name == "lo" && iface.kind == InterfaceKind::Loopback),
             "expected a `lo` interface classified as Loopback, got: {interfaces:?}"
         );
+    }
+
+    /// Exercises a real round trip through Netlink, no privilege required:
+    /// `RTM_GETNEIGH` dumps are readable by any user.
+    #[test]
+    fn neighbors_reads_the_real_kernel_neighbor_table() {
+        let backend = LinuxBackend::new().expect("failed to open a Netlink connection");
+        let neighbors = backend
+            .neighbors()
+            .expect("RTM_GETNEIGH dump should not require privilege");
+        // Not asserting on contents: the neighbor table of the machine
+        // running this test is arbitrary (may even be empty). Reaching here
+        // without an error is the assertion.
+        let _ = neighbors;
     }
 
     #[test]
