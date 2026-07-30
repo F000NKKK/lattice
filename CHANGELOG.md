@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `net-lattice-platform`: `CapabilityProvider`, reporting the runtime-
+  dependent `Capability` flags (previously only a bare bitflags type with
+  no way for a caller to actually query it) the connected backend
+  currently has available.
+- `net-lattice-backend-linux`/`-windows`/`-darwin`: `CapabilityProvider`
+  implementation, reporting `Capability::IPV6` (every provider these
+  backends implement already handles both address families).
+  `VRF`/`NAMESPACES`/`MONITORING` are left unset — not implemented yet.
+- `net-lattice` facade: `Lattice::capabilities()` and
+  `Lattice::supports(capability)`, and `LatticeBackend` now additionally
+  requires `CapabilityProvider`.
+
 ## [0.7.0] - 2026-07-30
 
 ### Added
