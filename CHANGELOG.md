@@ -137,6 +137,21 @@ BSD/macOS.
   netmask sockaddr as the gateway and the gateway/link-layer sockaddr as
   the netmask, on every `RTM_ADD`/`RTM_DELETE` this backend ever sent.
   Reordered to `DST, GATEWAY, NETMASK` in both functions.
+- `net-lattice-backend-darwin`: `push_link_gateway` returned the
+  unrounded `sdl_len` (e.g. 11 for an 8-byte header plus a 3-byte
+  interface name like `lo0`) as the buffer space it consumed, instead of
+  that value rounded up to the routing socket's 4-byte alignment (12).
+  Every subsequent sockaddr in the message (`NETMASK`, in this backend's
+  case) then landed at a misaligned offset, corrupting how the kernel
+  parsed everything after the link-layer gateway. Confirmed by hex-dumping
+  the exact bytes sent and the kernel's own reply in CI: the reply's
+  `rtm_errno` was `17` (`EEXIST`) — a real error the round-trip test's
+  `if matches!(..., Err(PermissionDenied) | Err(Platform(_)))` guard
+  didn't catch, since `EEXIST` correctly maps to `Error::AlreadyExists`,
+  silently letting a genuinely failed `add_route` continue as if nothing
+  had gone wrong. Fixed `push_link_gateway` to return the rounded-up
+  length, and hardened the test to fail on *any* `add_route` error rather
+  than only those two variants.
 
 ## [0.3.0] - TBD
 

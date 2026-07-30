@@ -487,6 +487,15 @@ fn push_link_gateway(buf: &mut [u8], offset: usize, interface_index: u32, name: 
     const HEADER_LEN: usize = 8;
     let nlen = name.len().min(12);
     let sdl_len = HEADER_LEN + nlen;
+    // Every sockaddr in a routing-socket message is padded to a 4-byte
+    // boundary (`kernelAlign` in golang.org/x/net/route's `roundup`) — the
+    // *declared* `sdl_len` is the unrounded significant length, but the
+    // space actually occupied in the buffer (and thus how far the next
+    // sockaddr's offset advances) is the rounded-up value. Returning the
+    // unrounded `sdl_len` here previously left the following sockaddr
+    // (`NETMASK`) at a misaligned offset, corrupting how the kernel parsed
+    // everything after this one.
+    let space = (sdl_len + 3) & !3;
 
     let mut sdl = libc::sockaddr_dl {
         sdl_len: sdl_len as u8,
@@ -508,7 +517,7 @@ fn push_link_gateway(buf: &mut [u8], offset: usize, interface_index: u32, name: 
             sdl_len,
         );
     }
-    sdl_len
+    space
 }
 
 fn push_sockaddr(buf: &mut [u8], offset: usize, addr: IpAddr) -> usize {
@@ -1086,15 +1095,13 @@ mod tests {
         }
         unsafe { libc::close(spy_fd) };
         eprintln!("[diag] spy socket saw (our pid only): {spy_seen:#?}");
-        if matches!(
-            add_result,
-            Err(Error::PermissionDenied) | Err(Error::Platform(_))
-        ) {
-            // Best effort even under #[ignore]: if it's run without the
-            // capability after all, fail loudly rather than silently
-            // passing on a no-op.
-            add_result.expect("add_route failed - are you running as root?");
-        }
+        // Fail loudly on *any* error rather than only `PermissionDenied`/
+        // `Platform(_)`: this test genuinely swallowed a real
+        // `Error::AlreadyExists` from the kernel this way once already
+        // (masking a `push_link_gateway` alignment bug that corrupted
+        // every add past the gateway sockaddr) — the destination was
+        // pre-cleaned immediately above, so any error here is real.
+        add_result.expect("add_route failed - are you running as root?");
 
         // Retry with a short delay before concluding the route is really
         // absent: `rtm_errno == 0` confirms the kernel accepted the
