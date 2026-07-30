@@ -14,11 +14,12 @@ use std::net::IpAddr;
 use std::{io, mem};
 
 use net_lattice_core::{Error, Id, PlatformErrorCode, Result};
+use net_lattice_model::dns::DnsConfig;
 use net_lattice_model::interface::{AdminState, Interface, InterfaceKind, OperationalState};
 use net_lattice_model::mac::MacAddress;
 use net_lattice_model::route::{Route, RouteId};
 use net_lattice_model::{IpAddress, Network};
-use net_lattice_platform::{InterfaceProvider, RouteProvider};
+use net_lattice_platform::{DnsProvider, InterfaceProvider, RouteProvider};
 
 const RTM_VERSION: u8 = 5;
 const RTM_ADD: u8 = 1;
@@ -861,10 +862,89 @@ impl InterfaceProvider for DarwinBackend {
     }
 }
 
+/// Parses the `nameserver`/`search`/`domain` directives out of a
+/// `resolv.conf`-format file (`man 5 resolv.conf`) — identical format to
+/// Linux's, so this parser is shared verbatim with
+/// `net-lattice-backend-linux`. On macOS `/etc/resolv.conf` is kept in sync
+/// by `configd` from the dynamic store, so reading it reflects the system's
+/// actual current resolver configuration even though it's not the source of
+/// truth `scutil` would show.
+///
+/// `domain` is folded into `search_domains` too: it is the legacy
+/// single-domain predecessor of `search` and every modern resolver treats a
+/// lone `domain` entry as an implicit one-element search list.
+fn parse_resolv_conf(contents: &str) -> DnsConfig {
+    let mut config = DnsConfig::new();
+    for line in contents.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
+            continue;
+        }
+        let mut parts = line.split_whitespace();
+        match parts.next() {
+            Some("nameserver") => {
+                if let Some(addr) = parts.next().and_then(|s| s.parse::<IpAddr>().ok()) {
+                    config.nameservers.push(std_ip_to_ip_address(addr));
+                }
+            }
+            Some("search") | Some("domain") => {
+                config
+                    .search_domains
+                    .extend(parts.map(|domain| domain.to_string()));
+            }
+            _ => {}
+        }
+    }
+    config
+}
+
+fn resolv_conf_error(err: &io::Error) -> Error {
+    match err.kind() {
+        io::ErrorKind::NotFound => Error::NotFound,
+        io::ErrorKind::PermissionDenied => Error::PermissionDenied,
+        _ => Error::Platform(io_error_code(err)),
+    }
+}
+
+impl DnsProvider for DarwinBackend {
+    type DnsConfig = DnsConfig;
+
+    fn dns_config(&self) -> Result<Self::DnsConfig> {
+        let contents =
+            std::fs::read_to_string("/etc/resolv.conf").map_err(|err| resolv_conf_error(&err))?;
+        Ok(parse_resolv_conf(&contents))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use net_lattice_ip::{Ipv4Address, Ipv4Network, Ipv4PrefixLength};
+
+    #[test]
+    fn parse_resolv_conf_reads_nameservers_and_search_domains() {
+        let contents = "# comment\nnameserver 1.1.1.1\nsearch example.com corp.example.com\n";
+        let config = parse_resolv_conf(contents);
+        assert_eq!(
+            config.nameservers,
+            vec![IpAddress::from(Ipv4Address::new(1, 1, 1, 1))]
+        );
+        assert_eq!(
+            config.search_domains,
+            vec!["example.com".to_string(), "corp.example.com".to_string()]
+        );
+    }
+
+    /// Reads the real `/etc/resolv.conf` present on this test environment.
+    /// Every macOS system has one, kept in sync by `configd`.
+    #[test]
+    fn dns_config_reads_the_real_resolv_conf() {
+        let backend = DarwinBackend::new().expect("failed to open a route socket");
+        let config = backend
+            .dns_config()
+            .expect("/etc/resolv.conf should be readable");
+        let _ = config;
+    }
 
     /// Diagnostic-only: formats `bytes` as a space-separated hex dump.
     fn hex_dump(bytes: &[u8]) -> String {
