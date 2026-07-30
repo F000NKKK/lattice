@@ -99,6 +99,17 @@ BSD/macOS.
   this request's `rtm_pid`/`rtm_seq` (filtering out other processes'
   traffic on the same shared socket), returning `Err` from a nonzero
   `rtm_errno` instead of assuming success.
+- `net-lattice-backend-darwin`: the `AF_LINK` `sockaddr_dl` gateway used
+  for interface-only routes (no IP next hop) declared `sdl_len` as
+  `sizeof(struct sockaddr_dl)` (20 bytes, including a 12-byte `sdl_data`
+  array left entirely unused). Compared against `golang.org/x/net/route`
+  (the reference BSD routing-socket implementation)'s `LinkAddr.marshal`,
+  the on-wire `sdl_len` for a name-less, address-less link address must be
+  just the significant header (8 bytes) — not the padded struct size. The
+  kernel accepted the malformed request (`rtm_errno == 0`) but never
+  actually created the route, which is why `routes()` found nothing under
+  that destination at all afterward, on any interface. `sdl_len` and the
+  bytes actually written are now both 8.
 
 ## [0.3.0] - TBD
 

@@ -433,9 +433,22 @@ fn build_delete_message(route: &Route) -> Result<Vec<u8>> {
 /// with no hardware address of its own — this is the gateway-slot shape
 /// used for "send directly out this interface, no next hop" routes (see
 /// `build_add_message`'s `(None, Some(interface_index))` case).
+///
+/// The on-wire `sdl_len` is the *significant* header length only (8 bytes:
+/// `sdl_len`+`sdl_family`+`sdl_index`+`sdl_type`+`sdl_nlen`+`sdl_alen`+
+/// `sdl_slen`) — not `sizeof(struct sockaddr_dl)` (20, padded with a
+/// 12-byte `sdl_data` array that's unused here since there's no interface
+/// name or link-layer address to attach). This matches
+/// `golang.org/x/net/route`'s `LinkAddr.marshal()` (`lenAndSpace`: `8 +
+/// len(Name) + len(Addr)`), the reference implementation for BSD routing
+/// sockets; declaring the full padded struct size here previously produced
+/// a `sockaddr_dl` bearing `sdl_nlen`/`sdl_alen` of `0` alongside a `sdl_len`
+/// that didn't match `8 + sdl_nlen + sdl_alen`, which the kernel evidently
+/// doesn't resolve to a usable interface reference.
 fn push_link_gateway(buf: &mut [u8], offset: usize, interface_index: u32) -> usize {
+    const SDL_HEADER_LEN: usize = 8;
     let sdl = libc::sockaddr_dl {
-        sdl_len: mem::size_of::<libc::sockaddr_dl>() as u8,
+        sdl_len: SDL_HEADER_LEN as u8,
         sdl_family: libc::AF_LINK as u8,
         sdl_index: interface_index as u16,
         sdl_type: 0,
@@ -448,10 +461,10 @@ fn push_link_gateway(buf: &mut [u8], offset: usize, interface_index: u32) -> usi
         std::ptr::copy_nonoverlapping(
             &sdl as *const _ as *const u8,
             buf.as_mut_ptr().add(offset),
-            mem::size_of::<libc::sockaddr_dl>(),
+            SDL_HEADER_LEN,
         );
     }
-    mem::size_of::<libc::sockaddr_dl>()
+    SDL_HEADER_LEN
 }
 
 fn push_sockaddr(buf: &mut [u8], offset: usize, addr: IpAddr) -> usize {
