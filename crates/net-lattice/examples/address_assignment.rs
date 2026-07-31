@@ -1,8 +1,9 @@
-//! Assign an IPv4 address when explicitly enabled by the caller.
+//! Assign and then remove an IPv4 address when explicitly enabled by the caller.
 //!
 //! This example never changes network state unless `NET_LATTICE_INTERFACE_INDEX`
-//! is set to the target interface's numeric index. Choose an unused address
-//! appropriate for the host before running it with sufficient privilege.
+//! is set to the target interface's numeric index. It removes only the address
+//! it successfully created. Choose an unused address appropriate for the host
+//! before running it with sufficient privilege.
 
 use net_lattice::{
     Error, Ipv4Address, Ipv4Network, Ipv4PrefixLength, Lattice, Network, NewInterfaceAddress,
@@ -33,5 +34,7 @@ fn main() -> Result<()> {
     );
     let observed = lattice.add_address(request)?;
     println!("assigned: {observed:?}");
+    lattice.remove_address(observed)?;
+    println!("removed the address created by this example");
     Ok(())
 }
