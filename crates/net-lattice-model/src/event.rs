@@ -262,4 +262,93 @@ mod tests {
             domain: EventDomain::Address,
         }));
     }
+
+    #[test]
+    fn domain_builders_default_and_empty_state_cover_every_domain() {
+        let empty = EventFilter::none();
+        assert!(empty.is_empty());
+        assert!(!empty.matches(Event::Route {
+            id: RouteId::new(1),
+            kind: ChangeKind::Added,
+        }));
+
+        let domains = EventFilter::none()
+            .routes()
+            .interfaces()
+            .neighbors()
+            .addresses();
+        assert!(!domains.is_empty());
+        assert!(domains.matches(Event::Route {
+            id: RouteId::new(1),
+            kind: ChangeKind::Added,
+        }));
+        assert!(domains.matches(Event::Interface {
+            id: InterfaceId::new(1),
+            kind: ChangeKind::Removed,
+        }));
+        assert!(domains.matches(Event::Neighbor {
+            id: NeighborId::new(1),
+            kind: ChangeKind::Changed,
+        }));
+        assert!(domains.matches(Event::Address {
+            id: InterfaceAddressId::new(1),
+            kind: ChangeKind::Added,
+        }));
+        assert_eq!(EventFilter::default(), EventFilter::ALL);
+    }
+
+    #[test]
+    fn object_selectors_cover_every_domain_and_deduplicate() {
+        let filter = EventFilter::none()
+            .route(RouteId::new(1))
+            .route(RouteId::new(1))
+            .interface(InterfaceId::new(2))
+            .neighbor(NeighborId::new(3))
+            .address(InterfaceAddressId::new(4));
+
+        assert!(filter.matches(Event::Route {
+            id: RouteId::new(1),
+            kind: ChangeKind::Added,
+        }));
+        assert!(!filter.matches(Event::Route {
+            id: RouteId::new(2),
+            kind: ChangeKind::Added,
+        }));
+        assert!(filter.matches(Event::Interface {
+            id: InterfaceId::new(2),
+            kind: ChangeKind::Added,
+        }));
+        assert!(!filter.matches(Event::Interface {
+            id: InterfaceId::new(3),
+            kind: ChangeKind::Added,
+        }));
+        assert!(filter.matches(Event::Neighbor {
+            id: NeighborId::new(3),
+            kind: ChangeKind::Added,
+        }));
+        assert!(!filter.matches(Event::Neighbor {
+            id: NeighborId::new(4),
+            kind: ChangeKind::Added,
+        }));
+        assert!(filter.matches(Event::Address {
+            id: InterfaceAddressId::new(4),
+            kind: ChangeKind::Added,
+        }));
+        assert!(!filter.matches(Event::Address {
+            id: InterfaceAddressId::new(5),
+            kind: ChangeKind::Added,
+        }));
+    }
+
+    #[test]
+    fn resync_all_is_selected_only_when_a_domain_is_selected() {
+        assert_eq!(
+            Event::resync_all(),
+            Event::ResyncRequired {
+                domain: EventDomain::All
+            }
+        );
+        assert!(!EventFilter::none().matches(Event::resync_all()));
+        assert!(EventFilter::none().routes().matches(Event::resync_all()));
+    }
 }
