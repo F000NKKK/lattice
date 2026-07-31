@@ -153,7 +153,12 @@ let observed = lattice.add_address(request)?;
 4. **Platform parity** *(completed)* — Linux, Windows, and macOS route and address mutation, interface, DNS-read, neighbor-read, address-read, and monitoring backends shipped.
 5. **Stage 0.10: Event semantics** *(completed)* — bounded delivery, overflow and resynchronization signaling, filtering, cancellation, and error propagation.
 6. **Stage 0.11: Async events** *(completed)* — optional `async` facade feature, one runtime-agnostic `EventStream`, and native Tokio-backed delivery in every platform backend.
-7. **Later stages** — further write parity, transactional configuration, and declarative networking.
+7. **Stage 0.12: Watcher filters** — make filtering symmetric across synchronous and async watcher entry points, while preserving the released 0.11 API.
+8. **Stage 0.13: DNS mutation** — native resolver-configuration writes with the same intent/observed-state discipline as address mutation.
+9. **Stage 0.14: Transaction primitives** — plans, application, failure reporting, and rollback boundaries for mutations.
+10. **Stage 0.15: Declarative networking** — `CurrentState`, `DesiredState`, `Diff`, and `ApplyPlan` built on the stable mutation foundation.
+11. **Stage 0.16+: Capability domains** — VLAN, VRF, namespaces, firewall, and tunnel support, gated by explicit runtime capabilities.
+12. **1.0** — stable cross-platform inspection, monitoring, and mutation foundation.
 
 ## Contributing
 

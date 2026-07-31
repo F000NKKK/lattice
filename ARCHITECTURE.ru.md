@@ -612,7 +612,12 @@ provider-traits, а не другой контракт backend'а. Дорабо�
 | 0.9 ✅ | `NewInterfaceAddress` + `AddressMutator`; нативное назначение/удаление IPv4/IPv6-адресов через Netlink (Linux), IP Helper (Windows) и address ioctl (macOS). |
 | 0.10 ✅ | Семантика событий: bounded delivery, overflow/resynchronization, filtering, cancellation и распространение ошибок фонового watcher'а. |
 | 0.11 ✅ | Опциональная feature `async` в `net-lattice`; `net-lattice-async` предоставляет один runtime-agnostic `EventStream`, а Linux (Tokio Netlink), Windows (callbacks IP Helper) и macOS (reader PF_ROUTE) доставляют события прямо в bounded Tokio transports. |
-| 0.12+ | Дальнейший паритет операций записи (включая DNS), примитивы транзакций, декларативные `CurrentState`/`DesiredState`/`Diff`/`ApplyPlan`, затем домены VLAN, VRF, firewall, tunnel и namespace под Capability. |
+| 0.12 | Паритет API фильтров watcher'ов между синхронными и async точками входа без изменения опубликованного API 0.11. |
+| 0.13 | Изменение DNS с моделью intent/observed state. |
+| 0.14 | Примитивы транзакций: планы, применение, сообщения об ошибках и границы rollback. |
+| 0.15 | Декларативные `CurrentState`/`DesiredState`/`Diff`/`ApplyPlan` на стабильной основе мутаций. |
+| 0.16+ | Домены VLAN, VRF, firewall, tunnel и namespace, закрытые Capability. |
+| 1.0 | Стабильная кроссплатформенная основа просмотра, мониторинга и изменения сети. |
 
 Ожидается, что каждый этап проверяет архитектуру перед началом следующего;
 более ранние этапы могут повлиять на корректировки более поздних.

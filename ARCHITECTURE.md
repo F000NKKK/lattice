@@ -605,7 +605,12 @@ are introduced only when there is real implementation work for them:
 | 0.9 ✅ | `NewInterfaceAddress` + `AddressMutator`; native IPv4/IPv6 address assignment/removal via Netlink (Linux), IP Helper (Windows), and address ioctls (macOS). |
 | 0.10 ✅ | Event semantics: bounded delivery, overflow/resynchronization, filtering, cancellation, and background-error propagation. |
 | 0.11 ✅ | Optional `net-lattice` `async` feature; `net-lattice-async` exposes one runtime-agnostic `EventStream`, while Linux (Tokio Netlink), Windows (IP Helper callbacks), and macOS (PF_ROUTE reader) deliver directly into bounded Tokio transports. |
-| 0.12+ | Further write parity (including DNS), transaction primitives, declarative `CurrentState`/`DesiredState`/`Diff`/`ApplyPlan`, then capability-gated VLAN, VRF, firewall, tunnel, and namespace domains. |
+| 0.12 | Watcher filter API parity across synchronous and async entry points, without changing the released 0.11 API. |
+| 0.13 | DNS mutation with an intent/observed-state model. |
+| 0.14 | Transaction primitives: plans, application, failure reporting, and rollback boundaries. |
+| 0.15 | Declarative `CurrentState`/`DesiredState`/`Diff`/`ApplyPlan` on the stable mutation foundation. |
+| 0.16+ | Capability-gated VLAN, VRF, firewall, tunnel, and namespace domains. |
+| 1.0 | Stable cross-platform inspection, monitoring, and mutation foundation. |
 
 Each stage is expected to validate the architecture before the next is
 started; earlier stages may inform adjustments to later ones.
