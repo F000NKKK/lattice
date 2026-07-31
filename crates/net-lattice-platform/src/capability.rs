@@ -24,6 +24,9 @@ bitflags::bitflags! {
         const VRF = 1 << 1;
         const NAMESPACES = 1 << 2;
         const MONITORING = 1 << 3;
+        /// The backend can replace resolver configuration through a supported
+        /// operating-system mechanism.
+        const DNS_MUTATION = 1 << 4;
     }
 }
 

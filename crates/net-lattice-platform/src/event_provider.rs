@@ -118,15 +118,6 @@ impl<E> EventReceiver<E> {
         }
     }
 
-    /// Alias for [`Self::from_channel_receiver`].
-    ///
-    /// Deprecated because the source channel is an implementation detail;
-    /// backend code should use the explicit constructor name instead.
-    #[deprecated(note = "use EventReceiver::from_channel_receiver instead")]
-    pub fn new(receiver: mpsc::Receiver<Result<E>>) -> Self {
-        Self::from_channel_receiver(receiver)
-    }
-
     /// Wraps a channel receiver and attaches a backend-owned subscription
     /// guard.
     ///

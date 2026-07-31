@@ -8,10 +8,9 @@ use net_lattice_core::Result;
 /// crate (`net-lattice`) is what constrains `DnsConfig` to the concrete
 /// model type.
 ///
-/// Read-only for now, like [`InterfaceProvider`](crate::InterfaceProvider):
-/// writing DNS configuration is a separate concern (which resolver backend
-/// owns `/etc/resolv.conf` vs. NetworkManager/systemd-resolved/Windows
-/// per-adapter settings) deferred to a later stage.
+/// See [`DnsMutator`](crate::DnsMutator) for the complementary mutation
+/// contract. Together these traits form the official DNS extension API for
+/// third-party backends.
 pub trait DnsProvider {
     type DnsConfig;
 

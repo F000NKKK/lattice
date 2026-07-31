@@ -13,6 +13,7 @@
 mod address_mutator;
 mod address_provider;
 mod capability;
+mod dns_mutator;
 mod dns_provider;
 mod event_provider;
 mod interface_provider;
@@ -24,6 +25,7 @@ mod tokio_event_provider;
 pub use address_mutator::AddressMutator;
 pub use address_provider::AddressProvider;
 pub use capability::{Capability, CapabilityProvider};
+pub use dns_mutator::DnsMutator;
 pub use dns_provider::DnsProvider;
 pub use event_provider::{EventProvider, EventReceiver, EventSender};
 pub use interface_provider::InterfaceProvider;
