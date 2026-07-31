@@ -4,17 +4,19 @@ Thank you for your interest in contributing to Net Lattice. This document descri
 
 ## Project Status
 
-Net Lattice has landed Stage 0.13 of its [architecture](ARCHITECTURE.md)'s
+Net Lattice has landed Stage 0.14 of its [architecture](ARCHITECTURE.md)'s
 Incremental Delivery Plan: route and interface-address mutation, DNS resolver
 inspection and mutation, interface and neighbor inspection, bounded
-object/domain-filterable monitoring, and optional native async event delivery
-for Linux, Windows, and macOS. Large capability domains remain ahead, but the
-published read, mutation, monitoring, and backend-extension APIs are real
-public surface. The most valuable contributions right now are:
+object/domain-filterable monitoring, optional native async event delivery, and
+inspectable data-only mutation plans for the existing route, address, and DNS
+operations on Linux, Windows, and macOS. Large capability domains remain
+ahead, but the published read, mutation, monitoring, planning, and
+backend-extension APIs are real public surface. The most valuable
+contributions right now are:
 
 - Feedback on the project's vision, scope, and roadmap (see [README.md](README.md))
 - Discussion of API design and architecture for upcoming stages
-- Implementation work on the next stages in [ARCHITECTURE.md](ARCHITECTURE.md)'s delivery plan (typed mutation operations, transaction execution, interface and neighbor mutation, declarative configuration, ...)
+- Implementation work on the next stages in [ARCHITECTURE.md](ARCHITECTURE.md)'s delivery plan (transaction execution, interface and neighbor mutation, declarative configuration, ...)
 - Documentation and tooling improvements
 
 Please read [ARCHITECTURE.md](ARCHITECTURE.md) before proposing a new crate, module, or provider trait — it documents the dependency rules (e.g. `net-lattice-platform` never depends on `net-lattice-model`) and the staged delivery order this project follows.

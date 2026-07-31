@@ -63,7 +63,7 @@ net-lattice-core          Error, Result, ID types, shared traits
    ├── net-lattice-ip        IPv4Address, IPv6Address, Network, Prefix
    │        (depends on: net-lattice-core)
    │
-   ├── net-lattice-model     modules: mac, route, interface, neighbor, dns, event
+   ├── net-lattice-model     модули: mac, route, interface, neighbor, dns, event, mutation
    │        (depends on: net-lattice-core, net-lattice-ip)
    │
    ├── net-lattice-platform  Generic provider traits, Capability

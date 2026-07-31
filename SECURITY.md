@@ -31,7 +31,7 @@ informed as the issue is investigated and resolved.
 
 ## Scope
 
-Net Lattice has landed Stage 0.13 of its [architecture](ARCHITECTURE.md)'s
+Net Lattice has landed Stage 0.14 of its [architecture](ARCHITECTURE.md)'s
 Incremental Delivery Plan: route inspection and mutation, interface
 inspection, DNS resolver inspection and mutation, neighbor inspection, and
 interface-address inspection and mutation on Linux
@@ -42,7 +42,10 @@ ioctls, and `/etc/resolv.conf`). Monitoring is bounded with explicit overflow
 resynchronization: Linux observes routes, links, neighbors, and addresses via
 Netlink multicast; Windows observes routes, interfaces, and unicast addresses
 via IP Helper; macOS observes routes, interfaces, neighbors, and addresses via
-PF_ROUTE. DNS changes do not currently produce watcher events.
+PF_ROUTE. DNS changes do not currently produce watcher events. Stage 0.14 also
+publishes inspectable, data-only mutation plans for the existing route,
+interface-address, and DNS operations; it does not add a transaction executor
+or change the underlying mutation behavior.
 
 Route, interface-address, and DNS-mutation operations are privileged (see
 [ARCHITECTURE.md](ARCHITECTURE.md)'s Privilege Model). Reports involving

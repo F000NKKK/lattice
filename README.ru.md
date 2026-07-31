@@ -17,7 +17,7 @@
 
 **Net Lattice** — это современная кроссплатформенная библиотека для Rust, предназначенная для настройки и анализа сетевой конфигурации операционной системы через единый строго типизированный API.
 
-> **Статус:** Net Lattice предоставляет кроссплатформенный просмотр сети, изменение маршрутов, адресов и DNS, а также синхронный мониторинг изменений с опциональным async-интерфейсом через нативные API операционных систем в Linux, Windows и macOS. Реализован Stage 0.13 плана архитектуры; см. «Текущий статус» ниже.
+> **Статус:** Net Lattice предоставляет кроссплатформенный просмотр сети, изменение маршрутов, адресов и DNS, inspectable планы mutation-операций, а также синхронный мониторинг изменений с опциональным async-интерфейсом через нативные API операционных систем в Linux, Windows и macOS. Реализован Stage 0.14 плана архитектуры; см. «Текущий статус» ниже.
 
 ## Обзор
 
@@ -48,6 +48,7 @@ Net Lattice призвана закрыть этот пробел, предос�
 - Просмотр и изменение маршрутов
 - Просмотр интерфейсов
 - Просмотр и изменение конфигурации DNS-резолвера
+- Inspectable планы mutation-операций для маршрутов, адресов и DNS
 - Таблицы соседей (ARP/NDP)
 - Мониторинг сети и уведомления об изменениях
 - Опциональный runtime-agnostic async stream событий
@@ -70,15 +71,15 @@ Net Lattice призвана закрыть этот пробел, предос�
 
 ## Текущий статус
 
-Реализован этап 0.13 плана поэтапной поставки из [архитектуры](ARCHITECTURE.ru.md):
+Реализован этап 0.14 плана поэтапной поставки из [архитектуры](ARCHITECTURE.ru.md):
 
 - `net-lattice-core`, `net-lattice-ip`
-- модули `route`, `mac`, `interface`, `dns`, `neighbor`, `ifaddr` и `event` в `net-lattice-model`; `NewInterfaceAddress` и `NewDnsConfig` выражают намерение изменения отдельно от наблюдаемого состояния
+- модули `route`, `mac`, `interface`, `dns`, `neighbor`, `ifaddr`, `event` и `mutation` в `net-lattice-model`; `NewInterfaceAddress` и `NewDnsConfig` выражают намерение изменения отдельно от наблюдаемого состояния
 - `RouteProvider`, `InterfaceProvider`, `DnsProvider`, `DnsMutator`, `NeighborProvider`, `AddressProvider`, `AddressMutator`, `CapabilityProvider`, синхронные `EventProvider`/bounded `EventReceiver` и опциональная async-поддержка мониторинга в `net-lattice-platform`
 - `net-lattice-async`, предоставляющий единый runtime-agnostic тип `EventStream`
 - фасад `net-lattice`, включая `Lattice::add_address()`, `Lattice::remove_address()`, `Lattice::set_dns_config()`, `Lattice::capabilities()`, `Lattice::supports()`, `Lattice::watch()`, `Lattice::watch_filtered()` и feature-gated `Lattice::watch_async()`
 
-Это даёт реальное управление маршрутами и IP-адресами интерфейсов, просмотр интерфейсов, просмотр и изменение DNS-конфигурации резолвера, чтение таблиц соседей (ARP/NDP) и bounded-мониторинг сетевых изменений на Linux, Windows и macOS. Создание адреса принимает `NewInterfaceAddress` и возвращает результирующий наблюдаемый `InterfaceAddress`; замена конфигурации резолвера принимает `NewDnsConfig` и возвращает результирующий наблюдаемый `DnsConfig`. `EventFilter` сочетает селекторы доменов (`routes()`) и объектов (`route(route_id)`); каждый backend применяет filter до помещения обычного события в очередь. В переносимом коде перед watching проверяйте `Lattice::supports(Capability::MONITORING)`, а перед заменой DNS-конфигурации — `Lattice::supports(Capability::DNS_MUTATION)`. Unix-менеджеры резолвера могут позднее перегенерировать `/etc/resolv.conf`; при необходимости постоянного состояния используйте конфигурационный интерфейс владеющего менеджера. Feature `async` в Net Lattice использует и реэкспортирует реализацию `EventStream` из `net-lattice-async`; приложению достаточно включить эту feature фасада. `Lattice::watch_async(filter)` остаётся async API Stage 0.11 и имеет ту же семантику filter, что и `Lattice::watch_filtered(filter)`. Tokio используется внутри там, где этого требует нативная реализация, а приложения взаимодействуют только с runtime-independent интерфейсом `futures::Stream`. Платформенные backend'ы используют Netlink в Linux, IP Helper API в Windows и BSD routing sockets, `getifaddrs` и address ioctl в macOS. Это всё ещё не полноценная библиотека: VLAN, VRF, namespaces, интеграция с firewall, транзакционная конфигурация, декларативная настройка сети и другие продвинутые возможности ещё впереди; см. [ARCHITECTURE.ru.md](ARCHITECTURE.ru.md) для поэтапной дорожной карты и [CHANGELOG.md](CHANGELOG.md) для того, что реально вышло.
+Это даёт реальное управление маршрутами и IP-адресами интерфейсов, просмотр интерфейсов, просмотр и изменение DNS-конфигурации резолвера, чтение таблиц соседей (ARP/NDP), inspectable планы mutation-операций и bounded-мониторинг сетевых изменений на Linux, Windows и macOS. Создание адреса принимает `NewInterfaceAddress` и возвращает результирующий наблюдаемый `InterfaceAddress`; замена конфигурации резолвера принимает `NewDnsConfig` и возвращает результирующий наблюдаемый `DnsConfig`. `MutationPlan` — только данные: он раскрывает preconditions, idempotency, privilege, confirmation, reversibility и риск partial application для каждой операции маршрута, адреса или DNS, но ничего не исполняет и не откатывает. `EventFilter` сочетает селекторы доменов (`routes()`) и объектов (`route(route_id)`); каждый backend применяет filter до помещения обычного события в очередь. В переносимом коде перед watching проверяйте `Lattice::supports(Capability::MONITORING)`, а перед заменой DNS-конфигурации — `Lattice::supports(Capability::DNS_MUTATION)`. Unix-менеджеры резолвера могут позднее перегенерировать `/etc/resolv.conf`; при необходимости постоянного состояния используйте конфигурационный интерфейс владеющего менеджера. Feature `async` в Net Lattice использует и реэкспортирует реализацию `EventStream` из `net-lattice-async`; приложению достаточно включить эту feature фасада. `Lattice::watch_async(filter)` остаётся async API Stage 0.11 и имеет ту же семантику filter, что и `Lattice::watch_filtered(filter)`. Tokio используется внутри там, где этого требует нативная реализация, а приложения взаимодействуют только с runtime-independent интерфейсом `futures::Stream`. Платформенные backend'ы используют Netlink в Linux, IP Helper API в Windows и BSD routing sockets, `getifaddrs` и address ioctl в macOS. Это всё ещё не полноценная библиотека: VLAN, VRF, namespaces, интеграция с firewall, исполнение транзакций, декларативная настройка сети и другие продвинутые возможности ещё впереди; см. [ARCHITECTURE.ru.md](ARCHITECTURE.ru.md) для поэтапной дорожной карты и [CHANGELOG.md](CHANGELOG.md) для того, что реально вышло.
 
 | Возможность | Linux | Windows | macOS |
 |---|:---:|:---:|:---:|
@@ -196,7 +197,7 @@ let observed = lattice.set_dns_config(requested)?;
 7. **Stage 0.11: Async events** *(завершён)* — опциональная feature фасада `async`, единый runtime-agnostic `EventStream` и нативная Tokio-backed доставка в каждом платформенном backend.
 8. **Stage 0.12: Стабилизация API watcher'ов** *(завершён)* — composable filters по объектам/доменам, filtering до помещения в очередь, validation capability мониторинга и одинаковая семантика filter для sync/async watcher'ов с сохранением опубликованного API 0.11.
 9. **Stage 0.13: Изменение DNS** *(завершён)* — замена конфигурации резолвера через поддерживаемые системные механизмы, закрытая capability, на Linux, Windows и macOS.
-10. **Stage 0.14: Модель mutation-операций** — inspectable типизированные операции для существующих изменений routes, addresses и DNS; preconditions, idempotency, privileges и reversibility определены явно.
+10. **Stage 0.14: Модель mutation-операций** *(завершён)* — inspectable значения `Mutation` и планы `MutationPlan` только из данных для существующих изменений routes, addresses и DNS; явно определены preconditions, idempotency, privileges, confirmation, partial application и reversibility.
 11. **Stage 0.15: Исполнение транзакций** — упорядоченные планы, результаты каждой операции, границы cancellation и ошибок, а также compensation только для документированно reversible операций.
 12. **Stage 0.16: Конфигурация интерфейсов** — отдельная desired-конфигурация интерфейса, capability-gated изменение admin state и MTU и platform-parity tests.
 13. **Stage 0.17: Изменение соседей** — intent/observed-типы и capability-gated управление статическими ARP/NDP-записями.
