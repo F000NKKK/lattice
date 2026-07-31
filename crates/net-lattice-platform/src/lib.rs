@@ -33,5 +33,10 @@ pub use route_provider::RouteProvider;
 pub trait TokioEventProvider {
     type Event;
     type EventFilter;
-    fn watch_tokio(&self, filter: Self::EventFilter) -> net_lattice_core::Result<tokio::sync::mpsc::UnboundedReceiver<net_lattice_core::Result<Self::Event>>>;
+    fn watch_tokio(
+        &self,
+        filter: Self::EventFilter,
+    ) -> net_lattice_core::Result<
+        tokio::sync::mpsc::UnboundedReceiver<net_lattice_core::Result<Self::Event>>,
+    >;
 }
