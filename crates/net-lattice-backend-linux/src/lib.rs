@@ -1045,6 +1045,34 @@ mod tests {
         );
     }
 
+    #[test]
+    fn resolver_parser_ignores_nonportable_directives_and_renderer_handles_empty_config() {
+        let config =
+            parse_resolv_conf("options rotate\ninvalid 192.0.2.1\nnameserver invalid\nsearch\n");
+        assert!(config.nameservers.is_empty());
+        assert!(config.search_domains.is_empty());
+        assert_eq!(render_resolv_conf(&NewDnsConfig::new()), "");
+    }
+
+    #[test]
+    fn ip_and_network_conversion_round_trip_both_families() {
+        let ipv4 = IpAddress::from(Ipv4Address::new(192, 0, 2, 1));
+        let ipv6 = std_ip_to_ip_address("2001:db8::1".parse().expect("IPv6"));
+        assert_eq!(std_ip_to_ip_address(ip_address_to_std(ipv4)), ipv4);
+        assert_eq!(std_ip_to_ip_address(ip_address_to_std(ipv6)), ipv6);
+
+        let v4_network = Network::from(Ipv4Network::new(
+            Ipv4Address::new(192, 0, 2, 0),
+            Ipv4PrefixLength::new(24).expect("prefix"),
+        ));
+        let v6_network = Network::from(net_lattice_ip::Ipv6Network::new(
+            net_lattice_ip::Ipv6Address::new([0x2001, 0xdb8, 0, 0, 0, 0, 0, 0]),
+            net_lattice_ip::Ipv6PrefixLength::new(32).expect("prefix"),
+        ));
+        assert_eq!(network_to_std(v4_network).1, 24);
+        assert_eq!(network_to_std(v6_network).1, 32);
+    }
+
     /// Reads the real `/etc/resolv.conf` present on this test environment.
     /// Every Linux system has one (even if empty/symlinked to
     /// systemd-resolved's stub), so this exercises the real filesystem read
