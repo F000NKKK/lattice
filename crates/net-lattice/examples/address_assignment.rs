@@ -1,0 +1,32 @@
+//! Assign an IPv4 address when explicitly enabled by the caller.
+//!
+//! This example never changes network state unless `NET_LATTICE_INTERFACE_INDEX`
+//! is set to the target interface's numeric index. Choose an unused address
+//! appropriate for the host before running it with sufficient privilege.
+
+use net_lattice::{
+    InterfaceId, Ipv4Address, Ipv4Network, Ipv4PrefixLength, Lattice, Network, NewInterfaceAddress,
+    Result,
+};
+
+fn main() -> Result<()> {
+    let Some(index) = std::env::var("NET_LATTICE_INTERFACE_INDEX")
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok())
+    else {
+        eprintln!("set NET_LATTICE_INTERFACE_INDEX to assign the example address");
+        return Ok(());
+    };
+
+    let lattice = Lattice::connect()?;
+    let request = NewInterfaceAddress::new(
+        InterfaceId::new(index as u64),
+        Network::from(Ipv4Network::new(
+            Ipv4Address::new(192, 0, 2, 10),
+            Ipv4PrefixLength::new(24).expect("24 is a valid IPv4 prefix length"),
+        )),
+    );
+    let observed = lattice.add_address(request)?;
+    println!("assigned: {observed:?}");
+    Ok(())
+}

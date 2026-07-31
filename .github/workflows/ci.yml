@@ -99,6 +99,9 @@ jobs:
       - name: cargo test --workspace --all-features
         run: cargo test --workspace --all-features
 
+      - name: cargo check --workspace --all-features --examples
+        run: cargo check --workspace --all-features --examples
+
       - name: cargo doc --no-deps --workspace --all-features
         run: cargo doc --no-deps --workspace --all-features
 

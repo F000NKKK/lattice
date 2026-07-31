@@ -21,6 +21,13 @@ net-lattice-model = { workspace = true }
 net-lattice-platform = { workspace = true }
 net-lattice-async = { workspace = true, optional = true }
 
+[dev-dependencies]
+futures = { workspace = true }
+
+[[example]]
+name = "async_monitor"
+required-features = ["async"]
+
 [target.'cfg(target_os = "linux")'.dependencies]
 net-lattice-backend-linux = { workspace = true }
 
