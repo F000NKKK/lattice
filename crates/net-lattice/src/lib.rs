@@ -269,3 +269,196 @@ impl Lattice<net_lattice_backend_darwin::DarwinBackend> {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct TestBackend {
+        capabilities: Capability,
+    }
+
+    fn network() -> Network {
+        Network::from(Ipv4Network::new(
+            Ipv4Address::new(192, 0, 2, 0),
+            Ipv4PrefixLength::new(24).expect("valid prefix"),
+        ))
+    }
+
+    fn route() -> Route {
+        Route::new(RouteId::new(1), network()).with_interface_index(1)
+    }
+
+    impl RouteProvider for TestBackend {
+        type Route = Route;
+
+        fn routes(&self) -> Result<Vec<Self::Route>> {
+            Ok(vec![route()])
+        }
+
+        fn add_route(&self, _route: Self::Route) -> Result<()> {
+            Ok(())
+        }
+
+        fn remove_route(&self, _route: Self::Route) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    impl InterfaceProvider for TestBackend {
+        type Interface = Interface;
+
+        fn interfaces(&self) -> Result<Vec<Self::Interface>> {
+            Ok(vec![Interface::new(
+                InterfaceId::new(1),
+                1,
+                "test0",
+                InterfaceKind::Ethernet,
+            )])
+        }
+    }
+
+    impl DnsProvider for TestBackend {
+        type DnsConfig = DnsConfig;
+
+        fn dns_config(&self) -> Result<Self::DnsConfig> {
+            Ok(DnsConfig::new())
+        }
+    }
+
+    impl DnsMutator for TestBackend {
+        type NewDnsConfig = NewDnsConfig;
+
+        fn set_dns_config(&self, _config: Self::NewDnsConfig) -> Result<Self::DnsConfig> {
+            Ok(DnsConfig::new())
+        }
+    }
+
+    impl NeighborProvider for TestBackend {
+        type NeighborEntry = NeighborEntry;
+
+        fn neighbors(&self) -> Result<Vec<Self::NeighborEntry>> {
+            Ok(vec![NeighborEntry::new(
+                NeighborId::new(1),
+                1,
+                IpAddress::from(Ipv4Address::new(192, 0, 2, 1)),
+            )])
+        }
+    }
+
+    impl AddressProvider for TestBackend {
+        type InterfaceAddress = InterfaceAddress;
+
+        fn addresses(&self) -> Result<Vec<Self::InterfaceAddress>> {
+            Ok(vec![InterfaceAddress::new(
+                InterfaceAddressId::new(1),
+                1,
+                network(),
+            )])
+        }
+    }
+
+    impl AddressMutator for TestBackend {
+        type NewInterfaceAddress = NewInterfaceAddress;
+        type InterfaceAddress = InterfaceAddress;
+
+        fn add_address(
+            &self,
+            address: Self::NewInterfaceAddress,
+        ) -> Result<Self::InterfaceAddress> {
+            Ok(InterfaceAddress::new(
+                InterfaceAddressId::new(1),
+                address.interface_id.value() as u32,
+                address.address,
+            ))
+        }
+
+        fn remove_address(&self, _address: Self::InterfaceAddress) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    impl CapabilityProvider for TestBackend {
+        fn capabilities(&self) -> Capability {
+            self.capabilities
+        }
+    }
+
+    impl EventProvider for TestBackend {
+        type Event = Event;
+        type EventFilter = EventFilter;
+
+        fn watch(&self) -> Result<EventReceiver<Self::Event>> {
+            self.watch_filtered(EventFilter::ALL)
+        }
+
+        fn watch_filtered(&self, filter: Self::EventFilter) -> Result<EventReceiver<Self::Event>> {
+            let (sender, receiver) = EventReceiver::bounded();
+            let event = Event::Route {
+                id: RouteId::new(1),
+                kind: ChangeKind::Added,
+            };
+            if filter.matches(event) {
+                assert!(sender.send(event, Event::resync_all()));
+            }
+            Ok(receiver)
+        }
+    }
+
+    fn lattice(capabilities: Capability) -> Lattice<TestBackend> {
+        Lattice {
+            backend: TestBackend { capabilities },
+        }
+    }
+
+    #[test]
+    fn facade_forwards_all_read_and_mutation_operations() {
+        let lattice = lattice(Capability::MONITORING | Capability::DNS_MUTATION);
+        let route = route();
+        let address = NewInterfaceAddress::new(InterfaceId::new(1), network());
+
+        assert_eq!(lattice.routes().expect("routes").len(), 1);
+        lattice.add_route(route.clone()).expect("add route");
+        lattice.remove_route(route).expect("remove route");
+        assert_eq!(lattice.interfaces().expect("interfaces").len(), 1);
+        assert_eq!(lattice.dns_config().expect("dns").nameservers.len(), 0);
+        assert_eq!(lattice.neighbors().expect("neighbors").len(), 1);
+        assert_eq!(lattice.addresses().expect("addresses").len(), 1);
+        let observed = lattice.add_address(address).expect("add address");
+        lattice.remove_address(observed).expect("remove address");
+        assert_eq!(
+            lattice
+                .set_dns_config(NewDnsConfig::new())
+                .expect("set DNS")
+                .search_domains
+                .len(),
+            0
+        );
+    }
+
+    #[test]
+    fn facade_enforces_monitoring_capability_and_forwards_filters() {
+        let unsupported = lattice(Capability::empty());
+        assert!(matches!(unsupported.watch(), Err(Error::Unsupported)));
+        assert!(matches!(
+            unsupported.watch_filtered(EventFilter::ALL),
+            Err(Error::Unsupported)
+        ));
+
+        let lattice = lattice(Capability::MONITORING);
+        assert!(lattice.supports(Capability::MONITORING));
+        assert!(!lattice.supports(Capability::DNS_MUTATION));
+        assert!(lattice.capabilities().contains(Capability::MONITORING));
+        assert!(matches!(
+            lattice.watch().expect("watch").recv(),
+            Ok(Event::Route { .. })
+        ));
+        assert!(matches!(
+            lattice
+                .watch_filtered(EventFilter::none().route(RouteId::new(1)))
+                .expect("filtered watch")
+                .recv(),
+            Ok(Event::Route { .. })
+        ));
+    }
+}
