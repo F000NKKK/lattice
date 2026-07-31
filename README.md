@@ -17,7 +17,7 @@
 
 **Net Lattice** is a modern, cross-platform Rust library for configuring and inspecting operating system networking through a single, strongly typed API.
 
-> **Status:** Net Lattice provides cross-platform network inspection, route and address mutation, and change monitoring through native operating-system APIs on Linux, Windows, and macOS. Stage 0.10 of the architecture plan has shipped; see Current Status below.
+> **Status:** Net Lattice provides cross-platform network inspection, route and address mutation, synchronous and optional async change monitoring through native operating-system APIs on Linux, Windows, and macOS. Stage 0.11 of the architecture plan has shipped; see Current Status below.
 
 ## Overview
 
@@ -49,6 +49,7 @@ Implemented:
 - DNS resolver inspection
 - Neighbor tables (ARP/NDP)
 - Network monitoring and change notifications
+- Optional runtime-agnostic async event stream
 
 Planned:
 
@@ -69,17 +70,18 @@ Planned:
 
 ## Current Status
 
-Stage 0.10 of the [architecture](ARCHITECTURE.md)'s Incremental Delivery Plan has landed:
+Stage 0.11 of the [architecture](ARCHITECTURE.md)'s Incremental Delivery Plan has landed:
 
 - `net-lattice-core`, `net-lattice-ip`
 - `net-lattice-model`'s `route`, `mac`, `interface`, `dns`, `neighbor`, `ifaddr`, and `event` modules; `NewInterfaceAddress` expresses address-assignment intent separately from an observed `InterfaceAddress`
-- `net-lattice-platform`'s `RouteProvider`, `InterfaceProvider`, `DnsProvider`, `NeighborProvider`, `AddressProvider`, `AddressMutator`, `CapabilityProvider`, and synchronous `EventProvider`/bounded `EventReceiver`
+- `net-lattice-platform`'s `RouteProvider`, `InterfaceProvider`, `DnsProvider`, `NeighborProvider`, `AddressProvider`, `AddressMutator`, `CapabilityProvider`, synchronous `EventProvider`/bounded `EventReceiver`, and feature-gated `TokioEventProvider`
 - `net-lattice-backend-linux` (routes, interfaces, neighbors, address reads and mutations, and monitoring via Netlink; DNS via `/etc/resolv.conf`)
 - `net-lattice-backend-windows` (routes and interfaces via the Windows IP Helper API, DNS via `GetAdaptersAddresses`, neighbors via `GetIpNetTable2`, address reads and mutations via the unicast-address IP Helper API, monitoring via IP Helper notifications)
 - `net-lattice-backend-darwin` (routes, neighbors, and monitoring via macOS BSD routing facilities; interfaces and address reads via `getifaddrs`; address mutations via native address ioctls; DNS via `/etc/resolv.conf`)
-- the `net-lattice` facade, including `Lattice::add_address()`, `Lattice::remove_address()`, `Lattice::capabilities()`, `Lattice::supports()`, and `Lattice::watch()`
+- `net-lattice-async`, which exposes the single runtime-agnostic `EventStream` type
+- the `net-lattice` facade, including `Lattice::add_address()`, `Lattice::remove_address()`, `Lattice::capabilities()`, `Lattice::supports()`, `Lattice::watch()`, and feature-gated `Lattice::watch_async()`
 
-This gives real route and interface-address management, interface listing, DNS resolver reads, neighbor (ARP/NDP) table reads, and bounded network-change monitoring on Linux, Windows, and macOS. Address creation accepts `NewInterfaceAddress` and returns the resulting observed `InterfaceAddress`, so callers never invent an address ID. `Lattice::watch_filtered(EventFilter::none().routes())` limits delivered domains; if `Event::ResyncRequired` arrives, re-read the affected state because a slow consumer overflowed the bounded queue. Query `Lattice::supports(Capability::MONITORING)` before watching in portable code. This is still not a complete library: DNS mutation, VLANs, VRFs, namespaces, firewall integration, transactional configuration, declarative networking, and other advanced capabilities are still ahead; see [ARCHITECTURE.md](ARCHITECTURE.md)'s Incremental Delivery Plan for the staged roadmap and [CHANGELOG.md](CHANGELOG.md) for what has actually shipped.
+This gives real route and interface-address management, interface listing, DNS resolver reads, neighbor (ARP/NDP) table reads, and bounded network-change monitoring on Linux, Windows, and macOS. Address creation accepts `NewInterfaceAddress` and returns the resulting observed `InterfaceAddress`, so callers never invent an address ID. `Lattice::watch_filtered(EventFilter::none().routes())` limits delivered domains; if `Event::ResyncRequired` arrives, re-read the affected state because a slow consumer overflowed the bounded queue. Query `Lattice::supports(Capability::MONITORING)` before watching in portable code. With the optional `async` feature, `Lattice::watch_async(filter)` returns the same `EventStream` on every platform: Linux reads Netlink through its Tokio reactor, Windows writes native IP Helper callbacks to the Tokio transport, and macOS bridges its native PF_ROUTE reader to that transport. The stream implements `futures::Stream` and does not select an application executor. This is still not a complete library: DNS mutation, VLANs, VRFs, namespaces, firewall integration, transactional configuration, declarative networking, and other advanced capabilities are still ahead; see [ARCHITECTURE.md](ARCHITECTURE.md)'s Incremental Delivery Plan for the staged roadmap and [CHANGELOG.md](CHANGELOG.md) for what has actually shipped.
 
 ## Quick Example
 
@@ -112,7 +114,8 @@ fn main() -> Result<()> {
 3. **Foundations** *(completed)* — core IP/route/interface types and all three platform backends shipped.
 4. **Platform parity** *(completed)* — Linux, Windows, and macOS route and address mutation, interface, DNS-read, neighbor-read, address-read, and monitoring backends shipped.
 5. **Stage 0.10: Event semantics** *(completed)* — bounded delivery, overflow and resynchronization signaling, filtering, cancellation, and error propagation.
-6. **Later stages** — async adapters, further write parity, transactional configuration, and declarative networking.
+6. **Stage 0.11: Async events** *(completed)* — optional `async` facade feature, one runtime-agnostic `EventStream`, and native Tokio-backed delivery in every platform backend.
+7. **Later stages** — further write parity, transactional configuration, and declarative networking.
 
 ## Contributing
 
