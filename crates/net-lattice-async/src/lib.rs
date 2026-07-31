@@ -33,7 +33,7 @@ pub struct EventStream<E> {
 /// The returned stream owns the receiver. Dropping it requests worker shutdown
 /// and joins the thread; shutdown latency is at most 50 ms, after which the
 /// receiver is dropped and its backend subscription is cancelled.
-pub fn stream<E>(receiver: EventReceiver<E>) -> EventStream<E>
+pub fn from_receiver<E>(receiver: EventReceiver<E>) -> EventStream<E>
 where
     E: Send + 'static,
 {
@@ -80,60 +80,6 @@ impl<E> Drop for EventStream<E> {
     }
 }
 
-/// Tokio-specific event stream, available with the `tokio` feature.
-pub struct TokioEventStream<E> {
-    receiver: tokio::sync::mpsc::UnboundedReceiver<Result<E>>,
-    stop: Arc<AtomicBool>,
-    worker: Option<thread::JoinHandle<()>>,
-}
-
-/// Bridges a watcher to Tokio's waker-aware channel.
-pub fn tokio_stream<E>(receiver: EventReceiver<E>) -> TokioEventStream<E>
-where
-    E: Send + 'static,
-{
-    let (sender, async_receiver) = tokio::sync::mpsc::unbounded_channel();
-    let stop = Arc::new(AtomicBool::new(false));
-    let worker_stop = Arc::clone(&stop);
-    let worker = thread::spawn(move || {
-        while !worker_stop.load(Ordering::Acquire) {
-            match receiver.recv_timeout(Duration::from_millis(50)) {
-                Ok(Some(event)) => {
-                    if sender.send(Ok(event)).is_err() {
-                        break;
-                    }
-                }
-                Ok(None) => {}
-                Err(error) => {
-                    let _ = sender.send(Err(error));
-                    break;
-                }
-            }
-        }
-    });
-    TokioEventStream {
-        receiver: async_receiver,
-        stop,
-        worker: Some(worker),
-    }
-}
-
-impl<E> Stream for TokioEventStream<E> {
-    type Item = Result<E>;
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.receiver.poll_recv(cx)
-    }
-}
-
-impl<E> Drop for TokioEventStream<E> {
-    fn drop(&mut self) {
-        self.stop.store(true, Ordering::Release);
-        if let Some(worker) = self.worker.take() {
-            let _ = worker.join();
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -142,7 +88,7 @@ mod tests {
     #[test]
     fn worker_forwards_events_to_the_stream() {
         let (sender, receiver) = EventReceiver::bounded();
-        let mut events = stream(receiver);
+        let mut events = from_receiver(receiver);
         assert!(sender.send(7_u8, 0));
         assert!(matches!(
             futures::executor::block_on(events.next()),
@@ -153,7 +99,7 @@ mod tests {
     #[test]
     fn worker_forwards_receiver_errors() {
         let (sender, receiver) = EventReceiver::<u8>::bounded();
-        let mut events = stream(receiver);
+        let mut events = from_receiver(receiver);
         assert!(sender.send_error(Error::InvalidState));
         assert!(matches!(
             futures::executor::block_on(events.next()),

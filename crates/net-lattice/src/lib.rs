@@ -9,7 +9,7 @@
 
 /// Async event adapters, enabled by the `async` feature.
 #[cfg(feature = "async")]
-pub use net_lattice_async::{EventStream, TokioEventStream, stream, tokio_stream};
+pub use net_lattice_async::EventStream;
 pub use net_lattice_core::{Error, Id, PlatformErrorCode, Result};
 pub use net_lattice_ip::{
     Ipv4Address, Ipv4Network, Ipv4PrefixLength, Ipv6Address, Ipv6Network, Ipv6PrefixLength,
@@ -131,6 +131,14 @@ impl<B: LatticeBackend> Lattice<B> {
     pub fn watch(&self) -> Result<EventReceiver<Event>> {
         self.backend.watch()
     }
+
+    #[cfg(feature = "async")]
+    pub fn watch_async(&self, filter: EventFilter) -> Result<EventStream<Event>> {
+        Ok(net_lattice_async::from_receiver(
+            self.backend.watch_filtered(filter)?,
+        ))
+    }
+    
     pub fn watch_filtered(&self, filter: EventFilter) -> Result<EventReceiver<Event>> {
         self.backend.watch_filtered(filter)
     }
