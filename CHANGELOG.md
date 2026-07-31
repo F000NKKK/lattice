@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.3] - 2026-07-31
+
+### Documentation
+
+- Document `EventReceiver` bounded delivery, cancellation, timeout,
+  disconnection, constructor, subscription-guard, and iterator semantics.
+- Clarify backend-facing native Tokio watcher integration through
+  `TokioEventProvider`, including associated types and receiver ownership.
+- Update `EventStream` documentation to cover both native async delivery and
+  synchronous receiver adaptation; add watcher-oriented rustdoc examples.
+- Clarify the observed resolver-view semantics of `DnsConfig` and the
+  portable-runtime contract of `Capability`.
+
+### Tests
+
+- Add lifecycle and regression coverage for subscription-guard replacement,
+  receiver drop, iterator error termination, and zero-capacity rejection.
+
 ## [0.12.2] - 2026-07-31
 
 ### Added

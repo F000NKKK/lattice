@@ -149,8 +149,21 @@ impl<B: LatticeBackend> Lattice<B> {
     }
 
     /// Subscribes to change notifications. See [`EventReceiver`] for how to
-    /// consume the returned events (`recv`/`try_recv`/`recv_timeout`, or
-    /// `Iterator`).
+    /// consume the returned events. Prefer `recv`/`try_recv`/`recv_timeout`
+    /// when errors must be handled explicitly; `Iterator` terminates on any
+    /// receiver error.
+    ///
+    /// ```no_run
+    /// use net_lattice::{Lattice, Result};
+    ///
+    /// fn main() -> Result<()> {
+    ///     let lattice = Lattice::connect()?;
+    ///     let events = lattice.watch()?;
+    ///     loop {
+    ///         println!("{:?}", events.recv()?);
+    ///     }
+    /// }
+    /// ```
     pub fn watch(&self) -> Result<EventReceiver<Event>> {
         self.ensure_monitoring()?;
         self.backend.watch()
@@ -160,6 +173,20 @@ impl<B: LatticeBackend> Lattice<B> {
     ///
     /// This is the Stage 0.11 async watcher API. It has the same filter
     /// semantics as [`Self::watch_filtered`].
+    ///
+    /// ```no_run
+    /// use futures::StreamExt;
+    /// use net_lattice::{EventFilter, Lattice, Result};
+    ///
+    /// async fn monitor() -> Result<()> {
+    ///     let lattice = Lattice::connect()?;
+    ///     let mut events = lattice.watch_async(EventFilter::ALL)?;
+    ///     while let Some(event) = events.next().await {
+    ///         println!("{:?}", event?);
+    ///     }
+    ///     Ok(())
+    /// }
+    /// ```
     #[cfg(feature = "async")]
     pub fn watch_async(&self, filter: EventFilter) -> Result<EventStream<Event>>
     where
