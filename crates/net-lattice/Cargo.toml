@@ -11,11 +11,15 @@ categories.workspace = true
 keywords.workspace = true
 description = "A modern, cross-platform Rust library for configuring and inspecting operating system networking through a single, strongly typed API."
 
+[features]
+async = ["dep:net-lattice-async"]
+
 [dependencies]
 net-lattice-core = { workspace = true }
 net-lattice-ip = { workspace = true }
 net-lattice-model = { workspace = true }
 net-lattice-platform = { workspace = true }
+net-lattice-async = { workspace = true, optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 net-lattice-backend-linux = { workspace = true }
