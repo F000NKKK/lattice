@@ -81,7 +81,7 @@ jobs:
 
       - name: collect coverage from privileged Windows tests
         if: matrix.os == 'windows-latest'
-        run: cargo test -p net-lattice-backend-windows --all-features -- --ignored
+        run: $env:CARGO_TARGET_DIR = "$env:CARGO_TARGET_DIR/llvm-cov-target"; cargo test -p net-lattice-backend-windows --all-features -- --ignored
 
       # `--show-missing-lines` deliberately remains enabled even on a
       # failure: Actions logs name every uncovered line, while the three
