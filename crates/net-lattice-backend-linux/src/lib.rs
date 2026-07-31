@@ -14,7 +14,7 @@ use std::net::IpAddr;
 
 use futures::{StreamExt, TryStreamExt};
 use net_lattice_core::{Error, Id, PlatformErrorCode, Result};
-use net_lattice_model::dns::DnsConfig;
+use net_lattice_model::dns::{DnsConfig, NewDnsConfig};
 use net_lattice_model::event::{ChangeKind, Event, EventFilter};
 use net_lattice_model::ifaddr::{InterfaceAddress, InterfaceAddressId, NewInterfaceAddress};
 use net_lattice_model::interface::{AdminState, Interface, InterfaceKind, OperationalState};
@@ -23,8 +23,8 @@ use net_lattice_model::neighbor::{NeighborEntry, NeighborId, NeighborState};
 use net_lattice_model::route::{Route, RouteId};
 use net_lattice_model::{IpAddress, Network};
 use net_lattice_platform::{
-    AddressMutator, AddressProvider, Capability, CapabilityProvider, DnsProvider, EventProvider,
-    EventReceiver, InterfaceProvider, NeighborProvider, RouteProvider,
+    AddressMutator, AddressProvider, Capability, CapabilityProvider, DnsMutator, DnsProvider,
+    EventProvider, EventReceiver, InterfaceProvider, NeighborProvider, RouteProvider,
 };
 #[cfg(feature = "async")]
 use net_lattice_platform::{TokioEventProvider, TokioEventReceiver};
@@ -634,6 +634,25 @@ fn parse_resolv_conf(contents: &str) -> DnsConfig {
     config
 }
 
+fn render_resolv_conf(config: &NewDnsConfig) -> String {
+    let mut contents = String::new();
+    for nameserver in &config.nameservers {
+        contents.push_str("nameserver ");
+        contents.push_str(&nameserver.to_string());
+        contents.push('\n');
+    }
+    if !config.search_domains.is_empty() {
+        contents.push_str("search ");
+        contents.push_str(&config.search_domains.join(" "));
+        contents.push('\n');
+    }
+    contents
+}
+
+fn write_resolv_conf(path: &std::path::Path, config: &NewDnsConfig) -> Result<()> {
+    std::fs::write(path, render_resolv_conf(config)).map_err(|err| resolv_conf_error(&err))
+}
+
 fn resolv_conf_error(err: &std::io::Error) -> Error {
     match err.kind() {
         std::io::ErrorKind::NotFound => Error::NotFound,
@@ -651,7 +670,7 @@ impl CapabilityProvider for LinuxBackend {
     /// Lattice doesn't implement either yet, and a `Capability` this
     /// backend can't actually act on would be a lie to the caller.
     fn capabilities(&self) -> Capability {
-        Capability::IPV6 | Capability::MONITORING
+        Capability::IPV6 | Capability::MONITORING | Capability::DNS_MUTATION
     }
 }
 
@@ -825,6 +844,15 @@ impl DnsProvider for LinuxBackend {
     }
 }
 
+impl DnsMutator for LinuxBackend {
+    type NewDnsConfig = NewDnsConfig;
+
+    fn set_dns_config(&self, config: Self::NewDnsConfig) -> Result<Self::DnsConfig> {
+        write_resolv_conf(std::path::Path::new("/etc/resolv.conf"), &config)?;
+        self.dns_config()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -992,6 +1020,21 @@ mod tests {
         assert_eq!(
             config.search_domains,
             vec!["example.com".to_string(), "corp.example.com".to_string()]
+        );
+    }
+
+    #[test]
+    fn render_resolv_conf_preserves_requested_order() {
+        let config = NewDnsConfig::with(
+            vec![
+                IpAddress::from(Ipv4Address::new(1, 1, 1, 1)),
+                IpAddress::from(Ipv4Address::new(8, 8, 8, 8)),
+            ],
+            vec!["example.test".to_string(), "corp.test".to_string()],
+        );
+        assert_eq!(
+            render_resolv_conf(&config),
+            "nameserver 1.1.1.1\nnameserver 8.8.8.8\nsearch example.test corp.test\n"
         );
     }
 

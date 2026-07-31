@@ -13,7 +13,7 @@ use std::ffi::c_void;
 use std::net::IpAddr;
 
 use net_lattice_core::{Error, Id, PlatformErrorCode, Result};
-use net_lattice_model::dns::DnsConfig;
+use net_lattice_model::dns::{DnsConfig, NewDnsConfig};
 use net_lattice_model::event::{ChangeKind, Event, EventFilter};
 use net_lattice_model::ifaddr::{InterfaceAddress, InterfaceAddressId, NewInterfaceAddress};
 use net_lattice_model::interface::{AdminState, Interface, InterfaceKind, OperationalState};
@@ -22,22 +22,24 @@ use net_lattice_model::neighbor::{NeighborEntry, NeighborId, NeighborState};
 use net_lattice_model::route::{Route, RouteId};
 use net_lattice_model::{IpAddress, Network};
 use net_lattice_platform::{
-    AddressMutator, AddressProvider, Capability, CapabilityProvider, DnsProvider, EventProvider,
-    EventReceiver, EventSender, InterfaceProvider, NeighborProvider, RouteProvider,
+    AddressMutator, AddressProvider, Capability, CapabilityProvider, DnsMutator, DnsProvider,
+    EventProvider, EventReceiver, EventSender, InterfaceProvider, NeighborProvider, RouteProvider,
 };
 #[cfg(feature = "async")]
 use net_lattice_platform::{TokioEventProvider, TokioEventReceiver, TokioEventSender};
 use windows::Win32::Foundation::HANDLE;
 use windows::Win32::NetworkManagement::IpHelper::{
     CancelMibChangeNotify2, CreateIpForwardEntry2, CreateUnicastIpAddressEntry,
-    DeleteIpForwardEntry2, DeleteUnicastIpAddressEntry, FreeMibTable, GAA_FLAG_SKIP_ANYCAST,
-    GAA_FLAG_SKIP_FRIENDLY_NAME, GAA_FLAG_SKIP_MULTICAST, GAA_FLAG_SKIP_UNICAST,
-    GetAdaptersAddresses, GetIfTable2, GetIpForwardTable2, GetIpNetTable2,
-    GetUnicastIpAddressTable, IP_ADAPTER_ADDRESSES_LH, InitializeIpForwardEntry,
-    InitializeUnicastIpAddressEntry, MIB_IF_ROW2, MIB_IF_TABLE2, MIB_IPFORWARD_ROW2,
-    MIB_IPFORWARD_TABLE2, MIB_IPNET_ROW2, MIB_IPNET_TABLE2, MIB_NOTIFICATION_TYPE,
-    MIB_UNICASTIPADDRESS_ROW, MIB_UNICASTIPADDRESS_TABLE, MibAddInstance, MibDeleteInstance,
-    NotifyIpInterfaceChange, NotifyRouteChange2, NotifyUnicastIpAddressChange,
+    DNS_INTERFACE_SETTINGS, DNS_INTERFACE_SETTINGS_VERSION1, DNS_SETTING_NAMESERVER,
+    DNS_SETTING_SEARCHLIST, DNS_SETTINGS, DNS_SETTINGS_VERSION1, DeleteIpForwardEntry2,
+    DeleteUnicastIpAddressEntry, FreeMibTable, GAA_FLAG_SKIP_ANYCAST, GAA_FLAG_SKIP_FRIENDLY_NAME,
+    GAA_FLAG_SKIP_MULTICAST, GAA_FLAG_SKIP_UNICAST, GetAdaptersAddresses, GetIfTable2,
+    GetIpForwardTable2, GetIpNetTable2, GetUnicastIpAddressTable, IP_ADAPTER_ADDRESSES_LH,
+    InitializeIpForwardEntry, InitializeUnicastIpAddressEntry, MIB_IF_ROW2, MIB_IF_TABLE2,
+    MIB_IPFORWARD_ROW2, MIB_IPFORWARD_TABLE2, MIB_IPNET_ROW2, MIB_IPNET_TABLE2,
+    MIB_NOTIFICATION_TYPE, MIB_UNICASTIPADDRESS_ROW, MIB_UNICASTIPADDRESS_TABLE, MibAddInstance,
+    MibDeleteInstance, NotifyIpInterfaceChange, NotifyRouteChange2, NotifyUnicastIpAddressChange,
+    SetDnsSettings, SetInterfaceDnsSettings,
 };
 use windows::Win32::NetworkManagement::Ndis::{
     IfOperStatusDormant, IfOperStatusDown, IfOperStatusLowerLayerDown, IfOperStatusUp,
@@ -48,6 +50,7 @@ use windows::Win32::Networking::WinSock::{
     NL_NEIGHBOR_STATE, NlnsDelay, NlnsIncomplete, NlnsPermanent, NlnsProbe, NlnsReachable,
     NlnsStale, SOCKADDR, SOCKADDR_IN, SOCKADDR_IN6, SOCKADDR_IN6_0, SOCKADDR_INET,
 };
+use windows::core::{GUID, PWSTR};
 
 const AF_UNSPEC: ADDRESS_FAMILY = ADDRESS_FAMILY(0);
 
@@ -112,6 +115,25 @@ fn ip_address_to_std(address: IpAddress) -> IpAddr {
         IpAddress::V4(addr) => IpAddr::V4(addr.into()),
         IpAddress::V6(addr) => IpAddr::V6(addr.into()),
     }
+}
+
+fn nul_terminated_wide(value: &str) -> Vec<u16> {
+    value.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+fn config_list(config: &[impl std::fmt::Display]) -> String {
+    config
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn adapter_guid(adapter: &IP_ADAPTER_ADDRESSES_LH) -> Result<GUID> {
+    let adapter_name =
+        unsafe { adapter.AdapterName.to_string() }.map_err(|_| Error::InvalidState)?;
+    GUID::try_from(adapter_name.trim_matches(|character| character == '{' || character == '}'))
+        .map_err(|_| Error::InvalidState)
 }
 
 fn network_to_std(network: Network) -> (IpAddr, u8) {
@@ -896,7 +918,7 @@ impl CapabilityProvider for WindowsBackend {
     /// registrations. `VRF`/`NAMESPACES` remain unset because Net Lattice
     /// does not implement either domain yet.
     fn capabilities(&self) -> Capability {
-        Capability::IPV6 | Capability::MONITORING
+        Capability::IPV6 | Capability::MONITORING | Capability::DNS_MUTATION
     }
 }
 
@@ -1089,6 +1111,52 @@ impl DnsProvider for WindowsBackend {
     }
 }
 
+impl DnsMutator for WindowsBackend {
+    type NewDnsConfig = NewDnsConfig;
+
+    /// Uses the IP Helper DNS settings API rather than a command-line tool.
+    /// Windows stores nameservers per adapter, so the system-wide model is
+    /// applied consistently to every adapter returned by
+    /// `GetAdaptersAddresses`; the global search list is updated too.
+    fn set_dns_config(&self, config: Self::NewDnsConfig) -> Result<Self::DnsConfig> {
+        let nameservers = nul_terminated_wide(&config_list(&config.nameservers));
+        let search_domains = nul_terminated_wide(&config.search_domains.join(","));
+
+        let global = DNS_SETTINGS {
+            Version: DNS_SETTINGS_VERSION1,
+            Flags: DNS_SETTING_SEARCHLIST as u64,
+            SearchList: PWSTR(search_domains.as_ptr().cast_mut()),
+            ..Default::default()
+        };
+        let status = unsafe { SetDnsSettings(&global) };
+        if status.0 != 0 {
+            return Err(Error::Platform(PlatformErrorCode::Windows(status.0)));
+        }
+
+        let adapters = adapter_addresses()?;
+        if adapters.is_empty() {
+            return Err(Error::InvalidState);
+        }
+        let mut adapter = adapters.as_ptr().cast::<IP_ADAPTER_ADDRESSES_LH>();
+        while !adapter.is_null() {
+            let guid = unsafe { adapter_guid(&*adapter) }?;
+            let settings = DNS_INTERFACE_SETTINGS {
+                Version: DNS_INTERFACE_SETTINGS_VERSION1,
+                Flags: (DNS_SETTING_NAMESERVER | DNS_SETTING_SEARCHLIST) as u64,
+                NameServer: PWSTR(nameservers.as_ptr().cast_mut()),
+                SearchList: PWSTR(search_domains.as_ptr().cast_mut()),
+                ..Default::default()
+            };
+            let status = unsafe { SetInterfaceDnsSettings(guid, &settings) };
+            if status.0 != 0 {
+                return Err(Error::Platform(PlatformErrorCode::Windows(status.0)));
+            }
+            adapter = unsafe { (*adapter).Next };
+        }
+        self.dns_config()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1238,6 +1306,18 @@ mod tests {
             .dns_config()
             .expect("GetAdaptersAddresses should not require privilege");
         let _ = config;
+    }
+
+    #[test]
+    fn dns_nameserver_list_preserves_requested_order() {
+        let config = NewDnsConfig::with(
+            vec![
+                IpAddress::from(Ipv4Address::new(1, 1, 1, 1)),
+                IpAddress::from(Ipv4Address::new(8, 8, 8, 8)),
+            ],
+            Vec::new(),
+        );
+        assert_eq!(config_list(&config.nameservers), "1.1.1.1,8.8.8.8");
     }
 
     /// Registers and immediately drops the three native notification handles
