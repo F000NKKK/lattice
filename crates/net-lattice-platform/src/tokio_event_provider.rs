@@ -189,6 +189,19 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(expected = "Tokio event sender poisoned")]
+    fn poisoned_tokio_terminal_error_mutex_is_reported() {
+        let (sender, _receiver) = TokioEventReceiver::<u32>::bounded();
+        let terminal_error = Arc::clone(&sender.terminal_error);
+        let _ = std::thread::spawn(move || {
+            let _guard = terminal_error.lock().unwrap();
+            panic!("poison Tokio terminal error");
+        })
+        .join();
+        let _ = sender.send_error(net_lattice_core::Error::InvalidState);
+    }
+
+    #[test]
     fn pending_resync_stays_pending_while_the_tokio_channel_is_full() {
         let (sender, _receiver) = TokioEventReceiver::bounded();
         for event in 0..EventReceiverCapacity::VALUE {

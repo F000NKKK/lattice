@@ -408,4 +408,17 @@ mod tests {
         assert!(sender.send(7_u32, 0));
         assert_eq!(receiver.try_recv().unwrap(), Some(7));
     }
+
+    #[test]
+    #[should_panic(expected = "event sender poisoned")]
+    fn poisoned_event_sender_mutex_is_reported() {
+        let (sender, _receiver) = EventReceiver::<u32>::bounded();
+        let pending = Arc::clone(&sender.pending_resync);
+        let _ = std::thread::spawn(move || {
+            let _guard = pending.lock().unwrap();
+            panic!("poison event sender");
+        })
+        .join();
+        let _ = sender.send(1, 0);
+    }
 }

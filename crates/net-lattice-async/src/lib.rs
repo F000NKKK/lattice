@@ -182,4 +182,20 @@ mod tests {
         });
         forward_receiver(receiver, output, stop);
     }
+
+    #[test]
+    fn adapter_handles_immediate_shutdown_and_native_stream_without_worker() {
+        let (_sender, receiver) = EventReceiver::<u8>::bounded();
+        let (output, _async_receiver) = unbounded::<Result<u8>>();
+        forward_receiver(receiver, output, Arc::new(AtomicBool::new(true)));
+
+        let (_sender, receiver) = TokioEventReceiver::<u8>::bounded();
+        drop(from_tokio_receiver(receiver));
+    }
+
+    #[test]
+    fn native_stream_drop_does_not_attempt_to_join_a_worker() {
+        let (_sender, receiver) = TokioEventReceiver::<u8>::bounded();
+        drop(from_tokio_receiver(receiver));
+    }
 }
