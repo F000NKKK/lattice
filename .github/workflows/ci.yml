@@ -21,105 +21,6 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  test:
-    name: ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Install Rust (MSRV)
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: "1.93"
-          components: rustfmt, clippy
-
-      - uses: Swatinem/rust-cache@v2
-
-      - name: cargo fmt --check
-        run: cargo fmt --check
-
-      - name: cargo clippy --workspace --all-targets -- -D warnings
-        run: cargo clippy --workspace --all-targets -- -D warnings
-
-      - name: cargo test --workspace
-        run: cargo test --workspace
-
-      - name: cargo doc --no-deps --workspace
-        run: cargo doc --no-deps --workspace
-
-      # The add/remove-route and `watch()` route-delivery round-trip tests in
-      # each backend are #[ignore]d by default because they need elevated
-      # privileges to actually touch the routing table — CAP_NET_ADMIN on
-      # Linux, root on macOS, Administrator on Windows. They use a
-      # documentation-only prefix (RFC 5737 TEST-NET-3) on loopback and
-      # clean up after themselves, so each native runner proves both route
-      # mutation and delivery through its real event provider.
-      - name: cargo test --ignored (privileged, Linux — sudo for CAP_NET_ADMIN)
-        if: matrix.os == 'ubuntu-latest'
-        run: sudo env "PATH=$PATH" "HOME=$HOME" "CARGO_TARGET_DIR=/tmp/net-lattice-privileged-target" cargo test -p net-lattice-backend-linux -- --ignored
-
-      - name: cargo test --ignored (privileged, macOS — sudo for root)
-        if: matrix.os == 'macos-latest'
-        run: sudo env "PATH=$PATH" "HOME=$HOME" "CARGO_TARGET_DIR=/tmp/net-lattice-privileged-target" cargo test -p net-lattice-backend-darwin -- --ignored
-
-      # GitHub-hosted Windows runners already execute as Administrator, so
-      # no elevation step is needed here — unlike the sudo re-exec above.
-      - name: cargo test --ignored (privileged, Windows — already Administrator)
-        if: matrix.os == 'windows-latest'
-        run: cargo test -p net-lattice-backend-windows -- --ignored
-
-  async-test:
-    name: async (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Install Rust (MSRV)
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: "1.93"
-          components: rustfmt, clippy
-
-      - uses: Swatinem/rust-cache@v2
-
-      # This is intentionally a separate matrix from the synchronous API.
-      # It proves that the opt-in facade compiles cleanly, while preserving a
-      # default build with no async facade code.
-      - name: cargo clippy --workspace --all-targets --all-features -- -D warnings
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
-
-      - name: cargo test --workspace --all-features
-        run: cargo test --workspace --all-features
-
-      - name: cargo check --workspace --all-features --examples
-        run: cargo check --workspace --all-features --examples
-
-      - name: cargo doc --no-deps --workspace --all-features
-        run: cargo doc --no-deps --workspace --all-features
-
-      # The ignored route round-trip tests now assert delivery through both
-      # `watch()` and the backend-native `watch_tokio()` path. Native runners
-      # therefore verify the full async event path on every supported OS.
-      - name: cargo test --ignored --features async (privileged, Linux)
-        if: matrix.os == 'ubuntu-latest'
-        run: sudo env "PATH=$PATH" "HOME=$HOME" "CARGO_TARGET_DIR=/tmp/net-lattice-privileged-target" cargo test -p net-lattice-backend-linux --features async -- --ignored
-
-      - name: cargo test --ignored --features async (privileged, macOS)
-        if: matrix.os == 'macos-latest'
-        run: sudo env "PATH=$PATH" "HOME=$HOME" "CARGO_TARGET_DIR=/tmp/net-lattice-privileged-target" cargo test -p net-lattice-backend-darwin --features async -- --ignored
-
-      - name: cargo test --ignored --features async (privileged, Windows)
-        if: matrix.os == 'windows-latest'
-        run: cargo test -p net-lattice-backend-windows --features async -- --ignored
-
   coverage:
     name: coverage (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -140,7 +41,7 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.93"
-          components: llvm-tools-preview
+          components: rustfmt, clippy, llvm-tools-preview
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@v2
@@ -150,6 +51,18 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: coverage-${{ matrix.os }}
+
+      - name: cargo fmt --check
+        run: cargo fmt --check
+
+      - name: cargo clippy --workspace --all-targets --all-features -- -D warnings
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: cargo check --workspace --all-features --examples
+        run: cargo check --workspace --all-features --examples
+
+      - name: cargo doc --no-deps --workspace --all-features
+        run: cargo doc --no-deps --workspace --all-features
 
       # Build and run every ordinary synchronous and async test under LLVM
       # source-based coverage. The platform-specific root/Administrator
