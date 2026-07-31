@@ -614,3 +614,18 @@ are introduced only when there is real implementation work for them:
 
 Each stage is expected to validate the architecture before the next is
 started; earlier stages may inform adjustments to later ones.
+
+## Pre-1.0 Review Backlog
+
+- **Iterator errors:** evaluate `Iterator<Item = Result<E, Error>>` or the
+  removal of `Iterator` in favor of explicit `recv`; either is potentially
+  incompatible with the current `Iterator<Item = E>` contract.
+- **Consumer and backend APIs:** consider a `net_lattice::backend` module for
+  `LatticeBackend`, `TokioEventProvider`, `EventSender`, and backend-facing
+  constructors, retaining deprecated re-exports if a post-release move occurs.
+- **Receiver constructor naming:** consider a clearer `from_receiver` or
+  `from_channel_receiver` name while retaining `EventReceiver::new` as a
+  deprecated compatibility alias.
+- **Provider trait status:** decide whether provider traits are an official
+  third-party backend extension API. If so, define their full semantic
+  contracts before 1.0.

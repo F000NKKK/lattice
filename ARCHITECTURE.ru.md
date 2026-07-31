@@ -621,3 +621,18 @@ provider-traits, а не другой контракт backend'а. Дорабо�
 
 Ожидается, что каждый этап проверяет архитектуру перед началом следующего;
 более ранние этапы могут повлиять на корректировки более поздних.
+
+## Backlog pre-1.0 review
+
+- **Ошибки iterator:** рассмотреть `Iterator<Item = Result<E, Error>>` или
+  удаление `Iterator` в пользу явного `recv`; оба варианта потенциально
+  несовместимы с текущим контрактом `Iterator<Item = E>`.
+- **Consumer и backend API:** рассмотреть модуль `net_lattice::backend` для
+  `LatticeBackend`, `TokioEventProvider`, `EventSender` и backend-конструкторов,
+  сохранив deprecated re-export'ы при переносе после релиза.
+- **Имена конструкторов receiver:** рассмотреть более ясное
+  `from_receiver` или `from_channel_receiver`, сохранив `EventReceiver::new`
+  как deprecated alias для совместимости.
+- **Статус provider traits:** определить, являются ли provider traits
+  официальным extension API для сторонних backend'ов. Если да, до 1.0 нужны
+  их полные semantic contracts.
