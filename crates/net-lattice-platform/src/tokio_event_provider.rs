@@ -178,6 +178,17 @@ mod tests {
     }
 
     #[test]
+    fn closed_consumer_is_reported_while_a_resync_is_pending() {
+        let (sender, receiver) = TokioEventReceiver::bounded();
+        for event in 0..EventReceiverCapacity::VALUE {
+            assert!(sender.send(event, || 999));
+        }
+        assert!(sender.send(256, || 999));
+        drop(receiver);
+        assert!(!sender.send(257, || 999));
+    }
+
+    #[test]
     fn pending_resync_stays_pending_while_the_tokio_channel_is_full() {
         let (sender, _receiver) = TokioEventReceiver::bounded();
         for event in 0..EventReceiverCapacity::VALUE {

@@ -401,4 +401,40 @@ mod tests {
         drop(receiver);
         assert!(!sender.send(4, 99));
     }
+
+    #[test]
+    fn try_recv_returns_an_already_queued_event() {
+        let (sender, receiver) = EventReceiver::bounded();
+        assert!(sender.send(7_u32, 0));
+        assert_eq!(receiver.try_recv().unwrap(), Some(7));
+    }
+
+    #[test]
+    #[should_panic]
+    fn sender_rejects_an_impossible_error_in_a_full_event_slot() {
+        let (raw_sender, raw_receiver) = mpsc::sync_channel(1);
+        assert!(raw_sender.send(Err(Error::InvalidState)).is_ok());
+        // Keep the receiving half connected: the invariant below is about a
+        // full slot containing an error, not a disconnected channel.
+        std::mem::forget(raw_receiver);
+        let sender = EventSender {
+            sender: raw_sender,
+            pending_resync: Arc::new(Mutex::new(None)),
+        };
+        let _ = sender.send(1_u32, 0);
+    }
+
+    #[test]
+    #[should_panic]
+    fn sender_rejects_an_impossible_error_while_flushing_resync() {
+        let (raw_sender, raw_receiver) = mpsc::sync_channel(1);
+        assert!(raw_sender.send(Err(Error::InvalidState)).is_ok());
+        // See the corresponding invariant test above.
+        std::mem::forget(raw_receiver);
+        let sender = EventSender {
+            sender: raw_sender,
+            pending_resync: Arc::new(Mutex::new(Some(99_u32))),
+        };
+        let _ = sender.send(1_u32, 0);
+    }
 }

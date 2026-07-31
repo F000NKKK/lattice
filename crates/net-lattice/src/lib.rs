@@ -481,6 +481,13 @@ mod tests {
                 .recv(),
             Ok(Event::Route { .. })
         ));
+        assert!(matches!(
+            lattice
+                .watch_filtered(EventFilter::none())
+                .expect("empty filtered watch")
+                .try_recv(),
+            Ok(None)
+        ));
     }
 
     #[cfg(feature = "async")]
@@ -495,6 +502,17 @@ mod tests {
                 .expect("async watch");
             assert!(matches!(events.next().await, Some(Ok(Event::Route { .. }))));
             assert!(events.next().await.is_none());
+
+            let mut events = lattice
+                .watch_async(EventFilter::none())
+                .expect("empty async watch");
+            assert!(events.next().now_or_never().is_none());
         });
+    }
+
+    #[test]
+    fn connect_uses_the_current_platform_backend() {
+        let lattice = Lattice::connect().expect("native backend should connect");
+        drop(lattice);
     }
 }

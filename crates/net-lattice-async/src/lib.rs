@@ -51,26 +51,38 @@ where
     let (sender, async_receiver) = unbounded();
     let stop = Arc::new(AtomicBool::new(false));
     let worker_stop = Arc::clone(&stop);
-    let worker = thread::spawn(move || {
-        while !worker_stop.load(Ordering::Acquire) {
-            match receiver.recv_timeout(Duration::from_millis(50)) {
-                Ok(Some(event)) => {
-                    if sender.unbounded_send(Ok(event)).is_err() {
-                        break;
-                    }
-                }
-                Ok(None) => {}
-                Err(error) => {
-                    let _ = sender.unbounded_send(Err(error));
-                    break;
-                }
-            }
-        }
-    });
+    let worker = thread::spawn(move || forward_receiver(receiver, sender, worker_stop));
     EventStream {
         receiver: EventStreamReceiver::Futures(async_receiver),
         stop,
         worker: Some(worker),
+    }
+}
+
+/// Runs the blocking side of a synchronous-to-async adapter.
+///
+/// Kept separate from [`from_receiver`] so its terminal-channel behaviour is
+/// directly regression-tested without exposing another public API surface.
+fn forward_receiver<E>(
+    receiver: EventReceiver<E>,
+    sender: futures::channel::mpsc::UnboundedSender<Result<E>>,
+    stop: Arc<AtomicBool>,
+) where
+    E: Send + 'static,
+{
+    while !stop.load(Ordering::Acquire) {
+        match receiver.recv_timeout(Duration::from_millis(50)) {
+            Ok(Some(event)) => {
+                if sender.unbounded_send(Ok(event)).is_err() {
+                    break;
+                }
+            }
+            Ok(None) => {}
+            Err(error) => {
+                let _ = sender.unbounded_send(Err(error));
+                break;
+            }
+        }
     }
 }
 
@@ -147,5 +159,14 @@ mod tests {
     fn dropping_a_sync_stream_joins_its_adapter_worker() {
         let (_sender, receiver) = EventReceiver::<u8>::bounded();
         drop(from_receiver(receiver));
+    }
+
+    #[test]
+    fn worker_stops_when_its_async_consumer_is_already_gone() {
+        let (input, receiver) = EventReceiver::bounded();
+        let (output, async_receiver) = unbounded::<Result<u8>>();
+        drop(async_receiver);
+        assert!(input.send(7, 0));
+        forward_receiver(receiver, output, Arc::new(AtomicBool::new(false)));
     }
 }
