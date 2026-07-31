@@ -22,9 +22,9 @@ impl<E> EventSender<E> {
             match self.sender.try_send(Ok(resync)) {
                 Ok(()) => {}
                 Err(mpsc::TrySendError::Full(event)) => {
-                    *pending = Some(
-                        event.expect("EventSender only enqueues ordinary events through send"),
-                    );
+                    if let Ok(event) = event {
+                        *pending = Some(event);
+                    }
                     return true;
                 }
                 Err(mpsc::TrySendError::Disconnected(_)) => return false,
@@ -263,6 +263,24 @@ mod tests {
         let (sender, receiver) = EventReceiver::<u32>::bounded();
         drop(sender);
         assert!(matches!(receiver.recv(), Err(Error::Disconnected)));
+    }
+
+    #[test]
+    fn recv_reports_disconnect_after_the_sender_is_dropped() {
+        let (sender, receiver) = EventReceiver::<u32>::bounded();
+        drop(sender);
+        assert!(matches!(receiver.recv(), Err(Error::Disconnected)));
+    }
+
+    #[test]
+    fn pending_resync_preserves_a_queued_producer_error() {
+        let (sender, receiver) = EventReceiver::bounded_with_capacity(1);
+        assert!(sender.send(1, 99));
+        assert!(sender.send(2, 99));
+        assert_eq!(receiver.recv().unwrap(), 1);
+        assert!(sender.send_error(Error::InvalidState));
+        assert!(sender.send(3, 99));
+        assert!(matches!(receiver.recv(), Err(Error::InvalidState)));
     }
 
     #[test]

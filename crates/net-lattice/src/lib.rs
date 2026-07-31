@@ -276,6 +276,7 @@ mod tests {
 
     struct TestBackend {
         capabilities: Capability,
+        fail_events: bool,
     }
 
     fn network() -> Network {
@@ -393,6 +394,9 @@ mod tests {
         }
 
         fn watch_filtered(&self, filter: Self::EventFilter) -> Result<EventReceiver<Self::Event>> {
+            if self.fail_events {
+                return Err(Error::InvalidState);
+            }
             let (sender, receiver) = EventReceiver::bounded();
             let event = Event::Route {
                 id: RouteId::new(1),
@@ -419,6 +423,9 @@ mod tests {
             &self,
             filter: Self::EventFilter,
         ) -> Result<net_lattice_platform::TokioEventReceiver<Self::Event>> {
+            if self.fail_events {
+                return Err(Error::InvalidState);
+            }
             let (sender, receiver) = net_lattice_platform::TokioEventReceiver::bounded();
             let event = Event::Route {
                 id: RouteId::new(1),
@@ -435,7 +442,10 @@ mod tests {
 
     fn lattice(capabilities: Capability) -> Lattice<TestBackend> {
         Lattice {
-            backend: TestBackend { capabilities },
+            backend: TestBackend {
+                capabilities,
+                fail_events: false,
+            },
         }
     }
 
@@ -494,6 +504,36 @@ mod tests {
                 .expect("empty filtered watch")
                 .try_recv(),
             Ok(None)
+        ));
+    }
+
+    #[test]
+    fn facade_propagates_backend_watcher_errors() {
+        let lattice = Lattice {
+            backend: TestBackend {
+                capabilities: Capability::MONITORING,
+                fail_events: true,
+            },
+        };
+        assert!(matches!(lattice.watch(), Err(Error::InvalidState)));
+        assert!(matches!(
+            lattice.watch_filtered(EventFilter::ALL),
+            Err(Error::InvalidState)
+        ));
+    }
+
+    #[cfg(feature = "async")]
+    #[test]
+    fn async_facade_propagates_native_watcher_errors() {
+        let lattice = Lattice {
+            backend: TestBackend {
+                capabilities: Capability::MONITORING,
+                fail_events: true,
+            },
+        };
+        assert!(matches!(
+            lattice.watch_async(EventFilter::ALL),
+            Err(Error::InvalidState)
         ));
     }
 
