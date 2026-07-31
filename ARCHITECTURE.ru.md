@@ -614,10 +614,36 @@ provider-traits, а не другой контракт backend'а. Дорабо�
 | 0.11 ✅ | Опциональная feature `async` в `net-lattice`; `net-lattice-async` предоставляет один runtime-agnostic `EventStream`, а Linux (Tokio Netlink), Windows (callbacks IP Helper) и macOS (reader PF_ROUTE) доставляют события прямо в bounded Tokio transports. |
 | 0.12 ✅ | Стабилизация API watcher'ов: composable object/domain filters до помещения в очередь, validation capability мониторинга и одинаковая sync/async семантика filter без изменения опубликованного API 0.11. |
 | 0.13 ✅ | Изменение DNS с моделью intent/observed state: `NewDnsConfig` применяется через поддерживаемые системные механизмы, а результирующий `DnsConfig` повторно читается на Linux, Windows и macOS. |
-| 0.14 | Примитивы транзакций: планы, применение, сообщения об ошибках и границы rollback. |
-| 0.15 | Декларативные `CurrentState`/`DesiredState`/`Diff`/`ApplyPlan` на стабильной основе мутаций. |
-| 0.16+ | Домены VLAN, VRF, firewall, tunnel и namespace, закрытые Capability. |
-| 1.0 | Стабильная кроссплатформенная основа просмотра, мониторинга и изменения сети. |
+| 0.14 | Модель mutation-операций: типизированное inspectable-представление уже существующих изменений routes/addresses/DNS; явные классификации preconditions, idempotency, privileges и reversibility. Никакого неявного обещания rollback. |
+| 0.15 | Исполнение транзакций: упорядоченные планы, результаты каждой операции, сообщения об ошибках, границы cancellation и best-effort compensation только там, где операция документирована как reversible. Native integration tests закрепляют одинаковый контракт на Linux, Windows и macOS. |
+| 0.16 | Конфигурация интерфейсов: desired interface configuration отдельно от наблюдаемого `Interface`; capability-gated изменение admin state и MTU с паритетом платформ и семантикой событий. |
+| 0.17 | Изменение соседей: intent/observed-типы и capability-gated управление статическими ARP/NDP-записями. Это завершает mutation-аналог существующей read-модели соседей. |
+| 0.18 | Основа snapshot: `CurrentState` последовательно собирается из реализованных provider'ов, с явно определёнными scope, consistency и partial-read семантиками snapshot. |
+| 0.19 | Декларативная модель и diff: конфигурационные типы `DesiredState` остаются отдельными от наблюдаемых типов; создаётся inspectable `Diff` без его применения. |
+| 0.20 | Декларативное применение: `Diff` компилируется в `ApplyPlan`, исполняется через transaction engine и сообщает о convergence, non-convergence и результатах compensation. |
+| 0.21 | Pre-1.0 hardening: заморозка core model, provider extension contracts, правил identity, значений capability, гарантий событий и матрицы поддержки платформ; завершение cross-platform privileged regression coverage и migration guidance. |
+| 0.22+ | Домены Capability, каждый вводится только вместе со своей read model, intent model, семантикой mutation, событиями там, где их поддерживает ОС, capabilities и all-platform tests: сначала VLAN, затем VRF, namespaces, firewall и tunnels по мере зрелости их платформенных контрактов. Эти домены не являются prerequisite для 1.0. |
+| 1.0 | Стабильная кроссплатформенная основа для реализованных контрактов inspection, monitoring, imperative mutation, transactions и declarative apply. 1.0 закрывается compatibility audit из 0.21, а не реализацией всех будущих capability-доменов. |
 
 Ожидается, что каждый этап проверяет архитектуру перед началом следующего;
 более ранние этапы могут повлиять на корректировки более поздних.
+
+### Путь к 1.0
+
+Номера этапов выше — границы поставки, а не обещание выпустить каждый заголовок
+одним релизом. Этап может быть разделён, если платформенное поведение или
+публичный контракт требуют независимой проверки. И наоборот, небольшой
+hardening-релиз может быть выпущен между этапами без изменения этого плана.
+
+Текущий фасад предоставляет завершённые read API и imperative mutation для
+routes, addresses и DNS. Этого достаточно, чтобы начать транзакции, но
+недостаточно, чтобы объявить платформу конфигурации стабильной: изменение
+параметров интерфейсов и статических соседей ещё требует собственных
+intent-моделей, а declarative apply должен определяться через явные операции,
+а не через повторное использование observed-объектов как desired state.
+
+Граница 1.0 намеренно не требует поддержки VLAN, VRF, namespaces, firewall
+или tunnels. Она требует, чтобы каждый уже заявленный как стабильный API имел
+документированный кроссплатформенный контракт, честное поведение capabilities
+и privileges, bounded-семантику событий, детерминированные transaction reports
+и privileged regression coverage на каждой поддерживаемой платформе.

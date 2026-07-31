@@ -607,10 +607,36 @@ are introduced only when there is real implementation work for them:
 | 0.11 ✅ | Optional `net-lattice` `async` feature; `net-lattice-async` exposes one runtime-agnostic `EventStream`, while Linux (Tokio Netlink), Windows (IP Helper callbacks), and macOS (PF_ROUTE reader) deliver directly into bounded Tokio transports. |
 | 0.12 ✅ | Watcher API stabilization: composable object/domain filters applied before enqueueing, monitoring-capability validation, and consistent synchronous/async filter semantics without changing the released 0.11 API. |
 | 0.13 ✅ | DNS mutation with an intent/observed-state model: `NewDnsConfig` is applied through supported system mechanisms and the resulting `DnsConfig` is re-read on Linux, Windows, and macOS. |
-| 0.14 | Transaction primitives: plans, application, failure reporting, and rollback boundaries. |
-| 0.15 | Declarative `CurrentState`/`DesiredState`/`Diff`/`ApplyPlan` on the stable mutation foundation. |
-| 0.16+ | Capability-gated VLAN, VRF, firewall, tunnel, and namespace domains. |
-| 1.0 | Stable cross-platform inspection, monitoring, and mutation foundation. |
+| 0.14 | Mutation operation model: an inspectable, typed representation of the existing route/address/DNS mutations; explicit preconditions, idempotency, privilege, and reversibility classifications. No implicit rollback promise. |
+| 0.15 | Transaction execution: ordered plans, per-operation outcomes, failure reporting, cancellation boundaries, and best-effort compensation only where an operation is documented as reversible. Native integration tests establish the same contract on Linux, Windows, and macOS. |
+| 0.16 | Interface configuration: separate desired interface configuration from observed `Interface`; capability-gated admin-state and MTU mutation with platform parity and event semantics. |
+| 0.17 | Neighbor mutation: intent/observed types and capability-gated static ARP/NDP entry management. This completes the mutation counterpart of the existing neighbor read model. |
+| 0.18 | Snapshot foundation: `CurrentState` assembled consistently from the implemented providers, with snapshot scope, consistency, and partial-read semantics made explicit. |
+| 0.19 | Declarative model and diff: `DesiredState` configuration types remain distinct from observed types; produce an inspectable `Diff` without applying it. |
+| 0.20 | Declarative apply: compile a `Diff` into an `ApplyPlan`, execute it through the transaction engine, and report convergence, non-convergence, and compensation results. |
+| 0.21 | Pre-1.0 hardening: freeze the core model, provider extension contracts, identity rules, capability meanings, event guarantees, and platform support matrix; complete cross-platform privileged regression coverage and migration guidance. |
+| 0.22+ | Capability domains, each introduced only with its read model, intent model, mutation semantics, events where the OS supports them, capabilities, and all-platform tests: VLAN first, then VRF, namespaces, firewall, and tunnels as their platform contracts mature. These domains are not prerequisites for 1.0. |
+| 1.0 | Stable cross-platform foundation for the implemented inspection, monitoring, imperative mutation, transactions, and declarative apply contracts. 1.0 is gated by the 0.21 compatibility audit, not by implementing every future capability domain. |
 
 Each stage is expected to validate the architecture before the next is
 started; earlier stages may inform adjustments to later ones.
+
+### Route to 1.0
+
+The stage numbers above are delivery boundaries, not a promise that every
+heading ships in one release. A stage may be split when platform behavior or
+the public contract needs independent validation. Conversely, a small
+hardening release may be issued between stages without changing this plan.
+
+The current facade exposes complete read APIs plus imperative route, address,
+and DNS mutation. That is enough to begin transactions, but not enough to
+declare a stable configuration platform: interface and static-neighbor
+mutation still need their own intent models, and declarative apply must be
+defined in terms of explicit operations rather than by reusing observed
+objects as desired state.
+
+The 1.0 boundary intentionally does not require VLAN, VRF, namespaces,
+firewall, or tunnel support. It requires that every API already advertised as
+stable has a documented cross-platform contract, truthful capability and
+privilege behavior, bounded event semantics, deterministic transaction
+reporting, and privileged regression coverage on each supported platform.
