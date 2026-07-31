@@ -1835,6 +1835,41 @@ mod tests {
         assert_eq!(decoded, Some(IpAddr::V4(input)));
     }
 
+    #[test]
+    fn darwin_scalar_mappings_cover_error_masks_interface_and_neighbor_states() {
+        assert!(matches!(
+            route_socket_error(&io::Error::from_raw_os_error(libc::EPERM)),
+            Error::PermissionDenied
+        ));
+        assert!(matches!(
+            route_socket_error(&io::Error::from_raw_os_error(libc::ENOENT)),
+            Error::NotFound
+        ));
+        assert!(matches!(
+            route_socket_error(&io::Error::from_raw_os_error(libc::EEXIST)),
+            Error::AlreadyExists
+        ));
+        assert!(matches!(
+            route_socket_error(&io::Error::other("route")),
+            Error::Platform(PlatformErrorCode::Darwin(_))
+        ));
+
+        assert_eq!(mask_bytes_to_prefix_len(&[]), 0);
+        assert_eq!(mask_bytes_to_prefix_len(&[0xff, 0xff, 0xf0]), 20);
+        assert_eq!(mask_bytes_to_prefix_len(&[0xff, 0x00]), 8);
+        assert_eq!(ift_type_to_kind(IFT_ETHER), InterfaceKind::Ethernet);
+        assert_eq!(ift_type_to_kind(IFT_LOOP), InterfaceKind::Loopback);
+        assert_eq!(ift_type_to_kind(IFT_PPP), InterfaceKind::PointToPoint);
+        assert_eq!(ift_type_to_kind(IFT_BRIDGE), InterfaceKind::Bridge);
+        assert_eq!(ift_type_to_kind(IFT_L2VLAN), InterfaceKind::Ethernet);
+        assert_eq!(
+            neighbor_flags_to_state(libc::RTAF_STATIC, true),
+            NeighborState::Permanent
+        );
+        assert_eq!(neighbor_flags_to_state(0, true), NeighborState::Reachable);
+        assert_eq!(neighbor_flags_to_state(0, false), NeighborState::Incomplete);
+    }
+
     /// Exercises a real round trip through `getifaddrs`, no privilege
     /// required: every macOS system has the `lo0` loopback interface.
     #[test]

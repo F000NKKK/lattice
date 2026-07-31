@@ -1188,6 +1188,93 @@ mod tests {
         false
     }
 
+    #[test]
+    fn ip_helper_row_fixtures_round_trip_all_read_models() {
+        let destination = Network::from(Ipv4Network::new(
+            Ipv4Address::new(198, 51, 100, 0),
+            Ipv4PrefixLength::new(24).unwrap(),
+        ));
+        let route = Route::new(RouteId::new(1), destination)
+            .with_gateway(IpAddress::from(Ipv4Address::new(192, 0, 2, 1)))
+            .with_interface_index(7)
+            .with_metric(42);
+        let row = build_row(route);
+        let observed = row_to_route(&row).unwrap().expect("valid route row");
+        assert_eq!(observed.destination, destination);
+        assert_eq!(observed.interface_index, Some(7));
+        assert_eq!(observed.metric, Some(42));
+        assert_eq!(
+            observed.gateway,
+            Some(IpAddress::from(Ipv4Address::new(192, 0, 2, 1)))
+        );
+
+        let mut address = MIB_UNICASTIPADDRESS_ROW::default();
+        address.InterfaceIndex = 7;
+        address.Address = ip_to_sockaddr_inet(IpAddr::V4(Ipv4Address::new(192, 0, 2, 7)));
+        address.OnLinkPrefixLength = 24;
+        let observed = row_to_interface_address(&address).expect("valid address row");
+        assert_eq!(observed.interface_index, 7);
+        assert_eq!(
+            observed.address,
+            Network::from(Ipv4Network::new(
+                Ipv4Address::new(192, 0, 2, 7),
+                Ipv4PrefixLength::new(24).unwrap(),
+            ))
+        );
+
+        let mut interface = MIB_IF_ROW2::default();
+        interface.InterfaceIndex = 7;
+        interface.Type = IF_TYPE_ETHERNET_CSMACD;
+        interface.AdminStatus = NET_IF_ADMIN_STATUS_UP;
+        interface.OperStatus = IfOperStatusUp;
+        interface.Mtu = 1500;
+        interface.Alias[0] = 'e' as u16;
+        interface.Alias[1] = 't' as u16;
+        interface.Alias[2] = 'h' as u16;
+        interface.PhysicalAddressLength = 6;
+        interface.PhysicalAddress[..6].copy_from_slice(&[0, 1, 2, 3, 4, 5]);
+        let observed = row_to_interface(&interface);
+        assert_eq!(observed.name, "eth");
+        assert_eq!(observed.kind, InterfaceKind::Ethernet);
+        assert_eq!(observed.operational_state, OperationalState::Up);
+        assert_eq!(observed.mac, Some(MacAddress::new([0, 1, 2, 3, 4, 5])));
+
+        let mut neighbor = MIB_IPNET_ROW2::default();
+        neighbor.InterfaceIndex = 7;
+        neighbor.Address = ip_to_sockaddr_inet(IpAddr::V4(Ipv4Address::new(192, 0, 2, 1)));
+        neighbor.State = NlnsReachable;
+        neighbor.PhysicalAddressLength = 6;
+        neighbor.PhysicalAddress[..6].copy_from_slice(&[5, 4, 3, 2, 1, 0]);
+        let observed = row_to_neighbor(&neighbor).expect("valid neighbor row");
+        assert_eq!(observed.interface_index, 7);
+        assert_eq!(observed.state, NeighborState::Reachable);
+        assert_eq!(observed.mac, Some(MacAddress::new([5, 4, 3, 2, 1, 0])));
+    }
+
+    #[test]
+    fn ip_helper_kind_and_state_mappings_cover_supported_values() {
+        assert_eq!(
+            if_type_to_kind(IF_TYPE_SOFTWARE_LOOPBACK),
+            InterfaceKind::Loopback
+        );
+        assert_eq!(if_type_to_kind(IF_TYPE_PPP), InterfaceKind::PointToPoint);
+        assert_eq!(if_type_to_kind(IF_TYPE_IEEE80211), InterfaceKind::Wireless);
+        assert_eq!(if_type_to_kind(IF_TYPE_BRIDGE), InterfaceKind::Bridge);
+        assert_eq!(if_type_to_kind(IF_TYPE_L2_VLAN), InterfaceKind::Ethernet);
+        assert_eq!(if_type_to_kind(999), InterfaceKind::Other(999));
+        assert_eq!(
+            neighbor_state_to_state(NlnsIncomplete),
+            NeighborState::Incomplete
+        );
+        assert_eq!(neighbor_state_to_state(NlnsStale), NeighborState::Stale);
+        assert_eq!(neighbor_state_to_state(NlnsDelay), NeighborState::Delay);
+        assert_eq!(neighbor_state_to_state(NlnsProbe), NeighborState::Probe);
+        assert_eq!(
+            neighbor_state_to_state(NlnsPermanent),
+            NeighborState::Permanent
+        );
+    }
+
     /// Exercises a real round trip through the IP Helper API, no privilege
     /// required: routing table dumps are readable by any user. This is the
     /// one test in this module that runs by default and actually proves the
