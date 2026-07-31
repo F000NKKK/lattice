@@ -10,6 +10,9 @@
 /// Runtime-agnostic async event adapter, enabled by the `async` feature.
 #[cfg(feature = "async")]
 pub use net_lattice_async::{EventStream, stream};
+/// Tokio-specific async event adapter, enabled by the `async-tokio` feature.
+#[cfg(feature = "async-tokio")]
+pub use net_lattice_async::{TokioEventStream, tokio_stream};
 pub use net_lattice_core::{Error, Id, PlatformErrorCode, Result};
 pub use net_lattice_ip::{
     Ipv4Address, Ipv4Network, Ipv4PrefixLength, Ipv6Address, Ipv6Network, Ipv6PrefixLength,
