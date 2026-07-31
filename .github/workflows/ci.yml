@@ -60,11 +60,11 @@ jobs:
       # mutation and delivery through its real event provider.
       - name: cargo test --ignored (privileged, Linux — sudo for CAP_NET_ADMIN)
         if: matrix.os == 'ubuntu-latest'
-        run: sudo env "PATH=$PATH" "HOME=$HOME" cargo test -p net-lattice-backend-linux -- --ignored
+        run: sudo env "PATH=$PATH" "HOME=$HOME" "CARGO_TARGET_DIR=/tmp/net-lattice-privileged-target" cargo test -p net-lattice-backend-linux -- --ignored
 
       - name: cargo test --ignored (privileged, macOS — sudo for root)
         if: matrix.os == 'macos-latest'
-        run: sudo env "PATH=$PATH" "HOME=$HOME" cargo test -p net-lattice-backend-darwin -- --ignored
+        run: sudo env "PATH=$PATH" "HOME=$HOME" "CARGO_TARGET_DIR=/tmp/net-lattice-privileged-target" cargo test -p net-lattice-backend-darwin -- --ignored
 
       # GitHub-hosted Windows runners already execute as Administrator, so
       # no elevation step is needed here — unlike the sudo re-exec above.
@@ -110,11 +110,11 @@ jobs:
       # therefore verify the full async event path on every supported OS.
       - name: cargo test --ignored --features async (privileged, Linux)
         if: matrix.os == 'ubuntu-latest'
-        run: sudo env "PATH=$PATH" "HOME=$HOME" cargo test -p net-lattice-backend-linux --features async -- --ignored
+        run: sudo env "PATH=$PATH" "HOME=$HOME" "CARGO_TARGET_DIR=/tmp/net-lattice-privileged-target" cargo test -p net-lattice-backend-linux --features async -- --ignored
 
       - name: cargo test --ignored --features async (privileged, macOS)
         if: matrix.os == 'macos-latest'
-        run: sudo env "PATH=$PATH" "HOME=$HOME" cargo test -p net-lattice-backend-darwin --features async -- --ignored
+        run: sudo env "PATH=$PATH" "HOME=$HOME" "CARGO_TARGET_DIR=/tmp/net-lattice-privileged-target" cargo test -p net-lattice-backend-darwin --features async -- --ignored
 
       - name: cargo test --ignored --features async (privileged, Windows)
         if: matrix.os == 'windows-latest'
