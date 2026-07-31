@@ -961,6 +961,9 @@ mod tests {
         assert!(receiver.recv().is_ok());
         drop(receiver);
         assert!(!sender.send(Event::resync_all(), Event::resync_all()));
+        let (sender, receiver) = EventReceiver::<Event>::bounded();
+        drop(sender);
+        assert!(receiver.recv().is_err());
 
         #[cfg(feature = "async")]
         {
@@ -986,6 +989,17 @@ mod tests {
                 Pin::new(&mut receiver).poll_recv(&mut cx),
                 Poll::Ready(_)
             ));
+            assert!(matches!(
+                Pin::new(&mut receiver).poll_recv(&mut cx),
+                Poll::Ready(_)
+            ));
+            drop(sender);
+            assert!(matches!(
+                Pin::new(&mut receiver).poll_recv(&mut cx),
+                Poll::Ready(None)
+            ));
+
+            let (sender, receiver) = TokioEventReceiver::bounded();
             drop(receiver);
             assert!(!sender.send(Event::resync_all(), Event::resync_all));
             assert!(!sender.send_error(Error::Disconnected));
