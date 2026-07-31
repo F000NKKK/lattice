@@ -12,8 +12,7 @@ keywords.workspace = true
 description = "A modern, cross-platform Rust library for configuring and inspecting operating system networking through a single, strongly typed API."
 
 [features]
-async = ["dep:net-lattice-async"]
-async-tokio = ["async", "net-lattice-async/tokio"]
+async = ["dep:net-lattice-async", "net-lattice-async/tokio"]
 
 [dependencies]
 net-lattice-core = { workspace = true }
