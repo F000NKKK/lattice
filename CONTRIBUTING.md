@@ -8,7 +8,7 @@ Net Lattice has landed Stage 0.11 of its [architecture](ARCHITECTURE.md)'s Incre
 
 - Feedback on the project's vision, scope, and roadmap (see [README.md](README.md))
 - Discussion of API design and architecture for upcoming stages
-- Implementation work on the next stages in [ARCHITECTURE.md](ARCHITECTURE.md)'s delivery plan (async adaptation, further write parity, declarative configuration, ...)
+- Implementation work on the next stages in [ARCHITECTURE.md](ARCHITECTURE.md)'s delivery plan (further write parity, transaction primitives, declarative configuration, ...)
 - Documentation and tooling improvements
 
 Please read [ARCHITECTURE.md](ARCHITECTURE.md) before proposing a new crate, module, or provider trait — it documents the dependency rules (e.g. `net-lattice-platform` never depends on `net-lattice-model`) and the staged delivery order this project follows.
