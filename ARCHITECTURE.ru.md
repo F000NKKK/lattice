@@ -606,7 +606,7 @@ provider-traits, а не другой контракт backend'а. Дорабо�
 | 0.8 ✅ | модуль `event` + синхронные `EventProvider`/`EventReceiver`; мониторинг через Netlink multicast (Linux), PF_ROUTE (macOS) и уведомления IP Helper (Windows). |
 | 0.9 ✅ | `NewInterfaceAddress` + `AddressMutator`; нативное назначение/удаление IPv4/IPv6-адресов через Netlink (Linux), IP Helper (Windows) и address ioctl (macOS). |
 | 0.10 ✅ | Семантика событий: bounded delivery, overflow/resynchronization, filtering, cancellation и распространение ошибок фонового watcher'а. |
-| 0.11 | Runtime-agnostic async-адаптер событий в отдельном crate с явным bridge от синхронного receiver. |
+| 0.11 ✅ | `net-lattice-async`: runtime-agnostic async-адаптер событий в отдельном crate с явным worker-thread bridge от синхронного receiver. |
 | 0.12+ | Дальнейший паритет операций записи (включая DNS), примитивы транзакций, декларативные `CurrentState`/`DesiredState`/`Diff`/`ApplyPlan`, затем домены VLAN, VRF, firewall, tunnel и namespace под Capability. |
 
 Ожидается, что каждый этап проверяет архитектуру перед началом следующего;

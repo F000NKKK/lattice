@@ -597,7 +597,7 @@ are introduced only when there is real implementation work for them:
 | 0.8 ✅ | `event` module + synchronous `EventProvider`/`EventReceiver`; monitoring via Netlink multicast (Linux), PF_ROUTE (macOS), and IP Helper notifications (Windows). |
 | 0.9 ✅ | `NewInterfaceAddress` + `AddressMutator`; native IPv4/IPv6 address assignment/removal via Netlink (Linux), IP Helper (Windows), and address ioctls (macOS). |
 | 0.10 ✅ | Event semantics: bounded delivery, overflow/resynchronization, filtering, cancellation, and background-error propagation. |
-| 0.11 | Runtime-agnostic async event adapter in a separate crate, with an explicit bridge from the synchronous receiver. |
+| 0.11 ✅ | `net-lattice-async`: runtime-agnostic async event adapter in a separate crate, with an explicit worker-thread bridge from the synchronous receiver. |
 | 0.12+ | Further write parity (including DNS), transaction primitives, declarative `CurrentState`/`DesiredState`/`Diff`/`ApplyPlan`, then capability-gated VLAN, VRF, firewall, tunnel, and namespace domains. |
 
 Each stage is expected to validate the architecture before the next is

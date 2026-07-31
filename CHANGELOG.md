@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-07-31
+
+### Added
+
+- `net-lattice-async` 0.1.0: runtime-agnostic `futures::Stream` adapter for
+  `EventReceiver`. It uses an explicit worker-thread bridge, so no async
+  runtime is required by Net Lattice's core API.
+
 ## [0.10.0] - 2026-07-31
 
 ### Added
