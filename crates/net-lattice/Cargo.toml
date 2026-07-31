@@ -13,6 +13,7 @@ description = "A modern, cross-platform Rust library for configuring and inspect
 
 [features]
 async = ["dep:net-lattice-async"]
+async-tokio = ["async", "net-lattice-async/tokio"]
 
 [dependencies]
 net-lattice-core = { workspace = true }
