@@ -17,7 +17,7 @@
 
 **Net Lattice** is a modern, cross-platform Rust library for configuring and inspecting operating system networking through a single, strongly typed API.
 
-> **Status:** Net Lattice provides cross-platform network inspection, route and address mutation, and synchronous change monitoring with an optional async interface through native operating-system APIs on Linux, Windows, and macOS. Stage 0.12 of the architecture plan has shipped; see Current Status below.
+> **Status:** Net Lattice provides cross-platform network inspection, route, address, and DNS mutation, plus synchronous change monitoring with an optional async interface through native operating-system APIs on Linux, Windows, and macOS. Stage 0.13 of the architecture plan has shipped; see Current Status below.
 
 ## Overview
 
@@ -196,10 +196,18 @@ let observed = lattice.set_dns_config(requested)?;
 7. **Stage 0.11: Async events** *(completed)* — optional `async` facade feature, one runtime-agnostic `EventStream`, and native Tokio-backed delivery in every platform backend.
 8. **Stage 0.12: Watcher API stabilization** *(completed)* — composable object/domain filters, filtering before queueing, monitoring-capability validation, and consistent filter semantics across synchronous and async watchers while preserving the released 0.11 API.
 9. **Stage 0.13: DNS mutation** *(completed)* — capability-gated resolver replacement through supported system mechanisms on Linux, Windows, and macOS.
-10. **Stage 0.14: Transaction primitives** — plans, application, failure reporting, and rollback boundaries for mutations.
-11. **Stage 0.15: Declarative networking** — `CurrentState`, `DesiredState`, `Diff`, and `ApplyPlan` built on the stable mutation foundation.
-12. **Stage 0.16+: Capability domains** — VLAN, VRF, namespaces, firewall, and tunnel support, gated by explicit runtime capabilities.
-13. **1.0** — stable cross-platform inspection, monitoring, and mutation foundation.
+10. **Stage 0.14: Mutation operation model** — inspectable typed operations for existing route, address, and DNS mutations; preconditions, idempotency, privilege, and reversibility are explicit.
+11. **Stage 0.15: Transaction execution** — ordered plans, per-operation outcomes, cancellation and failure boundaries, plus compensation only for documented reversible operations.
+12. **Stage 0.16: Interface configuration** — separate desired interface configuration, capability-gated admin-state and MTU mutation, and platform-parity tests.
+13. **Stage 0.17: Neighbor mutation** — intent/observed types and capability-gated static ARP/NDP management.
+14. **Stage 0.18: Snapshots** — consistently assembled `CurrentState` with explicit scope, consistency, and partial-read semantics.
+15. **Stage 0.19: Declarative diff** — separate `DesiredState` configuration types and an inspectable `Diff`, without mutation.
+16. **Stage 0.20: Declarative apply** — compile a `Diff` into an `ApplyPlan` and execute it through the transaction engine.
+17. **Stage 0.21: Pre-1.0 hardening** — freeze public contracts, identity and capability rules, event guarantees, platform matrix, and privileged regression coverage.
+18. **Stage 0.22+: Capability domains** — VLAN, VRF, namespaces, firewall, and tunnels, each with a complete read/intent/mutation/event/capability/test contract. They are not prerequisites for 1.0.
+19. **1.0** — stable foundation for the implemented inspection, monitoring, imperative mutation, transaction, and declarative-apply contracts. It is gated by the 0.21 compatibility audit, not by every future network domain.
+
+Stages are delivery boundaries, not a promise of one release per heading: platform validation may split a stage, and focused hardening releases may appear between stages.
 
 ## Contributing
 

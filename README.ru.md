@@ -17,7 +17,7 @@
 
 **Net Lattice** — это современная кроссплатформенная библиотека для Rust, предназначенная для настройки и анализа сетевой конфигурации операционной системы через единый строго типизированный API.
 
-> **Статус:** Net Lattice предоставляет кроссплатформенный просмотр сети, изменение маршрутов и адресов, синхронный мониторинг изменений с опциональным async-интерфейсом через нативные API операционных систем в Linux, Windows и macOS. Реализован Stage 0.12 плана архитектуры; см. «Текущий статус» ниже.
+> **Статус:** Net Lattice предоставляет кроссплатформенный просмотр сети, изменение маршрутов, адресов и DNS, а также синхронный мониторинг изменений с опциональным async-интерфейсом через нативные API операционных систем в Linux, Windows и macOS. Реализован Stage 0.13 плана архитектуры; см. «Текущий статус» ниже.
 
 ## Обзор
 
@@ -196,10 +196,18 @@ let observed = lattice.set_dns_config(requested)?;
 7. **Stage 0.11: Async events** *(завершён)* — опциональная feature фасада `async`, единый runtime-agnostic `EventStream` и нативная Tokio-backed доставка в каждом платформенном backend.
 8. **Stage 0.12: Стабилизация API watcher'ов** *(завершён)* — composable filters по объектам/доменам, filtering до помещения в очередь, validation capability мониторинга и одинаковая семантика filter для sync/async watcher'ов с сохранением опубликованного API 0.11.
 9. **Stage 0.13: Изменение DNS** *(завершён)* — замена конфигурации резолвера через поддерживаемые системные механизмы, закрытая capability, на Linux, Windows и macOS.
-10. **Stage 0.14: Примитивы транзакций** — планы, применение, сообщения об ошибках и границы rollback для мутаций.
-11. **Stage 0.15: Декларативная сеть** — `CurrentState`, `DesiredState`, `Diff` и `ApplyPlan`, построенные на стабильной основе мутаций.
-12. **Stage 0.16+: Домены Capability** — VLAN, VRF, namespaces, firewall и tunnel, закрытые явными runtime capabilities.
-13. **1.0** — стабильная кроссплатформенная основа просмотра, мониторинга и изменения сети.
+10. **Stage 0.14: Модель mutation-операций** — inspectable типизированные операции для существующих изменений routes, addresses и DNS; preconditions, idempotency, privileges и reversibility определены явно.
+11. **Stage 0.15: Исполнение транзакций** — упорядоченные планы, результаты каждой операции, границы cancellation и ошибок, а также compensation только для документированно reversible операций.
+12. **Stage 0.16: Конфигурация интерфейсов** — отдельная desired-конфигурация интерфейса, capability-gated изменение admin state и MTU и platform-parity tests.
+13. **Stage 0.17: Изменение соседей** — intent/observed-типы и capability-gated управление статическими ARP/NDP-записями.
+14. **Stage 0.18: Snapshots** — последовательно собранный `CurrentState` с явно определёнными scope, consistency и partial-read семантиками.
+15. **Stage 0.19: Декларативный diff** — отдельные конфигурационные типы `DesiredState` и inspectable `Diff` без mutation.
+16. **Stage 0.20: Декларативное применение** — компиляция `Diff` в `ApplyPlan` и его исполнение через transaction engine.
+17. **Stage 0.21: Pre-1.0 hardening** — заморозка публичных контрактов, правил identity и capability, гарантий событий, матрицы платформ и privileged regression coverage.
+18. **Stage 0.22+: Домены Capability** — VLAN, VRF, namespaces, firewall и tunnels, каждый с полным контрактом read/intent/mutation/event/capability/tests. Они не являются prerequisite для 1.0.
+19. **1.0** — стабильная основа для реализованных контрактов inspection, monitoring, imperative mutation, transactions и declarative apply. Она закрывается compatibility audit из 0.21, а не каждым будущим сетевым доменом.
+
+Этапы — это границы поставки, а не обещание одного релиза на каждый заголовок: platform validation может разделить этап, а focused hardening-релизы могут появляться между этапами.
 
 ## Участие в проекте
 
