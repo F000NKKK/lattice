@@ -77,9 +77,9 @@ Net Lattice призвана закрыть этот пробел, предос�
 - модули `route`, `mac`, `interface`, `dns`, `neighbor`, `ifaddr` и `event` в `net-lattice-model`; `NewInterfaceAddress` выражает намерение назначить адрес отдельно от наблюдаемого `InterfaceAddress`
 - `RouteProvider`, `InterfaceProvider`, `DnsProvider`, `NeighborProvider`, `AddressProvider`, `AddressMutator`, `CapabilityProvider`, синхронные `EventProvider`/bounded `EventReceiver` и опциональная async-поддержка мониторинга в `net-lattice-platform`
 - `net-lattice-async`, предоставляющий единый runtime-agnostic тип `EventStream`
-- фасад `net-lattice`, включая `Lattice::add_address()`, `Lattice::remove_address()`, `Lattice::capabilities()`, `Lattice::supports()`, `Lattice::watch_filtered()` и feature-gated `Lattice::watch_async()`/`Lattice::watch_async_filtered()`
+- фасад `net-lattice`, включая `Lattice::add_address()`, `Lattice::remove_address()`, `Lattice::capabilities()`, `Lattice::supports()`, `Lattice::watch()`, `Lattice::watch_filtered()` и feature-gated `Lattice::watch_async()`
 
-Это даёт реальное управление маршрутами и IP-адресами интерфейсов, просмотр интерфейсов, чтение DNS-конфигурации резолвера, чтение таблиц соседей (ARP/NDP) и bounded-мониторинг сетевых изменений на Linux, Windows и macOS. Создание адреса принимает `NewInterfaceAddress` и возвращает результирующий наблюдаемый `InterfaceAddress`, поэтому потребитель не конструирует ID адреса самостоятельно. `EventFilter` сочетает селекторы доменов (`routes()`) и объектов (`route(route_id)`); каждый backend применяет filter до помещения обычного события в очередь. В переносимом коде перед watching проверяйте `Lattice::supports(Capability::MONITORING)`; когда мониторинг недоступен, фасад возвращает `Error::Unsupported` до открытия watcher. Опциональная feature `async` в `net-lattice` использует и реэкспортирует реализацию `EventStream` из `net-lattice-async`; приложению достаточно включить эту feature фасада. `Lattice::watch_async(filter)` и `Lattice::watch_async_filtered(filter)` предоставляют одинаковый API `EventStream` на всех платформах. Tokio используется внутри там, где этого требует нативная реализация, а приложения взаимодействуют только с runtime-independent интерфейсом `futures::Stream`. Это всё ещё не полноценная библиотека: изменение DNS, VLAN, VRF, namespaces, интеграция с firewall, транзакционная конфигурация, декларативная настройка сети и другие продвинутые возможности ещё впереди; см. [ARCHITECTURE.ru.md](ARCHITECTURE.ru.md) для поэтапной дорожной карты и [CHANGELOG.md](CHANGELOG.md) для того, что реально вышло.
+Это даёт реальное управление маршрутами и IP-адресами интерфейсов, просмотр интерфейсов, чтение DNS-конфигурации резолвера, чтение таблиц соседей (ARP/NDP) и bounded-мониторинг сетевых изменений на Linux, Windows и macOS. Создание адреса принимает `NewInterfaceAddress` и возвращает результирующий наблюдаемый `InterfaceAddress`, поэтому потребитель не конструирует ID адреса самостоятельно. `EventFilter` сочетает селекторы доменов (`routes()`) и объектов (`route(route_id)`); каждый backend применяет filter до помещения обычного события в очередь. В переносимом коде перед watching проверяйте `Lattice::supports(Capability::MONITORING)`; когда мониторинг недоступен, фасад возвращает `Error::Unsupported` до открытия watcher. Feature `async` в Net Lattice использует и реэкспортирует реализацию `EventStream` из `net-lattice-async`; приложению достаточно включить эту feature фасада. `Lattice::watch_async(filter)` остаётся async API Stage 0.11 и имеет ту же семантику filter, что и `Lattice::watch_filtered(filter)`. Tokio используется внутри там, где этого требует нативная реализация, а приложения взаимодействуют только с runtime-independent интерфейсом `futures::Stream`. Платформенные backend'ы используют Netlink в Linux, IP Helper API в Windows и BSD routing sockets, `getifaddrs` и address ioctl в macOS. Это всё ещё не полноценная библиотека: изменение DNS, VLAN, VRF, namespaces, интеграция с firewall, транзакционная конфигурация, декларативная настройка сети и другие продвинутые возможности ещё впереди; см. [ARCHITECTURE.ru.md](ARCHITECTURE.ru.md) для поэтапной дорожной карты и [CHANGELOG.md](CHANGELOG.md) для того, что реально вышло.
 
 | Возможность | Linux | Windows | macOS |
 |---|:---:|:---:|:---:|
@@ -88,7 +88,7 @@ Net Lattice призвана закрыть этот пробел, предос�
 | Просмотр интерфейсов | ✅ | ✅ | ✅ |
 | Просмотр адресов интерфейсов | ✅ | ✅ | ✅ |
 | Изменение адресов интерфейсов | ✅ | ✅ | ✅ |
-| Просмотр соседей | ✅ | ✅ | ✅ |
+| Просмотр таблицы соседей | ✅ | ✅ | ✅ |
 | Просмотр DNS-резолвера | ✅ | ✅ | ✅ |
 | Мониторинг изменений | ✅ | ✅ | ✅ |
 | Асинхронный мониторинг изменений | ✅ | ✅ | ✅ |
@@ -98,11 +98,13 @@ Net Lattice призвана закрыть этот пробел, предос�
 Потоки событий bounded. Если consumer не успевает обрабатывать события, watcher запоминает и выдаёт `Event::ResyncRequired { .. }` перед последующим обычным событием, а не сохраняет неограниченный backlog. Прежде чем полагаться на последующие события, перечитайте состояние затронутого provider.
 
 ```rust
-let routes = EventFilter::none().route(route_id);
-let watcher = lattice.watch_filtered(routes)?;
+let route_events = EventFilter::none().route(route_id);
+let watcher = lattice.watch_filtered(route_events)?;
 ```
 
-## Краткий пример
+## Примеры
+
+### Просмотр и наблюдение состояния
 
 ```rust
 use net_lattice::{Lattice, Result};
@@ -126,7 +128,9 @@ fn main() -> Result<()> {
 }
 ```
 
-Включите опциональный async-фасад через `net-lattice = { version = "0.11", features = ["async"] }`. На каждой поддерживаемой платформе он возвращает одинаковый `futures::Stream`:
+### Асинхронный мониторинг
+
+Включите опциональный async-фасад через `net-lattice = { version = "0.12", features = ["async"] }`. На каждой поддерживаемой платформе он возвращает одинаковый `futures::Stream`:
 
 ```rust
 use futures::StreamExt;
@@ -141,6 +145,8 @@ async fn monitor() -> Result<()> {
     Ok(())
 }
 ```
+
+### Назначение адреса
 
 Назначение адреса использует тип запроса, поэтому потребитель не конструирует ID наблюдаемого адреса:
 
@@ -173,7 +179,7 @@ let observed = lattice.add_address(request)?;
 5. **Stage 0.9: Изменение адресов** *(завершён)* — кроссплатформенное назначение и удаление IPv4/IPv6-адресов интерфейсов.
 6. **Stage 0.10: Семантика событий** *(завершён)* — bounded delivery, сигнализация overflow и resynchronization, filtering, cancellation и распространение ошибок.
 7. **Stage 0.11: Async events** *(завершён)* — опциональная feature фасада `async`, единый runtime-agnostic `EventStream` и нативная Tokio-backed доставка в каждом платформенном backend.
-8. **Stage 0.12: Стабилизация API watcher'ов** *(завершён)* — composable filters по объектам/доменам, filtering до помещения в очередь, validation capability мониторинга и паритет sync/async API с сохранением опубликованного API 0.11.
+8. **Stage 0.12: Стабилизация API watcher'ов** *(завершён)* — composable filters по объектам/доменам, filtering до помещения в очередь, validation capability мониторинга и одинаковая семантика filter для sync/async watcher'ов с сохранением опубликованного API 0.11.
 9. **Stage 0.13: Изменение DNS** — конфигурация резолвера через поддерживаемые нативные системные механизмы, закрытая capability.
 10. **Stage 0.14: Примитивы транзакций** — планы, применение, сообщения об ошибках и границы rollback для мутаций.
 11. **Stage 0.15: Декларативная сеть** — `CurrentState`, `DesiredState`, `Diff` и `ApplyPlan`, построенные на стабильной основе мутаций.
