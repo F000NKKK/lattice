@@ -22,9 +22,7 @@ impl<E> EventSender<E> {
             match self.sender.try_send(Ok(resync)) {
                 Ok(()) => {}
                 Err(mpsc::TrySendError::Full(event)) => {
-                    if let Ok(event) = event {
-                        *pending = Some(event);
-                    }
+                    let _ = event.ok().map(|event| *pending = Some(event));
                     return true;
                 }
                 Err(mpsc::TrySendError::Disconnected(_)) => return false,
