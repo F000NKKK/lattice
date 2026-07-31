@@ -614,20 +614,3 @@ are introduced only when there is real implementation work for them:
 
 Each stage is expected to validate the architecture before the next is
 started; earlier stages may inform adjustments to later ones.
-
-## Pre-1.0 Extension API Decisions
-
-- **Iterator errors:** `EventReceiver` yields `Iterator<Item = Result<E,
-  Error>>`. Disconnection ends iteration; background errors remain visible to
-  the consumer.
-- **Consumer and backend APIs:** `net_lattice::backend` is the documented
-  extension surface for `LatticeBackend`, provider traits, event producers,
-  and backend-facing constructors. Existing root re-exports remain available
-  for compatibility.
-- **Receiver constructor naming:** backend code should use
-  `EventReceiver::from_channel_receiver`; the ambiguous `EventReceiver::new`
-  constructor was removed before 1.0.
-- **Provider trait status:** provider traits are an official extension API for
-  third-party backends. Implementations must preserve each trait's documented
-  read, mutation, event-delivery, filtering, cancellation, and error
-  semantics.

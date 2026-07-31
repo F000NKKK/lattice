@@ -621,20 +621,3 @@ provider-traits, а не другой контракт backend'а. Дорабо�
 
 Ожидается, что каждый этап проверяет архитектуру перед началом следующего;
 более ранние этапы могут повлиять на корректировки более поздних.
-
-## Принятые решения pre-1.0 для extension API
-
-- **Ошибки iterator:** `EventReceiver` выдаёт `Iterator<Item = Result<E,
-  Error>>`. Disconnect завершает итерацию, а фоновые ошибки остаются видимыми
-  consumer'у.
-- **Consumer и backend API:** `net_lattice::backend` — документированная
-  поверхность расширения для `LatticeBackend`, provider-trait'ов, producers
-  событий и backend-конструкторов. Существующие re-export'ы из корня остаются
-  для совместимости.
-- **Имена конструкторов receiver:** backend-код должен использовать
-  `EventReceiver::from_channel_receiver`; неоднозначный конструктор
-  `EventReceiver::new` удалён до 1.0.
-- **Статус provider traits:** provider-trait'ы — официальный extension API для
-  сторонних backend'ов. Реализации обязаны сохранять документированные
-  семантики чтения, изменения, доставки событий, filtering, cancellation и
-  ошибок каждого trait'а.
