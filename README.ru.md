@@ -105,6 +105,28 @@ let watcher = lattice.watch_filtered(route_events)?;
 
 ## Примеры
 
+Запускаемые исходники в
+[`crates/net-lattice/examples`](crates/net-lattice/examples) покрывают каждую
+доступную сейчас операцию фасада. Примеры только для чтения безопасны для
+запуска; примеры mutation требуют явного opt-in через переменную окружения и
+повышенных прав операционной системы.
+
+| Сценарий | Запускаемый пример | Покрываемый фасад/API |
+|---|---|---|
+| Полное состояние только для чтения | [`snapshot`](crates/net-lattice/examples/snapshot.rs) | `capabilities`, `interfaces`, `routes`, `addresses`, `dns_config`, `neighbors` |
+| Выбор возможностей во время работы | [`capabilities`](crates/net-lattice/examples/capabilities.rs) | `capabilities`, `supports`, все текущие флаги `Capability` |
+| Точечное чтение маршрутов | [`list_routes`](crates/net-lattice/examples/list_routes.rs) | `routes` |
+| Bounded синхронная доставка | [`sync_monitor`](crates/net-lattice/examples/sync_monitor.rs) | `watch`, `recv_timeout`, `Event::ResyncRequired` |
+| Фильтрация доменов и объектов | [`filtered_monitor`](crates/net-lattice/examples/filtered_monitor.rs) | `watch_filtered`, все domain/object selectors `EventFilter` |
+| Нативная async-доставка | [`async_monitor`](crates/net-lattice/examples/async_monitor.rs) | `watch_async`, `EventStream` |
+| Жизненный цикл адреса | [`address_assignment`](crates/net-lattice/examples/address_assignment.rs) | `NewInterfaceAddress`, `add_address`, `remove_address` |
+| Жизненный цикл маршрута | [`route_mutation`](crates/net-lattice/examples/route_mutation.rs) | `Route`, `add_route`, `remove_route` |
+| Замена конфигурации резолвера | [`dns_mutation`](crates/net-lattice/examples/dns_mutation.rs) | `NewDnsConfig`, `set_dns_config`, read-after-write verification |
+| Просмотр mutation | [`mutation_plan`](crates/net-lattice/examples/mutation_plan.rs) | все варианты `Mutation`, `Mutation::semantics`, `MutationPlan` |
+
+Запуск: `cargo run -p net-lattice --example <name>`. Для `async_monitor`
+добавьте `--features async`.
+
 ### Просмотр и наблюдение состояния
 
 ```rust
@@ -131,7 +153,7 @@ fn main() -> Result<()> {
 
 ### Асинхронный мониторинг
 
-Включите опциональный async-фасад через `net-lattice = { version = "0.13", features = ["async"] }`. На каждой поддерживаемой платформе он возвращает одинаковый `futures::Stream`:
+Включите опциональный async-фасад через `net-lattice = { version = "0.14", features = ["async"] }`. На каждой поддерживаемой платформе он возвращает одинаковый `futures::Stream`:
 
 ```rust
 use futures::StreamExt;
@@ -169,6 +191,20 @@ let request = NewInterfaceAddress::new(
     )),
 );
 let observed = lattice.add_address(request)?;
+lattice.remove_address(observed)?;
+```
+
+### Добавление и удаление маршрута
+
+Изменение маршрута принимает типизированное значение маршрута. Используйте
+безопасный для хоста маршрут и удаляйте только тот маршрут, который приложение
+успешно создало:
+
+```rust
+let route = Route::new(RouteId::new(0), destination)
+    .with_interface_index(interface_index);
+lattice.add_route(route.clone())?;
+lattice.remove_route(route)?;
 ```
 
 ### Замена конфигурации резолвера
@@ -184,6 +220,23 @@ let requested = NewDnsConfig::with(
     vec!["example.test".to_string()],
 );
 let observed = lattice.set_dns_config(requested)?;
+```
+
+### Просмотр плана mutation
+
+В Stage 0.14 планы являются чистыми данными. Они делают существующие
+imperative операции inspectable без их применения; исполнение транзакций —
+работа Stage 0.15.
+
+```rust
+let plan = MutationPlan::from_operations([
+    Mutation::AddAddress(request),
+    Mutation::SetDnsConfig(requested_dns),
+]);
+
+for operation in plan.operations() {
+    println!("{operation:?}: {:?}", operation.semantics());
+}
 ```
 
 ## Дорожная карта

@@ -105,6 +105,27 @@ let watcher = lattice.watch_filtered(route_events)?;
 
 ## Examples
 
+The runnable sources in [`crates/net-lattice/examples`](crates/net-lattice/examples)
+cover every currently available facade operation. Read-only examples are safe to
+run; mutation examples require an explicit environment-variable opt-in and
+elevated operating-system privilege.
+
+| Scenario | Runnable example | Facade/API covered |
+|---|---|---|
+| Complete read-only state | [`snapshot`](crates/net-lattice/examples/snapshot.rs) | `capabilities`, `interfaces`, `routes`, `addresses`, `dns_config`, `neighbors` |
+| Runtime feature selection | [`capabilities`](crates/net-lattice/examples/capabilities.rs) | `capabilities`, `supports`, every current `Capability` flag |
+| Focused route read | [`list_routes`](crates/net-lattice/examples/list_routes.rs) | `routes` |
+| Bounded synchronous delivery | [`sync_monitor`](crates/net-lattice/examples/sync_monitor.rs) | `watch`, `recv_timeout`, `Event::ResyncRequired` |
+| Domain and object filtering | [`filtered_monitor`](crates/net-lattice/examples/filtered_monitor.rs) | `watch_filtered`, every `EventFilter` domain and object selector |
+| Native async delivery | [`async_monitor`](crates/net-lattice/examples/async_monitor.rs) | `watch_async`, `EventStream` |
+| Address lifecycle | [`address_assignment`](crates/net-lattice/examples/address_assignment.rs) | `NewInterfaceAddress`, `add_address`, `remove_address` |
+| Route lifecycle | [`route_mutation`](crates/net-lattice/examples/route_mutation.rs) | `Route`, `add_route`, `remove_route` |
+| Resolver replacement | [`dns_mutation`](crates/net-lattice/examples/dns_mutation.rs) | `NewDnsConfig`, `set_dns_config`, read-after-write verification |
+| Mutation inspection | [`mutation_plan`](crates/net-lattice/examples/mutation_plan.rs) | every `Mutation` variant, `Mutation::semantics`, `MutationPlan` |
+
+Run an example with `cargo run -p net-lattice --example <name>`. Add
+`--features async` for `async_monitor`.
+
 ### Inspecting and watching state
 
 ```rust
@@ -131,7 +152,7 @@ fn main() -> Result<()> {
 
 ### Async monitoring
 
-Enable the optional async facade with `net-lattice = { version = "0.13", features = ["async"] }`. It returns the same `futures::Stream` on each supported platform:
+Enable the optional async facade with `net-lattice = { version = "0.14", features = ["async"] }`. It returns the same `futures::Stream` on each supported platform:
 
 ```rust
 use futures::StreamExt;
@@ -169,6 +190,19 @@ let request = NewInterfaceAddress::new(
     )),
 );
 let observed = lattice.add_address(request)?;
+lattice.remove_address(observed)?;
+```
+
+### Adding and removing a route
+
+Route mutation accepts the typed route value. Use a route that is safe for the
+host and remove only a route that the application successfully created:
+
+```rust
+let route = Route::new(RouteId::new(0), destination)
+    .with_interface_index(interface_index);
+lattice.add_route(route.clone())?;
+lattice.remove_route(route)?;
 ```
 
 ### Replacing resolver configuration
@@ -184,6 +218,22 @@ let requested = NewDnsConfig::with(
     vec!["example.test".to_string()],
 );
 let observed = lattice.set_dns_config(requested)?;
+```
+
+### Inspecting a mutation plan
+
+Plans are pure data in Stage 0.14. They make existing imperative operations
+inspectable without applying them; transaction execution is Stage 0.15 work.
+
+```rust
+let plan = MutationPlan::from_operations([
+    Mutation::AddAddress(request),
+    Mutation::SetDnsConfig(requested_dns),
+]);
+
+for operation in plan.operations() {
+    println!("{operation:?}: {:?}", operation.semantics());
+}
 ```
 
 ## Roadmap
