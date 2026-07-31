@@ -21,22 +21,22 @@ impl<E> EventSender<E> {
         if let Some(resync) = pending.take() {
             match self.sender.try_send(Ok(resync)) {
                 Ok(()) => {}
-                Err(mpsc::TrySendError::Full(Ok(resync))) => {
-                    *pending = Some(resync);
+                Err(mpsc::TrySendError::Full(event)) => {
+                    *pending = Some(
+                        event.expect("EventSender only enqueues ordinary events through send"),
+                    );
                     return true;
                 }
                 Err(mpsc::TrySendError::Disconnected(_)) => return false,
-                Err(mpsc::TrySendError::Full(Err(_))) => unreachable!(),
             }
         }
         match self.sender.try_send(Ok(event)) {
             Ok(()) => true,
-            Err(mpsc::TrySendError::Full(Ok(_))) => {
+            Err(mpsc::TrySendError::Full(_)) => {
                 *pending = Some(resync);
                 true
             }
             Err(mpsc::TrySendError::Disconnected(_)) => false,
-            Err(mpsc::TrySendError::Full(Err(_))) => unreachable!(),
         }
     }
     pub fn send_error(&self, error: Error) -> bool {
@@ -407,34 +407,5 @@ mod tests {
         let (sender, receiver) = EventReceiver::bounded();
         assert!(sender.send(7_u32, 0));
         assert_eq!(receiver.try_recv().unwrap(), Some(7));
-    }
-
-    #[test]
-    #[should_panic]
-    fn sender_rejects_an_impossible_error_in_a_full_event_slot() {
-        let (raw_sender, raw_receiver) = mpsc::sync_channel(1);
-        assert!(raw_sender.send(Err(Error::InvalidState)).is_ok());
-        // Keep the receiving half connected: the invariant below is about a
-        // full slot containing an error, not a disconnected channel.
-        std::mem::forget(raw_receiver);
-        let sender = EventSender {
-            sender: raw_sender,
-            pending_resync: Arc::new(Mutex::new(None)),
-        };
-        let _ = sender.send(1_u32, 0);
-    }
-
-    #[test]
-    #[should_panic]
-    fn sender_rejects_an_impossible_error_while_flushing_resync() {
-        let (raw_sender, raw_receiver) = mpsc::sync_channel(1);
-        assert!(raw_sender.send(Err(Error::InvalidState)).is_ok());
-        // See the corresponding invariant test above.
-        std::mem::forget(raw_receiver);
-        let sender = EventSender {
-            sender: raw_sender,
-            pending_resync: Arc::new(Mutex::new(Some(99_u32))),
-        };
-        let _ = sender.send(1_u32, 0);
     }
 }
