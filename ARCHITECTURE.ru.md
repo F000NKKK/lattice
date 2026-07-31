@@ -8,10 +8,10 @@
 дизайна, лежащие в её основе. Он отражает предполагаемое направление, а не
 текущее состояние: см. [CHANGELOG.md](CHANGELOG.md) и [README.md](README.md)
 для того, что реально существует в репозитории на данный момент. На момент
-написания реализован этап 0.12 плана поэтапной поставки ниже: `net-lattice-core`,
+написания реализован этап 0.13 плана поэтапной поставки ниже: `net-lattice-core`,
 `net-lattice-ip`, модули `route`, `interface`, `dns`, `neighbor` и `ifaddr` в `net-lattice-model`,
-`RouteProvider`, `InterfaceProvider`, `DnsProvider`, `NeighborProvider`, `AddressProvider`, `AddressMutator`, `CapabilityProvider`, синхронный `EventProvider`, feature-gated `TokioEventProvider` и object/domain selectors `EventFilter` в `net-lattice-platform`,
-поддержка маршрутов, адресов интерфейсов, DNS, соседей (ARP/NDP) и нативного мониторинга событий в `net-lattice-backend-linux`,
+`RouteProvider`, `InterfaceProvider`, `DnsProvider`, `DnsMutator`, `NeighborProvider`, `AddressProvider`, `AddressMutator`, `CapabilityProvider`, синхронный `EventProvider`, feature-gated `TokioEventProvider` и object/domain selectors `EventFilter` в `net-lattice-platform`,
+поддержка маршрутов, адресов интерфейсов, DNS, соседей (ARP/NDP), нативного изменения маршрутов/адресов/DNS и нативного мониторинга событий в `net-lattice-backend-linux`,
 `net-lattice-backend-windows`, `net-lattice-backend-darwin`, crate потока
 событий `net-lattice-async` и feature-gated async-фасад — всё, что описано
 дальше этого этапа, по-прежнему только цель, а не текущее состояние.
@@ -535,8 +535,9 @@ provider-traits, а не другой контракт backend'а. Дорабо�
   просмотреть до выполнения и откатить, если шаг провалится.
 
 Ни один из этих типов пока не существует, и под них сейчас не создаётся ни
-одного крейта — они относятся к этапу 0.7+, как только появится достаточно
-императивной поверхности provider'ов, чтобы вычислять содержательный diff.
+одного крейта — они относятся к этапам 0.18–0.20, после стабилизации
+transaction-контрактов и оставшейся imperative mutation-поверхности, когда
+можно будет вычислять содержательный diff.
 Разделение state/config названо здесь — как параллельный тип `*Config` на
 каждый доменный объект, живущий рядом с его типом состояния в
 `net-lattice-model` — чтобы оно было заложено с первого типа `*Config`, а не

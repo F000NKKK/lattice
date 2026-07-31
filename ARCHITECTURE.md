@@ -7,14 +7,15 @@
 This document describes the planned workspace structure for Net Lattice and the
 design principles behind it. It reflects intended direction, not current
 state: see [CHANGELOG.md](CHANGELOG.md) and [README.md](README.md) for what
-actually exists in the repository today. As of this writing, Stage 0.12 of
+actually exists in the repository today. As of this writing, Stage 0.13 of
 the Incremental Delivery Plan below has landed: `net-lattice-core`,
 `net-lattice-ip`, `net-lattice-model`'s `route`, `interface`, `dns`,
 `neighbor`, and `ifaddr` modules, `net-lattice-platform`'s `RouteProvider`,
-`InterfaceProvider`, `DnsProvider`, `NeighborProvider`, and
+`InterfaceProvider`, `DnsProvider`, `DnsMutator`, `NeighborProvider`, and
 `AddressProvider`, `AddressMutator`, `CapabilityProvider`, synchronous `EventProvider`,
 feature-gated `TokioEventProvider`, and object/domain `EventFilter` selectors,
-route/interface-address/DNS/neighbor support and native event monitoring in
+route/interface-address/DNS/neighbor support, native route/address/DNS
+mutation, and native event monitoring in
 `net-lattice-backend-linux`, `net-lattice-backend-windows`, and
 `net-lattice-backend-darwin`, the `net-lattice-async` event stream crate, and
 the feature-gated async facade — everything past that stage is still a target,
@@ -530,8 +531,9 @@ architecture reserves room for it as:
   and rolled back if a step fails.
 
 None of these types exist yet, and no crate is created for them now — they
-belong to stage 0.7+ once enough of the imperative provider surface exists
-to compute a meaningful diff against. The state/config split is named here
+belong to stages 0.18–0.20, after the transaction and remaining imperative
+mutation contracts are stable enough to compute a meaningful diff against.
+The state/config split is named here
 — as a parallel `*Config` type per domain object living alongside its state
 type in `net-lattice-model` — so that it is built in from the first `*Config`
 type rather than retrofitted after `CurrentState`/`DesiredState` have

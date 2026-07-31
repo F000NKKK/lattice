@@ -130,7 +130,7 @@ fn main() -> Result<()> {
 
 ### Async monitoring
 
-Enable the optional async facade with `net-lattice = { version = "0.12", features = ["async"] }`. It returns the same `futures::Stream` on each supported platform:
+Enable the optional async facade with `net-lattice = { version = "0.13", features = ["async"] }`. It returns the same `futures::Stream` on each supported platform:
 
 ```rust
 use futures::StreamExt;

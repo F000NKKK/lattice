@@ -130,7 +130,7 @@ fn main() -> Result<()> {
 
 ### Асинхронный мониторинг
 
-Включите опциональный async-фасад через `net-lattice = { version = "0.12", features = ["async"] }`. На каждой поддерживаемой платформе он возвращает одинаковый `futures::Stream`:
+Включите опциональный async-фасад через `net-lattice = { version = "0.13", features = ["async"] }`. На каждой поддерживаемой платформе он возвращает одинаковый `futures::Stream`:
 
 ```rust
 use futures::StreamExt;
