@@ -4,7 +4,7 @@ Thank you for your interest in contributing to Net Lattice. This document descri
 
 ## Project Status
 
-Net Lattice has landed Stage 0.11 of its [architecture](ARCHITECTURE.md)'s Incremental Delivery Plan — route and interface-address mutation, interface, DNS-read, neighbor-read, address-read, bounded/filterable monitoring, and optional native async event delivery for Linux, Windows, and macOS. Most public API surface is still unbuilt. The most valuable contributions right now are:
+Net Lattice has landed Stage 0.12 of its [architecture](ARCHITECTURE.md)'s Incremental Delivery Plan — route and interface-address mutation, interface, DNS-read, neighbor-read, address-read, bounded object/domain-filterable monitoring, and optional native async event delivery for Linux, Windows, and macOS. Most public API surface is still unbuilt. The most valuable contributions right now are:
 
 - Feedback on the project's vision, scope, and roadmap (see [README.md](README.md))
 - Discussion of API design and architecture for upcoming stages
