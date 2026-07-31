@@ -28,6 +28,8 @@ pub use net_lattice_platform::{
     AddressMutator, AddressProvider, Capability, CapabilityProvider, DnsProvider, EventProvider,
     EventReceiver, InterfaceProvider, NeighborProvider, RouteProvider,
 };
+#[cfg(feature = "async")]
+pub use net_lattice_platform::TokioEventProvider;
 
 /// Bound satisfied by any backend usable with [`Lattice`].
 ///
@@ -133,9 +135,12 @@ impl<B: LatticeBackend> Lattice<B> {
     }
 
     #[cfg(feature = "async")]
-    pub fn watch_async(&self, filter: EventFilter) -> Result<EventStream<Event>> {
-        Ok(net_lattice_async::from_receiver(
-            self.backend.watch_filtered(filter)?,
+    pub fn watch_async(&self, filter: EventFilter) -> Result<EventStream<Event>>
+    where
+        B: TokioEventProvider<Event = Event, EventFilter = EventFilter>,
+    {
+        Ok(net_lattice_async::from_tokio_receiver(
+            self.backend.watch_tokio(filter)?,
         ))
     }
     
