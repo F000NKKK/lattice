@@ -493,7 +493,7 @@ mod tests {
     #[cfg(feature = "async")]
     #[test]
     fn async_facade_uses_the_backend_native_watcher_contract() {
-        use futures::StreamExt;
+        use futures::{FutureExt, StreamExt};
 
         futures::executor::block_on(async {
             let lattice = lattice(Capability::MONITORING);
