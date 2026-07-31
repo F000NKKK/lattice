@@ -546,6 +546,13 @@ mod tests {
 
     #[cfg(feature = "async")]
     #[test]
+    fn async_facade_enforces_monitoring_capability() {
+        let lattice = lattice(Capability::empty());
+        assert!(lattice.watch_async(EventFilter::ALL).is_err());
+    }
+
+    #[cfg(feature = "async")]
+    #[test]
     fn async_facade_uses_the_backend_native_watcher_contract() {
         use futures::{FutureExt, StreamExt};
 
