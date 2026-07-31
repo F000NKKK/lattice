@@ -1235,6 +1235,31 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn mutation_validation_and_resolver_errors_are_explicit() {
+        assert_eq!(
+            resolv_conf_error(&std::io::Error::from(std::io::ErrorKind::NotFound)),
+            Error::NotFound
+        );
+        assert_eq!(
+            resolv_conf_error(&std::io::Error::from(std::io::ErrorKind::PermissionDenied)),
+            Error::PermissionDenied
+        );
+        assert!(matches!(
+            resolv_conf_error(&std::io::Error::other("resolver failure")),
+            Error::Platform(PlatformErrorCode::Linux(_))
+        ));
+
+        let backend = LinuxBackend::new().expect("failed to open a Netlink connection");
+        let ipv6 = Network::from(net_lattice_ip::Ipv6Network::new(
+            net_lattice_ip::Ipv6Address::new([0x2001, 0xdb8, 0, 0, 0, 0, 0, 1]),
+            net_lattice_ip::Ipv6PrefixLength::new(64).unwrap(),
+        ));
+        let request = NewInterfaceAddress::new(Id::new(1), ipv6)
+            .with_broadcast(Ipv4Address::new(192, 0, 2, 255));
+        assert_eq!(backend.add_address(request), Err(Error::InvalidState));
+    }
+
     /// Reads the real `/etc/resolv.conf` present on this test environment.
     /// Every Linux system has one (even if empty/symlinked to
     /// systemd-resolved's stub), so this exercises the real filesystem read
