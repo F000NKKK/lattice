@@ -771,9 +771,12 @@ impl EventProvider for LinuxBackend {
     }
 }
 
-/// Native async monitoring reuses the backend's Tokio reactor and Netlink
-/// multicast socket directly. Unlike `net-lattice-async::from_receiver`, no
-/// blocking worker thread sits between the kernel notification and the stream.
+/// Native async monitoring uses the backend's Tokio reactor and Netlink
+/// multicast socket directly.
+///
+/// Unlike `net_lattice_async::from_receiver`, this implementation does not
+/// place a blocking worker thread between the kernel notification source and
+/// the returned stream.
 #[cfg(feature = "async")]
 impl TokioEventProvider for LinuxBackend {
     type Event = Event;
