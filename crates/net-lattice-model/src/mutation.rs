@@ -73,6 +73,15 @@ pub enum MutationConfirmation {
     ReadAfterWrite,
 }
 
+/// Privilege level required by the current native operation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum MutationPrivilege {
+    /// The operation changes operating-system network configuration and
+    /// requires the platform's elevated networking privilege.
+    Elevated,
+}
+
 /// Whether an operation can be safely compensated without prior state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
@@ -94,6 +103,8 @@ pub struct MutationSemantics {
     pub precondition: MutationPrecondition,
     /// Repetition behavior.
     pub idempotency: MutationIdempotency,
+    /// Privilege required to submit the operation.
+    pub privilege: MutationPrivilege,
     /// How successful completion is confirmed.
     pub confirmation: MutationConfirmation,
     /// Whether rollback can be promised by this primitive.
@@ -110,6 +121,7 @@ impl Mutation {
                 kind: MutationKind::AddRoute,
                 precondition: MutationPrecondition::Absent,
                 idempotency: MutationIdempotency::Strict,
+                privilege: MutationPrivilege::Elevated,
                 confirmation: MutationConfirmation::NativeAcknowledgement,
                 reversibility: MutationReversibility::RequiresPriorState,
                 may_partially_apply: false,
@@ -118,6 +130,7 @@ impl Mutation {
                 kind: MutationKind::RemoveRoute,
                 precondition: MutationPrecondition::Present,
                 idempotency: MutationIdempotency::Strict,
+                privilege: MutationPrivilege::Elevated,
                 confirmation: MutationConfirmation::NativeAcknowledgement,
                 reversibility: MutationReversibility::RequiresPriorState,
                 may_partially_apply: false,
@@ -126,6 +139,7 @@ impl Mutation {
                 kind: MutationKind::AddAddress,
                 precondition: MutationPrecondition::Absent,
                 idempotency: MutationIdempotency::Strict,
+                privilege: MutationPrivilege::Elevated,
                 confirmation: MutationConfirmation::ReadAfterWrite,
                 reversibility: MutationReversibility::RequiresPriorState,
                 may_partially_apply: false,
@@ -134,6 +148,7 @@ impl Mutation {
                 kind: MutationKind::RemoveAddress,
                 precondition: MutationPrecondition::Present,
                 idempotency: MutationIdempotency::Strict,
+                privilege: MutationPrivilege::Elevated,
                 confirmation: MutationConfirmation::NativeAcknowledgement,
                 reversibility: MutationReversibility::RequiresPriorState,
                 may_partially_apply: false,
@@ -142,6 +157,7 @@ impl Mutation {
                 kind: MutationKind::SetDnsConfig,
                 precondition: MutationPrecondition::Any,
                 idempotency: MutationIdempotency::Replace,
+                privilege: MutationPrivilege::Elevated,
                 confirmation: MutationConfirmation::ReadAfterWrite,
                 reversibility: MutationReversibility::NotGuaranteed,
                 may_partially_apply: true,
