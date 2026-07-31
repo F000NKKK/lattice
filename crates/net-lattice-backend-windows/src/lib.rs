@@ -1120,7 +1120,8 @@ impl DnsMutator for WindowsBackend {
     /// `GetAdaptersAddresses`; the global search list is updated too. Global
     /// and adapter settings are separate native calls, so a later adapter
     /// failure can leave an earlier update applied; callers must re-read
-    /// `dns_config` after an error.
+    /// [`DnsProvider::dns_config`] after an error. This operation does not
+    /// produce a DNS watcher event.
     fn set_dns_config(&self, config: Self::NewDnsConfig) -> Result<Self::DnsConfig> {
         let nameservers = nul_terminated_wide(&config_list(&config.nameservers));
         let search_domains = nul_terminated_wide(&config.search_domains.join(","));

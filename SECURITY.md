@@ -8,8 +8,8 @@ for the 0.1.x-0.10.x series has ended — upgrade to 0.11.x to receive fixes.
 
 | Version | Supported |
 | ------- | --------- |
-| 0.11.x | ✅ |
-| 0.1.0 - 0.11.1 | ❌ |
+| 0.13.x | ✅ |
+| 0.1.x - 0.12.x | ❌ |
 
 ## Reporting a Vulnerability
 

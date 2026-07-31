@@ -847,11 +847,14 @@ impl DnsProvider for LinuxBackend {
 impl DnsMutator for LinuxBackend {
     type NewDnsConfig = NewDnsConfig;
 
+    /// Replaces the active global `/etc/resolv.conf` resolver view.
+    ///
+    /// Only portable nameserver and search directives are rendered; other
+    /// directives are not retained. Linux resolver managers can later replace
+    /// the file, and this operation does not produce a DNS watcher event.
+    /// Failure may leave a partially written file, so callers must re-read
+    /// [`DnsProvider::dns_config`] after an error.
     fn set_dns_config(&self, config: Self::NewDnsConfig) -> Result<Self::DnsConfig> {
-        // `write` replaces the resolver-file contents and does not preserve
-        // directives outside Net Lattice's portable model. A write failure can
-        // leave a partial file; the trait therefore requires callers to
-        // re-read observed state after an error.
         write_resolv_conf(std::path::Path::new("/etc/resolv.conf"), &config)?;
         self.dns_config()
     }
