@@ -10,6 +10,7 @@ pub mod event;
 pub mod ifaddr;
 pub mod interface;
 pub mod mac;
+pub mod mutation;
 pub mod neighbor;
 pub mod route;
 
@@ -19,5 +20,9 @@ pub use event::{ChangeKind, Event, EventDomain, EventFilter};
 pub use ifaddr::{InterfaceAddress, InterfaceAddressId, NewInterfaceAddress};
 pub use interface::{AdminState, Interface, InterfaceId, InterfaceKind, OperationalState};
 pub use mac::MacAddress;
+pub use mutation::{
+    Mutation, MutationConfirmation, MutationIdempotency, MutationKind, MutationPlan,
+    MutationPrecondition, MutationReversibility, MutationSemantics,
+};
 pub use neighbor::{NeighborEntry, NeighborId, NeighborState};
 pub use route::Route;
