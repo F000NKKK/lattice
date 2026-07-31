@@ -1161,6 +1161,63 @@ mod tests {
     }
 
     #[test]
+    fn netlink_interface_and_neighbor_mappings_cover_all_known_states() {
+        assert_eq!(
+            link_layer_type_to_kind(LinkLayerType::Ether),
+            InterfaceKind::Ethernet
+        );
+        assert_eq!(
+            link_layer_type_to_kind(LinkLayerType::Loopback),
+            InterfaceKind::Loopback
+        );
+        assert_eq!(
+            link_layer_type_to_kind(LinkLayerType::Ppp),
+            InterfaceKind::PointToPoint
+        );
+        assert_eq!(
+            link_layer_type_to_kind(LinkLayerType::Ieee80211),
+            InterfaceKind::Wireless
+        );
+        assert_eq!(
+            link_layer_type_to_kind(LinkLayerType::Ieee80211Prism),
+            InterfaceKind::Wireless
+        );
+        assert_eq!(
+            link_layer_type_to_kind(LinkLayerType::Ieee80211Radiotap),
+            InterfaceKind::Wireless
+        );
+        assert!(matches!(
+            link_layer_type_to_kind(LinkLayerType::Netrom),
+            InterfaceKind::Other(_)
+        ));
+
+        assert_eq!(
+            neighbour_state_to_state(RtNeighbourState::Incomplete),
+            NeighborState::Incomplete
+        );
+        assert_eq!(
+            neighbour_state_to_state(RtNeighbourState::Stale),
+            NeighborState::Stale
+        );
+        assert_eq!(
+            neighbour_state_to_state(RtNeighbourState::Delay),
+            NeighborState::Delay
+        );
+        assert_eq!(
+            neighbour_state_to_state(RtNeighbourState::Probe),
+            NeighborState::Probe
+        );
+        assert_eq!(
+            neighbour_state_to_state(RtNeighbourState::Permanent),
+            NeighborState::Permanent
+        );
+        assert_eq!(
+            neighbour_state_to_state(RtNeighbourState::Noarp),
+            NeighborState::Unknown
+        );
+    }
+
+    #[test]
     fn netlink_event_mapper_covers_every_supported_domain_and_change_kind() {
         let route = RouteMessageBuilder::<std::net::Ipv4Addr>::new()
             .destination_prefix(std::net::Ipv4Addr::new(198, 51, 100, 0), 24)
