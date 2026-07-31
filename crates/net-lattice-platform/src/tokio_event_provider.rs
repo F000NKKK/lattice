@@ -202,6 +202,20 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(expected = "Tokio event sender poisoned")]
+    fn poisoned_tokio_receiver_mutex_is_reported() {
+        let (sender, mut receiver) = TokioEventReceiver::<u32>::bounded();
+        let terminal_error = Arc::clone(&receiver.terminal_error);
+        let _ = std::thread::spawn(move || {
+            let _guard = terminal_error.lock().unwrap();
+            panic!("poison Tokio receiver");
+        })
+        .join();
+        drop(sender);
+        let _ = poll(&mut receiver);
+    }
+
+    #[test]
     fn pending_resync_stays_pending_while_the_tokio_channel_is_full() {
         let (sender, _receiver) = TokioEventReceiver::bounded();
         for event in 0..EventReceiverCapacity::VALUE {

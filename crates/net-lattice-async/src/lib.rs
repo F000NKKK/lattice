@@ -198,4 +198,16 @@ mod tests {
         let (_sender, receiver) = TokioEventReceiver::<u8>::bounded();
         drop(from_tokio_receiver(receiver));
     }
+
+    #[test]
+    fn dropping_a_stream_ignores_a_worker_join_error() {
+        let (_sender, receiver) = TokioEventReceiver::<u8>::bounded();
+        let worker = std::thread::spawn(|| panic!("worker terminated unexpectedly"));
+        let stream = EventStream {
+            receiver: EventStreamReceiver::Tokio(receiver),
+            stop: Arc::new(AtomicBool::new(false)),
+            worker: Some(worker),
+        };
+        drop(stream);
+    }
 }
