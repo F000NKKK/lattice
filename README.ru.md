@@ -76,13 +76,22 @@ Net Lattice призвана закрыть этот пробел, предос�
 - `net-lattice-core`, `net-lattice-ip`
 - модули `route`, `mac`, `interface`, `dns`, `neighbor`, `ifaddr` и `event` в `net-lattice-model`; `NewInterfaceAddress` выражает намерение назначить адрес отдельно от наблюдаемого `InterfaceAddress`
 - `RouteProvider`, `InterfaceProvider`, `DnsProvider`, `NeighborProvider`, `AddressProvider`, `AddressMutator`, `CapabilityProvider`, синхронные `EventProvider`/bounded `EventReceiver` и опциональная async-поддержка мониторинга в `net-lattice-platform`
-- `net-lattice-backend-linux` (маршруты, интерфейсы, соседи, чтение и изменение адресов и мониторинг через Netlink; DNS через `/etc/resolv.conf`)
-- `net-lattice-backend-windows` (маршруты и интерфейсы через Windows IP Helper API, DNS через `GetAdaptersAddresses`, соседи через `GetIpNetTable2`, чтение и изменение адресов через unicast-address API IP Helper, мониторинг через уведомления IP Helper)
-- `net-lattice-backend-darwin` (маршруты, соседи и мониторинг через BSD routing facilities в macOS; интерфейсы и чтение адресов через `getifaddrs`; изменение адресов через нативные address ioctl; DNS через `/etc/resolv.conf`)
 - `net-lattice-async`, предоставляющий единый runtime-agnostic тип `EventStream`
 - фасад `net-lattice`, включая `Lattice::add_address()`, `Lattice::remove_address()`, `Lattice::capabilities()`, `Lattice::supports()`, `Lattice::watch()` и feature-gated `Lattice::watch_async()`
 
 Это даёт реальное управление маршрутами и IP-адресами интерфейсов, просмотр интерфейсов, чтение DNS-конфигурации резолвера, чтение таблиц соседей (ARP/NDP) и bounded-мониторинг сетевых изменений на Linux, Windows и macOS. Создание адреса принимает `NewInterfaceAddress` и возвращает результирующий наблюдаемый `InterfaceAddress`, поэтому потребитель не конструирует ID адреса самостоятельно. `Lattice::watch_filtered(EventFilter::none().routes())` ограничивает доставляемые домены. В переносимом коде перед watching проверяйте `Lattice::supports(Capability::MONITORING)`. Опциональная feature `async` в `net-lattice` использует и реэкспортирует реализацию `EventStream` из `net-lattice-async`; приложению достаточно включить эту feature фасада. `Lattice::watch_async(filter)` предоставляет одинаковый API `EventStream` на всех платформах. Tokio используется внутри там, где этого требует нативная реализация, а приложения взаимодействуют только с runtime-independent интерфейсом `futures::Stream`. Это всё ещё не полноценная библиотека: изменение DNS, VLAN, VRF, namespaces, интеграция с firewall, транзакционная конфигурация, декларативная настройка сети и другие продвинутые возможности ещё впереди; см. [ARCHITECTURE.ru.md](ARCHITECTURE.ru.md) для поэтапной дорожной карты и [CHANGELOG.md](CHANGELOG.md) для того, что реально вышло.
+
+| Возможность | Linux | Windows | macOS |
+|---|:---:|:---:|:---:|
+| Просмотр маршрутов | ✅ | ✅ | ✅ |
+| Изменение маршрутов | ✅ | ✅ | ✅ |
+| Просмотр интерфейсов | ✅ | ✅ | ✅ |
+| Просмотр адресов интерфейсов | ✅ | ✅ | ✅ |
+| Изменение адресов интерфейсов | ✅ | ✅ | ✅ |
+| Просмотр соседей | ✅ | ✅ | ✅ |
+| Просмотр DNS-резолвера | ✅ | ✅ | ✅ |
+| Мониторинг изменений | ✅ | ✅ | ✅ |
+| Асинхронный мониторинг изменений | ✅ | ✅ | ✅ |
 
 ### Доставка событий
 
