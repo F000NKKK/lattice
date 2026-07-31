@@ -28,12 +28,16 @@ pub enum EventDomain {
 }
 
 /// Selects which domains an event watcher delivers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct EventFilter {
     routes: bool,
     interfaces: bool,
     neighbors: bool,
     addresses: bool,
+    route_ids: Option<Vec<RouteId>>,
+    interface_ids: Option<Vec<InterfaceId>>,
+    neighbor_ids: Option<Vec<NeighborId>>,
+    address_ids: Option<Vec<InterfaceAddressId>>,
 }
 
 impl EventFilter {
@@ -42,6 +46,10 @@ impl EventFilter {
         interfaces: true,
         neighbors: true,
         addresses: true,
+        route_ids: None,
+        interface_ids: None,
+        neighbor_ids: None,
+        address_ids: None,
     };
     pub const fn none() -> Self {
         Self {
@@ -49,6 +57,10 @@ impl EventFilter {
             interfaces: false,
             neighbors: false,
             addresses: false,
+            route_ids: None,
+            interface_ids: None,
+            neighbor_ids: None,
+            address_ids: None,
         }
     }
     pub const fn routes(mut self) -> Self {
@@ -67,12 +79,47 @@ impl EventFilter {
         self.addresses = true;
         self
     }
-    pub const fn matches(self, event: Event) -> bool {
+
+    /// Narrows route delivery to `id`. Repeated object selectors compose as
+    /// a union within their domain.
+    pub fn route(mut self, id: RouteId) -> Self {
+        self.routes = true;
+        add_selector(&mut self.route_ids, id);
+        self
+    }
+    /// Narrows interface delivery to `id`.
+    pub fn interface(mut self, id: InterfaceId) -> Self {
+        self.interfaces = true;
+        add_selector(&mut self.interface_ids, id);
+        self
+    }
+    /// Narrows neighbor delivery to `id`.
+    pub fn neighbor(mut self, id: NeighborId) -> Self {
+        self.neighbors = true;
+        add_selector(&mut self.neighbor_ids, id);
+        self
+    }
+    /// Narrows interface-address delivery to `id`.
+    pub fn address(mut self, id: InterfaceAddressId) -> Self {
+        self.addresses = true;
+        add_selector(&mut self.address_ids, id);
+        self
+    }
+
+    /// Whether this filter selects at least one event domain.
+    pub const fn is_empty(&self) -> bool {
+        !self.routes && !self.interfaces && !self.neighbors && !self.addresses
+    }
+
+    /// Whether this filter delivers `event`. Object selectors are applied
+    /// before a backend enqueues an ordinary event. A resynchronization event
+    /// has no object ID, so it is selected by its affected domain.
+    pub fn matches(&self, event: Event) -> bool {
         match event {
-            Event::Route { .. } => self.routes,
-            Event::Interface { .. } => self.interfaces,
-            Event::Neighbor { .. } => self.neighbors,
-            Event::Address { .. } => self.addresses,
+            Event::Route { id, .. } => self.routes && selected(&self.route_ids, id),
+            Event::Interface { id, .. } => self.interfaces && selected(&self.interface_ids, id),
+            Event::Neighbor { id, .. } => self.neighbors && selected(&self.neighbor_ids, id),
+            Event::Address { id, .. } => self.addresses && selected(&self.address_ids, id),
             Event::ResyncRequired { domain } => match domain {
                 EventDomain::Route => self.routes,
                 EventDomain::Interface => self.interfaces,
@@ -84,6 +131,19 @@ impl EventFilter {
             },
         }
     }
+}
+
+fn add_selector<T: PartialEq>(selectors: &mut Option<Vec<T>>, value: T) {
+    let selectors = selectors.get_or_insert_with(Vec::new);
+    if !selectors.contains(&value) {
+        selectors.push(value);
+    }
+}
+
+fn selected<T: PartialEq>(selectors: &Option<Vec<T>>, value: T) -> bool {
+    selectors
+        .as_ref()
+        .is_none_or(|selectors| selectors.contains(&value))
 }
 impl Default for EventFilter {
     fn default() -> Self {
@@ -170,5 +230,35 @@ mod tests {
                 kind: ChangeKind::Removed,
             }
         );
+    }
+
+    #[test]
+    fn object_selectors_compose_without_leaking_other_objects() {
+        let filter = EventFilter::none()
+            .route(RouteId::new(1))
+            .route(RouteId::new(2));
+        assert!(filter.matches(Event::Route {
+            id: RouteId::new(1),
+            kind: ChangeKind::Changed,
+        }));
+        assert!(filter.matches(Event::Route {
+            id: RouteId::new(2),
+            kind: ChangeKind::Changed,
+        }));
+        assert!(!filter.matches(Event::Route {
+            id: RouteId::new(3),
+            kind: ChangeKind::Changed,
+        }));
+    }
+
+    #[test]
+    fn resync_is_selected_by_domain_even_for_object_filter() {
+        let filter = EventFilter::none().route(RouteId::new(1));
+        assert!(filter.matches(Event::ResyncRequired {
+            domain: EventDomain::Route,
+        }));
+        assert!(!filter.matches(Event::ResyncRequired {
+            domain: EventDomain::Address,
+        }));
     }
 }
