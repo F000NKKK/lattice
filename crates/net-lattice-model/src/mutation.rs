@@ -7,6 +7,7 @@
 use crate::dns::NewDnsConfig;
 use crate::ifaddr::{InterfaceAddress, NewInterfaceAddress};
 use crate::route::Route;
+use net_lattice_core::Error;
 
 /// One existing imperative network mutation expressed as data.
 ///
@@ -173,6 +174,106 @@ impl Mutation {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct MutationPlan {
     operations: Vec<Mutation>,
+}
+
+/// The result recorded for one operation in an applied mutation plan.
+///
+/// These values describe an executor's report; constructing a plan or a
+/// report never changes operating-system state. `Failed` deliberately keeps
+/// whether the operation may have taken effect separate from the error so a
+/// caller can decide whether a fresh read is required.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum MutationOutcome {
+    /// The backend acknowledged the operation according to its contract.
+    Applied,
+    /// The operation returned an error.
+    Failed {
+        /// Backend error returned by the operation.
+        error: Error,
+        /// Whether the operation may have changed state before failing.
+        may_have_applied: bool,
+    },
+    /// The executor did not attempt this operation because an earlier
+    /// operation failed or execution was cancelled.
+    NotAttempted,
+}
+
+/// Status of compensation attempted after a plan failure.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum RollbackStatus {
+    /// No operation failed, so rollback was not needed.
+    NotNeeded,
+    /// A rollback boundary exists, but compensation was not attempted.
+    NotAttempted,
+    /// Compensation completed for the operations selected by the executor.
+    Completed,
+    /// Compensation itself failed.
+    Failed {
+        /// Index of the operation whose compensation failed.
+        operation_index: usize,
+        /// Error returned by the compensation attempt.
+        error: Error,
+    },
+}
+
+/// Executor report for an ordered [`MutationPlan`].
+///
+/// A report is intentionally not called a transaction: operations may have
+/// been partially applied, and rollback is reported separately rather than
+/// implied. Callers should re-read affected state whenever an outcome says
+/// that application was possible or rollback was not completed.
+#[derive(Debug)]
+pub struct MutationPlanReport {
+    outcomes: Vec<MutationOutcome>,
+    rollback: RollbackStatus,
+}
+
+impl MutationPlanReport {
+    /// Creates a report for outcomes in the plan's declared order.
+    pub fn new(
+        outcomes: impl IntoIterator<Item = MutationOutcome>,
+        rollback: RollbackStatus,
+    ) -> Self {
+        Self {
+            outcomes: outcomes.into_iter().collect(),
+            rollback,
+        }
+    }
+
+    /// Returns one outcome for each operation attempted or skipped.
+    pub fn outcomes(&self) -> &[MutationOutcome] {
+        &self.outcomes
+    }
+
+    /// Returns the rollback status recorded by the executor.
+    pub fn rollback(&self) -> &RollbackStatus {
+        &self.rollback
+    }
+
+    /// Whether every recorded operation was applied successfully.
+    pub fn is_success(&self) -> bool {
+        self.outcomes
+            .iter()
+            .all(|outcome| matches!(outcome, MutationOutcome::Applied))
+    }
+
+    /// Number of operations recorded as applied.
+    pub fn applied_count(&self) -> usize {
+        self.outcomes
+            .iter()
+            .filter(|outcome| matches!(outcome, MutationOutcome::Applied))
+            .count()
+    }
+
+    /// Number of operations the executor did not attempt.
+    pub fn not_attempted_count(&self) -> usize {
+        self.outcomes
+            .iter()
+            .filter(|outcome| matches!(outcome, MutationOutcome::NotAttempted))
+            .count()
+    }
 }
 
 impl MutationPlan {
@@ -355,5 +456,32 @@ mod tests {
         plan.push(operation.clone());
         assert_eq!(plan.operations(), std::slice::from_ref(&operation));
         assert_eq!(plan.into_iter().collect::<Vec<_>>(), vec![operation]);
+    }
+
+    #[test]
+    fn plan_report_preserves_partial_failure_and_rollback_boundary() {
+        let report = MutationPlanReport::new(
+            [
+                MutationOutcome::Applied,
+                MutationOutcome::Failed {
+                    error: Error::PermissionDenied,
+                    may_have_applied: true,
+                },
+                MutationOutcome::NotAttempted,
+            ],
+            RollbackStatus::NotAttempted,
+        );
+
+        assert!(!report.is_success());
+        assert_eq!(report.applied_count(), 1);
+        assert_eq!(report.not_attempted_count(), 1);
+        assert!(matches!(report.rollback(), RollbackStatus::NotAttempted));
+        assert!(matches!(
+            &report.outcomes()[1],
+            MutationOutcome::Failed {
+                may_have_applied: true,
+                ..
+            }
+        ));
     }
 }
