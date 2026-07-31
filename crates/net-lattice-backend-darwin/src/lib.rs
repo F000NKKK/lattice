@@ -2289,12 +2289,36 @@ mod tests {
         });
         #[cfg(feature = "async")]
         let async_observed = tokio_route_event(&mut async_watcher, watched_id);
+        let selected_watcher = backend
+            .watch_filtered(EventFilter::none().route(watched_id))
+            .expect("failed to open selected PF_ROUTE watcher");
+        #[cfg(feature = "async")]
+        let mut selected_async_watcher = backend
+            .watch_tokio(EventFilter::none().route(watched_id))
+            .expect("failed to open selected async PF_ROUTE watcher");
         let _ = backend.remove_route(route);
+        let selected_observed = (0..12).any(|_| {
+            matches!(
+                selected_watcher.recv_timeout(Duration::from_millis(250)),
+                Ok(Some(Event::Route { id, kind: ChangeKind::Removed })) if id == watched_id
+            )
+        });
+        #[cfg(feature = "async")]
+        let selected_async_observed = tokio_route_event(&mut selected_async_watcher, watched_id);
         assert!(observed, "watch() did not report the route mutation");
+        assert!(
+            selected_observed,
+            "object route filter did not report removal"
+        );
         #[cfg(feature = "async")]
         assert!(
             async_observed,
             "watch_tokio() did not report the route mutation"
+        );
+        #[cfg(feature = "async")]
+        assert!(
+            selected_async_observed,
+            "async object route filter did not report removal"
         );
     }
 }
