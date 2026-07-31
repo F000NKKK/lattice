@@ -1004,7 +1004,7 @@ mod tests {
             assert!(!sender.send(Event::resync_all(), Event::resync_all));
             assert!(!sender.send_error(Error::Disconnected));
 
-            let (sender, mut receiver) = TokioEventReceiver::bounded();
+            let (sender, mut receiver) = TokioEventReceiver::<Event>::bounded();
             assert!(sender.send_error(Error::InvalidState));
             drop(sender);
             assert!(matches!(
