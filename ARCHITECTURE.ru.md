@@ -8,10 +8,10 @@
 дизайна, лежащие в её основе. Он отражает предполагаемое направление, а не
 текущее состояние: см. [CHANGELOG.md](CHANGELOG.md) и [README.md](README.md)
 для того, что реально существует в репозитории на данный момент. На момент
-написания реализован этап 0.13 плана поэтапной поставки ниже: `net-lattice-core`,
-`net-lattice-ip`, модули `route`, `interface`, `dns`, `neighbor` и `ifaddr` в `net-lattice-model`,
+написания реализован этап 0.14 плана поэтапной поставки ниже: `net-lattice-core`,
+`net-lattice-ip`, модули `route`, `interface`, `dns`, `neighbor`, `ifaddr` и `mutation` в `net-lattice-model`,
 `RouteProvider`, `InterfaceProvider`, `DnsProvider`, `DnsMutator`, `NeighborProvider`, `AddressProvider`, `AddressMutator`, `CapabilityProvider`, синхронный `EventProvider`, feature-gated `TokioEventProvider` и object/domain selectors `EventFilter` в `net-lattice-platform`,
-поддержка маршрутов, адресов интерфейсов, DNS, соседей (ARP/NDP), нативного изменения маршрутов/адресов/DNS и нативного мониторинга событий в `net-lattice-backend-linux`,
+поддержка маршрутов, адресов интерфейсов, DNS, соседей (ARP/NDP), нативного изменения маршрутов/адресов/DNS, inspectable mutation plans и нативного мониторинга событий в `net-lattice-backend-linux`,
 `net-lattice-backend-windows`, `net-lattice-backend-darwin`, crate потока
 событий `net-lattice-async` и feature-gated async-фасад — всё, что описано
 дальше этого этапа, по-прежнему только цель, а не текущее состояние.
@@ -547,7 +547,7 @@ transaction-контрактов и оставшейся imperative mutation-п�
 ## Контракт mutation и событий до транзакций
 
 Текущий imperative API полезен, но ещё не является atomic configuration
-engine. На Stage 0.14 нужно превратить следующее наблюдаемое поведение в
+engine. Stage 0.14 превращает следующее наблюдаемое поведение в
 явные метаданные операций, прежде чем transaction API сможет давать более
 сильные обещания.
 
@@ -585,7 +585,7 @@ application; и безопасна ли compensating operation. `ApplyPlan` мо
   Поэтому `ChangeKind::Changed` — консервативный результат, когда ОС не
   предоставляет однозначный lifecycle transition.
 
-Stages 0.14–0.20 должны строить transactions и declarative apply поверх этих
+Stages 0.15–0.20 должны строить transactions и declarative apply поверх этих
 ограничений, а не задним числом обещать atomicity или event guarantees,
 которых не предоставляют native sources.
 
@@ -660,7 +660,7 @@ Stages 0.14–0.20 должны строить transactions и declarative apply
 | 0.11 ✅ | Опциональная feature `async` в `net-lattice`; `net-lattice-async` предоставляет один runtime-agnostic `EventStream`, а Linux (Tokio Netlink), Windows (callbacks IP Helper) и macOS (reader PF_ROUTE) доставляют события прямо в bounded Tokio transports. |
 | 0.12 ✅ | Стабилизация API watcher'ов: composable object/domain filters до помещения в очередь, validation capability мониторинга и одинаковая sync/async семантика filter без изменения опубликованного API 0.11. |
 | 0.13 ✅ | Изменение DNS с моделью intent/observed state: `NewDnsConfig` применяется через поддерживаемые системные механизмы, а результирующий `DnsConfig` повторно читается на Linux, Windows и macOS. |
-| 0.14 | Модель mutation-операций: типизированное inspectable-представление уже существующих изменений routes/addresses/DNS; явные классификации preconditions, idempotency, privileges и reversibility. Никакого неявного обещания rollback. |
+| 0.14 ✅ | Модель mutation-операций: inspectable значения `Mutation` и упорядоченные `MutationPlan` для существующих изменений routes/addresses/DNS; явные классификации preconditions, idempotency, privileges, confirmation, partial application и reversibility. Планы не имеют side effects исполнения или rollback. |
 | 0.15 | Исполнение транзакций: упорядоченные планы, результаты каждой операции, сообщения об ошибках, границы cancellation и best-effort compensation только там, где операция документирована как reversible. Native integration tests закрепляют одинаковый контракт на Linux, Windows и macOS. |
 | 0.16 | Конфигурация интерфейсов: desired interface configuration отдельно от наблюдаемого `Interface`; capability-gated изменение admin state и MTU с паритетом платформ и семантикой событий. |
 | 0.17 | Изменение соседей: intent/observed-типы и capability-gated управление статическими ARP/NDP-записями. Это завершает mutation-аналог существующей read-модели соседей. |

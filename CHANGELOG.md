@@ -36,6 +36,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.12.3] - 2026-07-31
 
+### Added
+
+- Stage 0.12 watcher API stabilization: `EventFilter` object selectors for
+  routes, interfaces, neighbors, and interface addresses; filters are applied
+  before ordinary events enter backend queues.
+- Stage 0.11 `Lattice::watch_async(filter)` now shares the object/domain
+  filter semantics of `Lattice::watch_filtered(filter)` without a duplicate
+  async watcher entry point.
+
+### Tests
+
+- Add lifecycle and regression coverage for subscription-guard replacement,
+  receiver drop, iterator error termination, and zero-capacity rejection.
+
+### Changed
+
+- Facade watcher entry points now validate `Capability::MONITORING` before
+  opening a native subscription and return `Error::Unsupported` when absent.
+
 ### Documentation
 
 - Document `EventReceiver` bounded delivery, cancellation, timeout,
@@ -46,27 +65,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   synchronous receiver adaptation; add watcher-oriented rustdoc examples.
 - Clarify the observed resolver-view semantics of `DnsConfig` and the
   portable-runtime contract of `Capability`.
-
-### Tests
-
-- Add lifecycle and regression coverage for subscription-guard replacement,
-  receiver drop, iterator error termination, and zero-capacity rejection.
-
-## [0.12.2] - 2026-07-31
-
-### Added
-
-- Stage 0.12 watcher API stabilization: `EventFilter` object selectors for
-  routes, interfaces, neighbors, and interface addresses; filters are applied
-  before ordinary events enter backend queues.
-- Stage 0.11 `Lattice::watch_async(filter)` now shares the object/domain
-  filter semantics of `Lattice::watch_filtered(filter)` without a duplicate
-  async watcher entry point.
-
-### Changed
-
-- Facade watcher entry points now validate `Capability::MONITORING` before
-  opening a native subscription and return `Error::Unsupported` when absent.
 
 ## [0.11.0] - 2026-07-31
 

@@ -7,15 +7,15 @@
 This document describes the planned workspace structure for Net Lattice and the
 design principles behind it. It reflects intended direction, not current
 state: see [CHANGELOG.md](CHANGELOG.md) and [README.md](README.md) for what
-actually exists in the repository today. As of this writing, Stage 0.13 of
+actually exists in the repository today. As of this writing, Stage 0.14 of
 the Incremental Delivery Plan below has landed: `net-lattice-core`,
 `net-lattice-ip`, `net-lattice-model`'s `route`, `interface`, `dns`,
-`neighbor`, and `ifaddr` modules, `net-lattice-platform`'s `RouteProvider`,
+`neighbor`, `ifaddr`, and `mutation` modules, `net-lattice-platform`'s `RouteProvider`,
 `InterfaceProvider`, `DnsProvider`, `DnsMutator`, `NeighborProvider`, and
 `AddressProvider`, `AddressMutator`, `CapabilityProvider`, synchronous `EventProvider`,
 feature-gated `TokioEventProvider`, and object/domain `EventFilter` selectors,
 route/interface-address/DNS/neighbor support, native route/address/DNS
-mutation, and native event monitoring in
+mutation, inspectable mutation plans, and native event monitoring in
 `net-lattice-backend-linux`, `net-lattice-backend-windows`, and
 `net-lattice-backend-darwin`, the `net-lattice-async` event stream crate, and
 the feature-gated async facade — everything past that stage is still a target,
@@ -542,7 +542,7 @@ already been conflated into one type.
 ## Mutation and Event Contract Before Transactions
 
 The current imperative API is useful, but it is not an atomic configuration
-engine. Stage 0.14 must turn the following observed behavior into explicit
+engine. Stage 0.14 turns the following observed behavior into explicit
 operation metadata before a transaction API can make stronger promises.
 
 | Domain | Current mutation contract | Required normalization before declarative apply |
@@ -580,7 +580,7 @@ Event delivery is deliberately a separate, eventually consistent signal path:
   `ChangeKind::Changed` is therefore the conservative result where the OS
   does not provide an unambiguous lifecycle transition.
 
-Stages 0.14–0.20 must build transactions and declarative apply on these
+Stages 0.15–0.20 must build transactions and declarative apply on these
 constraints rather than retroactively claiming atomicity or event guarantees
 that the native sources do not provide.
 
@@ -654,7 +654,7 @@ are introduced only when there is real implementation work for them:
 | 0.11 ✅ | Optional `net-lattice` `async` feature; `net-lattice-async` exposes one runtime-agnostic `EventStream`, while Linux (Tokio Netlink), Windows (IP Helper callbacks), and macOS (PF_ROUTE reader) deliver directly into bounded Tokio transports. |
 | 0.12 ✅ | Watcher API stabilization: composable object/domain filters applied before enqueueing, monitoring-capability validation, and consistent synchronous/async filter semantics without changing the released 0.11 API. |
 | 0.13 ✅ | DNS mutation with an intent/observed-state model: `NewDnsConfig` is applied through supported system mechanisms and the resulting `DnsConfig` is re-read on Linux, Windows, and macOS. |
-| 0.14 | Mutation operation model: an inspectable, typed representation of the existing route/address/DNS mutations; explicit preconditions, idempotency, privilege, and reversibility classifications. No implicit rollback promise. |
+| 0.14 ✅ | Mutation operation model: inspectable `Mutation` values and ordered `MutationPlan`s for existing route/address/DNS mutations; explicit preconditions, idempotency, privilege, confirmation, partial-application, and reversibility classifications. Plans have no execution or rollback side effects. |
 | 0.15 | Transaction execution: ordered plans, per-operation outcomes, failure reporting, cancellation boundaries, and best-effort compensation only where an operation is documented as reversible. Native integration tests establish the same contract on Linux, Windows, and macOS. |
 | 0.16 | Interface configuration: separate desired interface configuration from observed `Interface`; capability-gated admin-state and MTU mutation with platform parity and event semantics. |
 | 0.17 | Neighbor mutation: intent/observed types and capability-gated static ARP/NDP entry management. This completes the mutation counterpart of the existing neighbor read model. |
