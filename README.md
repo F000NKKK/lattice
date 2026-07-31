@@ -17,7 +17,7 @@
 
 **Net Lattice** is a modern, cross-platform Rust library for configuring and inspecting operating system networking through a single, strongly typed API.
 
-> **Status:** Net Lattice provides cross-platform network inspection, route and address mutation, and synchronous change monitoring with an optional async interface through native operating-system APIs on Linux, Windows, and macOS. Stage 0.11 of the architecture plan has shipped; see Current Status below.
+> **Status:** Net Lattice provides cross-platform network inspection, route and address mutation, and synchronous change monitoring with an optional async interface through native operating-system APIs on Linux, Windows, and macOS. Stage 0.12 of the architecture plan has shipped; see Current Status below.
 
 ## Overview
 
@@ -71,15 +71,15 @@ Planned:
 
 ## Current Status
 
-Stage 0.11 of the [architecture](ARCHITECTURE.md)'s Incremental Delivery Plan has landed:
+Stage 0.12 of the [architecture](ARCHITECTURE.md)'s Incremental Delivery Plan has landed:
 
 - `net-lattice-core`, `net-lattice-ip`
 - `net-lattice-model`'s `route`, `mac`, `interface`, `dns`, `neighbor`, `ifaddr`, and `event` modules; `NewInterfaceAddress` expresses address-assignment intent separately from an observed `InterfaceAddress`
 - `net-lattice-platform`'s `RouteProvider`, `InterfaceProvider`, `DnsProvider`, `NeighborProvider`, `AddressProvider`, `AddressMutator`, `CapabilityProvider`, synchronous `EventProvider`/bounded `EventReceiver`, and optional async monitoring support
 - `net-lattice-async`, which exposes the single runtime-agnostic `EventStream` type
-- the `net-lattice` facade, including `Lattice::add_address()`, `Lattice::remove_address()`, `Lattice::capabilities()`, `Lattice::supports()`, `Lattice::watch()`, and feature-gated `Lattice::watch_async()`
+- the `net-lattice` facade, including `Lattice::add_address()`, `Lattice::remove_address()`, `Lattice::capabilities()`, `Lattice::supports()`, `Lattice::watch_filtered()`, and feature-gated `Lattice::watch_async()`/`Lattice::watch_async_filtered()`
 
-This gives real route and interface-address management, interface listing, DNS resolver reads, neighbor (ARP/NDP) table reads, and bounded network-change monitoring on Linux, Windows, and macOS. Address creation accepts `NewInterfaceAddress` and returns the resulting observed `InterfaceAddress`, so callers never invent an address ID. `Lattice::watch_filtered(EventFilter::none().routes())` limits delivered domains. Query `Lattice::supports(Capability::MONITORING)` before watching in portable code. The optional `net-lattice` `async` feature uses and re-exports the `EventStream` implementation from `net-lattice-async`; applications need only enable that facade feature. `Lattice::watch_async(filter)` exposes the same `EventStream` API on every platform. Tokio is used internally where the native implementation requires it, while applications interact only with the runtime-independent `futures::Stream` interface. This is still not a complete library: DNS mutation, VLANs, VRFs, namespaces, firewall integration, transactional configuration, declarative networking, and other advanced capabilities are still ahead; see [ARCHITECTURE.md](ARCHITECTURE.md)'s Incremental Delivery Plan for the staged roadmap and [CHANGELOG.md](CHANGELOG.md) for what has actually shipped.
+This gives real route and interface-address management, interface listing, DNS resolver reads, neighbor (ARP/NDP) table reads, and bounded network-change monitoring on Linux, Windows, and macOS. Address creation accepts `NewInterfaceAddress` and returns the resulting observed `InterfaceAddress`, so callers never invent an address ID. `EventFilter` composes domain selectors (`routes()`) and object selectors (`route(route_id)`); every backend applies the filter before enqueueing an ordinary event. Query `Lattice::supports(Capability::MONITORING)` before watching in portable code; the facade returns `Error::Unsupported` before opening a watcher when monitoring is unavailable. The optional `net-lattice` `async` feature uses and re-exports the `EventStream` implementation from `net-lattice-async`; applications need only enable that facade feature. `Lattice::watch_async(filter)` and `Lattice::watch_async_filtered(filter)` expose the same `EventStream` API on every platform. Tokio is used internally where the native implementation requires it, while applications interact only with the runtime-independent `futures::Stream` interface. This is still not a complete library: DNS mutation, VLANs, VRFs, namespaces, firewall integration, transactional configuration, declarative networking, and other advanced capabilities are still ahead; see [ARCHITECTURE.md](ARCHITECTURE.md)'s Incremental Delivery Plan for the staged roadmap and [CHANGELOG.md](CHANGELOG.md) for what has actually shipped.
 
 | Capability | Linux | Windows | macOS |
 |---|:---:|:---:|:---:|
@@ -96,6 +96,11 @@ This gives real route and interface-address management, interface listing, DNS r
 ### Event delivery
 
 Event streams are bounded. If a consumer falls behind, the watcher records and delivers `Event::ResyncRequired { .. }` before a subsequent ordinary event instead of retaining an unbounded backlog. Re-read the affected provider state before relying on subsequent events.
+
+```rust
+let routes = EventFilter::none().route(route_id);
+let watcher = lattice.watch_filtered(routes)?;
+```
 
 ## Quick Example
 
@@ -168,7 +173,7 @@ let observed = lattice.add_address(request)?;
 5. **Stage 0.9: Address mutation** *(completed)* — cross-platform assignment and removal of interface IPv4/IPv6 addresses.
 6. **Stage 0.10: Event semantics** *(completed)* — bounded delivery, overflow and resynchronization signaling, filtering, cancellation, and error propagation.
 7. **Stage 0.11: Async events** *(completed)* — optional `async` facade feature, one runtime-agnostic `EventStream`, and native Tokio-backed delivery in every platform backend.
-8. **Stage 0.12: Watcher API stabilization** — composable and object/domain filters, filtering before queueing, capability-aware validation, and sync/async API parity while preserving the released 0.11 API.
+8. **Stage 0.12: Watcher API stabilization** *(completed)* — composable object/domain filters, filtering before queueing, monitoring-capability validation, and sync/async API parity while preserving the released 0.11 API.
 9. **Stage 0.13: DNS mutation** — capability-gated resolver configuration through supported native system mechanisms.
 10. **Stage 0.14: Transaction primitives** — plans, application, failure reporting, and rollback boundaries for mutations.
 11. **Stage 0.15: Declarative networking** — `CurrentState`, `DesiredState`, `Diff`, and `ApplyPlan` built on the stable mutation foundation.
