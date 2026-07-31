@@ -1160,6 +1160,81 @@ mod tests {
         );
     }
 
+    #[test]
+    fn netlink_event_mapper_covers_every_supported_domain_and_change_kind() {
+        let route = RouteMessageBuilder::<std::net::Ipv4Addr>::new()
+            .destination_prefix(std::net::Ipv4Addr::new(198, 51, 100, 0), 24)
+            .build();
+        assert!(matches!(
+            route_netlink_message_to_event(RouteNetlinkMessage::NewRoute(route.clone())),
+            Some(Event::Route {
+                kind: ChangeKind::Changed,
+                ..
+            })
+        ));
+        assert!(matches!(
+            route_netlink_message_to_event(RouteNetlinkMessage::DelRoute(route)),
+            Some(Event::Route {
+                kind: ChangeKind::Removed,
+                ..
+            })
+        ));
+
+        let mut link = LinkMessage::default();
+        link.header.index = 7;
+        assert!(matches!(
+            route_netlink_message_to_event(RouteNetlinkMessage::NewLink(link.clone())),
+            Some(Event::Interface { id, kind: ChangeKind::Changed }) if id == Id::new(7)
+        ));
+        assert!(matches!(
+            route_netlink_message_to_event(RouteNetlinkMessage::DelLink(link)),
+            Some(Event::Interface { id, kind: ChangeKind::Removed }) if id == Id::new(7)
+        ));
+
+        let mut address = AddressMessage::default();
+        address.header.index = 7;
+        address.header.prefix_len = 24;
+        address.attributes.push(AddressAttribute::Local(IpAddr::V4(
+            std::net::Ipv4Addr::new(192, 0, 2, 7),
+        )));
+        assert!(matches!(
+            route_netlink_message_to_event(RouteNetlinkMessage::NewAddress(address.clone())),
+            Some(Event::Address {
+                kind: ChangeKind::Changed,
+                ..
+            })
+        ));
+        assert!(matches!(
+            route_netlink_message_to_event(RouteNetlinkMessage::DelAddress(address)),
+            Some(Event::Address {
+                kind: ChangeKind::Removed,
+                ..
+            })
+        ));
+
+        let mut neighbor = NeighbourMessage::default();
+        neighbor.header.ifindex = 7;
+        neighbor
+            .attributes
+            .push(NeighbourAttribute::Destination(NeighbourAddress::Inet(
+                std::net::Ipv4Addr::new(192, 0, 2, 1),
+            )));
+        assert!(matches!(
+            route_netlink_message_to_event(RouteNetlinkMessage::NewNeighbour(neighbor.clone())),
+            Some(Event::Neighbor {
+                kind: ChangeKind::Changed,
+                ..
+            })
+        ));
+        assert!(matches!(
+            route_netlink_message_to_event(RouteNetlinkMessage::DelNeighbour(neighbor)),
+            Some(Event::Neighbor {
+                kind: ChangeKind::Removed,
+                ..
+            })
+        ));
+    }
+
     /// Reads the real `/etc/resolv.conf` present on this test environment.
     /// Every Linux system has one (even if empty/symlinked to
     /// systemd-resolved's stub), so this exercises the real filesystem read
