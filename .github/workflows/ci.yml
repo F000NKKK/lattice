@@ -119,3 +119,58 @@ jobs:
       - name: cargo test --ignored --features async (privileged, Windows)
         if: matrix.os == 'windows-latest'
         run: cargo test -p net-lattice-backend-windows --features async -- --ignored
+
+  coverage:
+    name: coverage (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    env:
+      # Keep profiles outside the checkout so privileged native tests can add
+      # their coverage without modifying repository-owned files.
+      CARGO_TARGET_DIR: ${{ runner.temp }}/net-lattice-coverage-target
+      LLVM_PROFILE_FILE: ${{ runner.temp }}/net-lattice-%p-%m.profraw
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust (MSRV with coverage tools)
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.93"
+          components: llvm-tools-preview
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: coverage-${{ matrix.os }}
+
+      # Build and run all ordinary tests under LLVM source-based coverage.
+      # The platform-specific test commands below reuse these instrumented
+      # artifacts and add profiles for the privileged mutation/watch paths.
+      - name: collect coverage from workspace tests
+        run: cargo llvm-cov test --workspace --all-features --no-report
+
+      - name: collect coverage from privileged Linux tests
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo env "PATH=$PATH" "HOME=$HOME" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" "LLVM_PROFILE_FILE=$LLVM_PROFILE_FILE" cargo test -p net-lattice-backend-linux --all-features -- --ignored
+
+      - name: collect coverage from privileged macOS tests
+        if: matrix.os == 'macos-latest'
+        run: sudo env "PATH=$PATH" "HOME=$HOME" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" "LLVM_PROFILE_FILE=$LLVM_PROFILE_FILE" cargo test -p net-lattice-backend-darwin --all-features -- --ignored
+
+      - name: collect coverage from privileged Windows tests
+        if: matrix.os == 'windows-latest'
+        run: cargo test -p net-lattice-backend-windows --all-features -- --ignored
+
+      # `--show-missing-lines` deliberately remains enabled even on a
+      # failure: Actions logs name every uncovered line, while the three
+      # threshold checks make incomplete line, function, or region
+      # coverage a hard CI failure on each native platform.
+      - name: require complete native coverage
+        run: cargo llvm-cov report --workspace --show-missing-lines --fail-under-lines 100 --fail-under-functions 100 --fail-under-regions 100
