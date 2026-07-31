@@ -3,12 +3,12 @@
 ## Supported Versions
 
 Net Lattice follows a rolling support policy. Security fixes are provided only
-for the latest stable release series. With the release of Stage 0.10, support
-for the 0.1.x-0.9.x series has ended — upgrade to 0.10.x to receive fixes.
+for the latest stable release series. With the release of Stage 0.11, support
+for the 0.1.x-0.10.x series has ended — upgrade to 0.11.x to receive fixes.
 
 | Version | Supported |
 | ------- | --------- |
-| 0.10.x | ✅ |
+| 0.11.x | ✅ |
 | 0.1.0 - 0.9.x | ❌ |
 
 ## Reporting a Vulnerability
@@ -31,7 +31,7 @@ informed as the issue is investigated and resolved.
 
 ## Scope
 
-Net Lattice has landed Stage 0.10 of its [architecture](ARCHITECTURE.md)'s
+Net Lattice has landed Stage 0.11 of its [architecture](ARCHITECTURE.md)'s
 Incremental Delivery Plan: route, interface, DNS-read, neighbor-read, and
 address-read and address-mutation providers for Linux (`net-lattice-backend-linux`, via Netlink
 and `/etc/resolv.conf`), Windows (`net-lattice-backend-windows`, via the IP

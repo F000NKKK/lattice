@@ -11,9 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `net-lattice-async` 0.1.0: runtime-agnostic `futures::Stream` adapter for
-  `EventReceiver`. It uses an explicit worker-thread bridge, so no async
-  runtime is required by Net Lattice's core API.
+- Optional `net-lattice` `async` feature and `Lattice::watch_async(filter)`.
+  The feature re-exports one runtime-agnostic `net-lattice-async::EventStream`
+  without adding Tokio code to the default facade.
+- Native async event delivery in every backend: Linux polls Netlink through
+  its existing Tokio runtime, Windows IP Helper callbacks feed a Tokio
+  transport, and the macOS PF_ROUTE reader feeds that transport directly.
+  All three use bounded delivery with the existing resynchronization semantics.
+- `net-lattice-async` 0.1.0: the single `futures::Stream` type used by the
+  facade. It also retains an explicit worker-thread bridge for callers that
+  adapt an arbitrary synchronous `EventReceiver` themselves.
 
 ## [0.10.0] - 2026-07-31
 
