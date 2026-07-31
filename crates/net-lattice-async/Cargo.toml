@@ -11,12 +11,9 @@ categories.workspace = true
 keywords.workspace = true
 description = "Runtime-agnostic futures Stream adapter for Net Lattice event watchers."
 
-[features]
-tokio = ["dep:tokio"]
-
 [dependencies]
 net-lattice-core = { workspace = true }
 net-lattice-platform = { workspace = true }
 
 futures = { workspace = true }
-tokio = { workspace = true, optional = true, features = ["sync"] }
+tokio = { workspace = true, features = ["sync"] }
