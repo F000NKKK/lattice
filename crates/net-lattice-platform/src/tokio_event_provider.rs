@@ -138,7 +138,7 @@ mod tests {
 
     #[test]
     fn overflow_delivers_resync_before_a_later_event() {
-        let (sender, mut receiver) = TokioEventReceiver::bounded();
+        let (sender, mut receiver) = TokioEventReceiver::<E>::bounded();
         for event in 0..EventReceiverCapacity::VALUE {
             assert!(sender.send(event, || 999));
         }
@@ -249,6 +249,12 @@ mod tests {
         drop(receiver);
         assert!(!sender.send(event, || resync));
         assert!(!sender.send_error(net_lattice_core::Error::InvalidState));
+
+        let (sender, mut receiver) = TokioEventReceiver::bounded();
+        assert!(sender.send_error(net_lattice_core::Error::InvalidState));
+        drop(sender);
+        assert!(matches!(poll(&mut receiver), Poll::Ready(Some(Err(_)))));
+        assert!(matches!(poll(&mut receiver), Poll::Ready(None)));
     }
 
     #[test]
