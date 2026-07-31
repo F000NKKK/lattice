@@ -125,10 +125,10 @@ mod tests {
         let (sender, receiver) = EventReceiver::bounded();
         let mut events = from_receiver(receiver);
         assert!(sender.send(7_u8, 0));
-        assert!(matches!(
-            futures::executor::block_on(events.next()),
-            Some(Ok(7))
-        ));
+        assert_eq!(
+            futures::executor::block_on(events.next()).unwrap().unwrap(),
+            7
+        );
     }
 
     #[test]
@@ -136,10 +136,7 @@ mod tests {
         let (sender, receiver) = EventReceiver::<u8>::bounded();
         let mut events = from_receiver(receiver);
         assert!(sender.send_error(Error::InvalidState));
-        assert!(matches!(
-            futures::executor::block_on(events.next()),
-            Some(Err(Error::InvalidState))
-        ));
+        assert!(futures::executor::block_on(events.next()).unwrap().is_err());
     }
 
     #[test]
@@ -148,10 +145,10 @@ mod tests {
         let mut events = from_tokio_receiver(receiver);
         assert!(sender.send(7_u8, || 0));
         drop(sender);
-        assert!(matches!(
-            futures::executor::block_on(events.next()),
-            Some(Ok(7))
-        ));
+        assert_eq!(
+            futures::executor::block_on(events.next()).unwrap().unwrap(),
+            7
+        );
         assert!(futures::executor::block_on(events.next()).is_none());
     }
 

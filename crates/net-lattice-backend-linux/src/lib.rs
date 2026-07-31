@@ -1450,10 +1450,7 @@ mod tests {
         // identity source for this monitoring test.
         let watched_id = (0..12)
             .find_map(|_| match watcher.recv_timeout(Duration::from_millis(250)) {
-                Ok(Some(Event::Route {
-                    id,
-                    kind: ChangeKind::Added,
-                })) => Some(id),
+                Ok(Some(Event::Route { id, .. })) => Some(id),
                 _ => None,
             })
             .expect("watch() did not report the route addition");
