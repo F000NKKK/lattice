@@ -606,7 +606,7 @@ are introduced only when there is real implementation work for them:
 | 0.10 ✅ | Event semantics: bounded delivery, overflow/resynchronization, filtering, cancellation, and background-error propagation. |
 | 0.11 ✅ | Optional `net-lattice` `async` feature; `net-lattice-async` exposes one runtime-agnostic `EventStream`, while Linux (Tokio Netlink), Windows (IP Helper callbacks), and macOS (PF_ROUTE reader) deliver directly into bounded Tokio transports. |
 | 0.12 ✅ | Watcher API stabilization: composable object/domain filters applied before enqueueing, monitoring-capability validation, and consistent synchronous/async filter semantics without changing the released 0.11 API. |
-| 0.13 | DNS mutation with an intent/observed-state model. |
+| 0.13 | DNS mutation with an intent/observed-state model, implemented and verified on Linux, Windows, and macOS before the stage is complete. |
 | 0.14 | Transaction primitives: plans, application, failure reporting, and rollback boundaries. |
 | 0.15 | Declarative `CurrentState`/`DesiredState`/`Diff`/`ApplyPlan` on the stable mutation foundation. |
 | 0.16+ | Capability-gated VLAN, VRF, firewall, tunnel, and namespace domains. |
@@ -615,17 +615,19 @@ are introduced only when there is real implementation work for them:
 Each stage is expected to validate the architecture before the next is
 started; earlier stages may inform adjustments to later ones.
 
-## Pre-1.0 Review Backlog
+## Pre-1.0 Extension API Decisions
 
-- **Iterator errors:** evaluate `Iterator<Item = Result<E, Error>>` or the
-  removal of `Iterator` in favor of explicit `recv`; either is potentially
-  incompatible with the current `Iterator<Item = E>` contract.
-- **Consumer and backend APIs:** consider a `net_lattice::backend` module for
-  `LatticeBackend`, `TokioEventProvider`, `EventSender`, and backend-facing
-  constructors, retaining deprecated re-exports if a post-release move occurs.
-- **Receiver constructor naming:** consider a clearer `from_receiver` or
-  `from_channel_receiver` name while retaining `EventReceiver::new` as a
+- **Iterator errors:** `EventReceiver` yields `Iterator<Item = Result<E,
+  Error>>`. Disconnection ends iteration; background errors remain visible to
+  the consumer.
+- **Consumer and backend APIs:** `net_lattice::backend` is the documented
+  extension surface for `LatticeBackend`, provider traits, event producers,
+  and backend-facing constructors. Existing root re-exports remain available
+  for compatibility.
+- **Receiver constructor naming:** backend code should use
+  `EventReceiver::from_channel_receiver`; `EventReceiver::new` remains a
   deprecated compatibility alias.
-- **Provider trait status:** decide whether provider traits are an official
-  third-party backend extension API. If so, define their full semantic
-  contracts before 1.0.
+- **Provider trait status:** provider traits are an official extension API for
+  third-party backends. Implementations must preserve each trait's documented
+  read, mutation, event-delivery, filtering, cancellation, and error
+  semantics.

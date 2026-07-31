@@ -613,7 +613,7 @@ provider-traits, а не другой контракт backend'а. Дорабо�
 | 0.10 ✅ | Семантика событий: bounded delivery, overflow/resynchronization, filtering, cancellation и распространение ошибок фонового watcher'а. |
 | 0.11 ✅ | Опциональная feature `async` в `net-lattice`; `net-lattice-async` предоставляет один runtime-agnostic `EventStream`, а Linux (Tokio Netlink), Windows (callbacks IP Helper) и macOS (reader PF_ROUTE) доставляют события прямо в bounded Tokio transports. |
 | 0.12 ✅ | Стабилизация API watcher'ов: composable object/domain filters до помещения в очередь, validation capability мониторинга и одинаковая sync/async семантика filter без изменения опубликованного API 0.11. |
-| 0.13 | Изменение DNS с моделью intent/observed state. |
+| 0.13 | Изменение DNS с моделью intent/observed state; этап завершается только после реализации и проверки на Linux, Windows и macOS. |
 | 0.14 | Примитивы транзакций: планы, применение, сообщения об ошибках и границы rollback. |
 | 0.15 | Декларативные `CurrentState`/`DesiredState`/`Diff`/`ApplyPlan` на стабильной основе мутаций. |
 | 0.16+ | Домены VLAN, VRF, firewall, tunnel и namespace, закрытые Capability. |
@@ -622,17 +622,19 @@ provider-traits, а не другой контракт backend'а. Дорабо�
 Ожидается, что каждый этап проверяет архитектуру перед началом следующего;
 более ранние этапы могут повлиять на корректировки более поздних.
 
-## Backlog pre-1.0 review
+## Принятые решения pre-1.0 для extension API
 
-- **Ошибки iterator:** рассмотреть `Iterator<Item = Result<E, Error>>` или
-  удаление `Iterator` в пользу явного `recv`; оба варианта потенциально
-  несовместимы с текущим контрактом `Iterator<Item = E>`.
-- **Consumer и backend API:** рассмотреть модуль `net_lattice::backend` для
-  `LatticeBackend`, `TokioEventProvider`, `EventSender` и backend-конструкторов,
-  сохранив deprecated re-export'ы при переносе после релиза.
-- **Имена конструкторов receiver:** рассмотреть более ясное
-  `from_receiver` или `from_channel_receiver`, сохранив `EventReceiver::new`
-  как deprecated alias для совместимости.
-- **Статус provider traits:** определить, являются ли provider traits
-  официальным extension API для сторонних backend'ов. Если да, до 1.0 нужны
-  их полные semantic contracts.
+- **Ошибки iterator:** `EventReceiver` выдаёт `Iterator<Item = Result<E,
+  Error>>`. Disconnect завершает итерацию, а фоновые ошибки остаются видимыми
+  consumer'у.
+- **Consumer и backend API:** `net_lattice::backend` — документированная
+  поверхность расширения для `LatticeBackend`, provider-trait'ов, producers
+  событий и backend-конструкторов. Существующие re-export'ы из корня остаются
+  для совместимости.
+- **Имена конструкторов receiver:** backend-код должен использовать
+  `EventReceiver::from_channel_receiver`; `EventReceiver::new` остаётся
+  deprecated compatibility alias.
+- **Статус provider traits:** provider-trait'ы — официальный extension API для
+  сторонних backend'ов. Реализации обязаны сохранять документированные
+  семантики чтения, изменения, доставки событий, filtering, cancellation и
+  ошибок каждого trait'а.
