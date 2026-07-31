@@ -1210,7 +1210,7 @@ mod tests {
 
         let mut address = MIB_UNICASTIPADDRESS_ROW::default();
         address.InterfaceIndex = 7;
-        address.Address = ip_to_sockaddr_inet(IpAddr::V4(Ipv4Address::new(192, 0, 2, 7)));
+        address.Address = ip_to_sockaddr_inet(IpAddr::V4(Ipv4Address::new(192, 0, 2, 7).into()));
         address.OnLinkPrefixLength = 24;
         let observed = row_to_interface_address(&address).expect("valid address row");
         assert_eq!(observed.interface_index, 7);
@@ -1241,7 +1241,7 @@ mod tests {
 
         let mut neighbor = MIB_IPNET_ROW2::default();
         neighbor.InterfaceIndex = 7;
-        neighbor.Address = ip_to_sockaddr_inet(IpAddr::V4(Ipv4Address::new(192, 0, 2, 1)));
+        neighbor.Address = ip_to_sockaddr_inet(IpAddr::V4(Ipv4Address::new(192, 0, 2, 1).into()));
         neighbor.State = NlnsReachable;
         neighbor.PhysicalAddressLength = 6;
         neighbor.PhysicalAddress[..6].copy_from_slice(&[5, 4, 3, 2, 1, 0]);
