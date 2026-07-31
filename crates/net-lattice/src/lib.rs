@@ -401,7 +401,9 @@ mod tests {
             if filter.matches(event) {
                 assert!(sender.send(event, Event::resync_all()));
             }
-            Ok(receiver)
+            // Keep the producer alive for an empty filter, matching a real
+            // backend watcher whose subscription remains active.
+            Ok(receiver.with_subscription(sender))
         }
     }
 
@@ -422,7 +424,7 @@ mod tests {
             if filter.matches(event) {
                 assert!(sender.send(event, Event::resync_all));
             }
-            Ok(receiver)
+            Ok(receiver.with_subscription(sender))
         }
     }
 
