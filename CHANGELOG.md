@@ -7,16 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.12.0] - 2026-07-31
+## [0.12.1] - 2026-07-31
 
 ### Added
 
 - Stage 0.12 watcher API stabilization: `EventFilter` object selectors for
   routes, interfaces, neighbors, and interface addresses; filters are applied
   before ordinary events enter backend queues.
-- `Lattice::watch_async_filtered()` as the async counterpart to
-  `Lattice::watch_filtered()`. The Stage 0.11 `watch_async(filter)` API
-  remains supported.
+- Stage 0.11 `Lattice::watch_async(filter)` now shares the object/domain
+  filter semantics of `Lattice::watch_filtered(filter)` without a duplicate
+  async watcher entry point.
 
 ### Changed
 
