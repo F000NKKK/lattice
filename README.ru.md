@@ -224,6 +224,11 @@ let observed = lattice.set_dns_config(requested)?;
 
 ### Просмотр плана mutation
 
+Stage 0.14 также предоставляет типизированные `MutationOutcome`,
+`MutationPlanReport` и `RollbackStatus` для будущего отчёта исполнителя о
+частичных отказах и границах компенсации. Само исполнение транзакций остаётся
+за Stage 0.15.
+
 В Stage 0.14 планы являются чистыми данными. Они делают существующие
 imperative операции inspectable без их применения; исполнение транзакций —
 работа Stage 0.15.
