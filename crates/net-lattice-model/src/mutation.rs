@@ -249,6 +249,10 @@ mod tests {
         );
         assert!(operation.semantics().may_partially_apply);
         assert_eq!(
+            operation.semantics().confirmation,
+            MutationConfirmation::ReadAfterWrite
+        );
+        assert_eq!(
             operation.semantics().reversibility,
             MutationReversibility::NotGuaranteed
         );
@@ -268,6 +272,11 @@ mod tests {
             operation.semantics().precondition,
             MutationPrecondition::Absent
         );
+        assert_eq!(
+            operation.semantics().reversibility,
+            MutationReversibility::RequiresPriorState
+        );
+        assert!(!operation.semantics().may_partially_apply);
     }
 
     #[test]
@@ -277,5 +286,74 @@ mod tests {
         let plan = MutationPlan::from_operations([first.clone(), second.clone()]);
         assert_eq!(plan.operations(), [first, second]);
         assert_eq!(plan.len(), 2);
+        assert!(!plan.is_empty());
+    }
+
+    #[test]
+    fn route_operations_expose_strict_native_acknowledgement_contracts() {
+        let route = Route::new(crate::route::RouteId::new(1), network());
+
+        let added = Mutation::AddRoute(route.clone()).semantics();
+        assert_eq!(added.kind, MutationKind::AddRoute);
+        assert_eq!(added.precondition, MutationPrecondition::Absent);
+        assert_eq!(added.idempotency, MutationIdempotency::Strict);
+        assert_eq!(added.privilege, MutationPrivilege::Elevated);
+        assert_eq!(
+            added.confirmation,
+            MutationConfirmation::NativeAcknowledgement
+        );
+        assert_eq!(
+            added.reversibility,
+            MutationReversibility::RequiresPriorState
+        );
+        assert!(!added.may_partially_apply);
+
+        let removed = Mutation::RemoveRoute(route).semantics();
+        assert_eq!(removed.kind, MutationKind::RemoveRoute);
+        assert_eq!(removed.precondition, MutationPrecondition::Present);
+        assert_eq!(removed.idempotency, MutationIdempotency::Strict);
+        assert_eq!(removed.privilege, MutationPrivilege::Elevated);
+        assert_eq!(
+            removed.confirmation,
+            MutationConfirmation::NativeAcknowledgement
+        );
+        assert_eq!(
+            removed.reversibility,
+            MutationReversibility::RequiresPriorState
+        );
+        assert!(!removed.may_partially_apply);
+    }
+
+    #[test]
+    fn address_removal_exposes_its_observed_record_contract() {
+        let address =
+            InterfaceAddress::new(crate::ifaddr::InterfaceAddressId::new(1), 1, network());
+        let semantics = Mutation::RemoveAddress(address).semantics();
+
+        assert_eq!(semantics.kind, MutationKind::RemoveAddress);
+        assert_eq!(semantics.precondition, MutationPrecondition::Present);
+        assert_eq!(semantics.idempotency, MutationIdempotency::Strict);
+        assert_eq!(semantics.privilege, MutationPrivilege::Elevated);
+        assert_eq!(
+            semantics.confirmation,
+            MutationConfirmation::NativeAcknowledgement
+        );
+        assert_eq!(
+            semantics.reversibility,
+            MutationReversibility::RequiresPriorState
+        );
+        assert!(!semantics.may_partially_apply);
+    }
+
+    #[test]
+    fn empty_plan_can_be_built_appended_and_consumed() {
+        let mut plan = MutationPlan::new();
+        assert!(plan.is_empty());
+        assert_eq!(plan.len(), 0);
+
+        let operation = Mutation::AddRoute(Route::new(crate::route::RouteId::new(1), network()));
+        plan.push(operation.clone());
+        assert_eq!(plan.operations(), [operation.clone()]);
+        assert_eq!(plan.into_iter().collect::<Vec<_>>(), vec![operation]);
     }
 }
