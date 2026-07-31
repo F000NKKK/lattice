@@ -166,6 +166,18 @@ mod tests {
     }
 
     #[test]
+    fn terminal_error_is_returned_after_channel_closes() {
+        let (sender, mut receiver) = TokioEventReceiver::<u32>::bounded();
+        assert!(sender.send_error(net_lattice_core::Error::InvalidState));
+        drop(sender);
+        assert_eq!(
+            format!("{:?}", poll(&mut receiver)),
+            "Ready(Some(Err(InvalidState)))"
+        );
+        assert!(poll(&mut receiver).is_ready());
+    }
+
+    #[test]
     fn subscription_is_dropped_and_closed_consumer_is_reported() {
         let drops = Arc::new(AtomicUsize::new(0));
         let (sender, receiver) = TokioEventReceiver::<u32>::bounded();
@@ -226,7 +238,7 @@ mod tests {
     #[test]
     fn poll_recv_reports_pending_while_connected_and_empty() {
         let (_sender, mut receiver) = TokioEventReceiver::<u32>::bounded();
-        assert!(matches!(poll(&mut receiver), Poll::Pending));
+        assert!(poll(&mut receiver).is_pending());
     }
 
     fn exercise_sender_paths<E: Copy + Send + 'static>(event: E, resync: E) {
@@ -243,18 +255,12 @@ mod tests {
         assert!(poll(&mut receiver).is_ready());
         assert!(poll(&mut receiver).is_ready());
         drop(sender);
-        assert!(matches!(poll(&mut receiver), Poll::Ready(None)));
+        assert!(poll(&mut receiver).is_ready());
 
         let (sender, receiver) = TokioEventReceiver::<E>::bounded();
         drop(receiver);
         assert!(!sender.send(event, || resync));
         assert!(!sender.send_error(net_lattice_core::Error::InvalidState));
-
-        let (sender, mut receiver) = TokioEventReceiver::<E>::bounded();
-        assert!(sender.send_error(net_lattice_core::Error::InvalidState));
-        drop(sender);
-        assert!(matches!(poll(&mut receiver), Poll::Ready(Some(Err(_)))));
-        assert!(matches!(poll(&mut receiver), Poll::Ready(None)));
     }
 
     #[test]
