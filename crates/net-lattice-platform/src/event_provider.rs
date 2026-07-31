@@ -346,4 +346,28 @@ mod tests {
         assert!(sender.send_error(Error::InvalidState));
         assert!(matches!(receiver.recv(), Err(Error::InvalidState)));
     }
+
+    #[test]
+    fn backend_channel_constructors_preserve_events_and_guards() {
+        let (sender, raw_receiver) = mpsc::channel();
+        assert!(sender.send(Ok(7_u32)).is_ok());
+        let receiver = EventReceiver::from_channel_receiver(raw_receiver);
+        assert_eq!(receiver.recv().unwrap(), 7);
+
+        let drops = Arc::new(AtomicUsize::new(0));
+        let (_sender, raw_receiver) = mpsc::channel::<Result<u32>>();
+        drop(EventReceiver::from_receiver_with_subscription(
+            raw_receiver,
+            DropGuard(Arc::clone(&drops)),
+        ));
+        assert_eq!(drops.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn sender_reports_disconnected_consumer() {
+        let (sender, receiver) = EventReceiver::<u32>::bounded_with_capacity(1);
+        drop(receiver);
+        assert!(!sender.send(1, 0));
+        assert!(!sender.send_error(Error::InvalidState));
+    }
 }

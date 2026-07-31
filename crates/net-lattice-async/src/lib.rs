@@ -129,4 +129,23 @@ mod tests {
             Some(Err(Error::InvalidState))
         ));
     }
+
+    #[test]
+    fn native_tokio_receiver_uses_the_same_stream_surface() {
+        let (sender, receiver) = TokioEventReceiver::bounded();
+        let mut events = from_tokio_receiver(receiver);
+        assert!(sender.send(7_u8, || 0));
+        drop(sender);
+        assert!(matches!(
+            futures::executor::block_on(events.next()),
+            Some(Ok(7))
+        ));
+        assert!(futures::executor::block_on(events.next()).is_none());
+    }
+
+    #[test]
+    fn dropping_a_sync_stream_joins_its_adapter_worker() {
+        let (_sender, receiver) = EventReceiver::<u8>::bounded();
+        drop(from_receiver(receiver));
+    }
 }

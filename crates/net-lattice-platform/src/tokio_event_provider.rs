@@ -120,6 +120,15 @@ impl EventReceiverCapacity {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct DropGuard(Arc<AtomicUsize>);
+
+    impl Drop for DropGuard {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
 
     fn poll<E>(receiver: &mut TokioEventReceiver<E>) -> Poll<Option<Result<E>>> {
         let waker = std::task::Waker::noop();
@@ -156,5 +165,15 @@ mod tests {
             poll(&mut receiver),
             Poll::Ready(Some(Err(net_lattice_core::Error::InvalidState)))
         ));
+    }
+
+    #[test]
+    fn subscription_is_dropped_and_closed_consumer_is_reported() {
+        let drops = Arc::new(AtomicUsize::new(0));
+        let (sender, receiver) = TokioEventReceiver::<u32>::bounded();
+        drop(receiver.with_subscription(DropGuard(Arc::clone(&drops))));
+        assert_eq!(drops.load(Ordering::SeqCst), 1);
+        assert!(!sender.send(1, || 0));
+        assert!(!sender.send_error(net_lattice_core::Error::InvalidState));
     }
 }
