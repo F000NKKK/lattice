@@ -13,7 +13,7 @@ description = "Runtime-agnostic futures Stream adapter for Net Lattice event wat
 
 [dependencies]
 net-lattice-core = { workspace = true }
-net-lattice-platform = { workspace = true }
+net-lattice-platform = { workspace = true, features = ["async"] }
 
 futures = { workspace = true }
 tokio = { workspace = true, features = ["sync"] }

@@ -18,6 +18,8 @@ mod event_provider;
 mod interface_provider;
 mod neighbor_provider;
 mod route_provider;
+#[cfg(feature = "async")]
+mod tokio_event_provider;
 
 pub use address_mutator::AddressMutator;
 pub use address_provider::AddressProvider;
@@ -27,6 +29,8 @@ pub use event_provider::{EventProvider, EventReceiver, EventSender};
 pub use interface_provider::InterfaceProvider;
 pub use neighbor_provider::NeighborProvider;
 pub use route_provider::RouteProvider;
+#[cfg(feature = "async")]
+pub use tokio_event_provider::{TokioEventReceiver, TokioEventSender};
 
 /// Tokio watcher contract, available with the `async` feature.
 #[cfg(feature = "async")]
@@ -36,7 +40,5 @@ pub trait TokioEventProvider {
     fn watch_tokio(
         &self,
         filter: Self::EventFilter,
-    ) -> net_lattice_core::Result<
-        tokio::sync::mpsc::UnboundedReceiver<net_lattice_core::Result<Self::Event>>,
-    >;
+    ) -> net_lattice_core::Result<TokioEventReceiver<Self::Event>>;
 }

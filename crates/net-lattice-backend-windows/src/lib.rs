@@ -25,6 +25,8 @@ use net_lattice_platform::{
     AddressMutator, AddressProvider, Capability, CapabilityProvider, DnsProvider, EventProvider,
     EventReceiver, EventSender, InterfaceProvider, NeighborProvider, RouteProvider,
 };
+#[cfg(feature = "async")]
+use net_lattice_platform::{TokioEventProvider, TokioEventReceiver, TokioEventSender};
 use windows::Win32::Foundation::HANDLE;
 use windows::Win32::NetworkManagement::IpHelper::{
     CancelMibChangeNotify2, CreateIpForwardEntry2, CreateUnicastIpAddressEntry,
@@ -692,6 +694,12 @@ struct WindowsWatchState {
     filter: EventFilter,
 }
 
+#[cfg(feature = "async")]
+struct WindowsTokioWatchState {
+    sender: TokioEventSender<Event>,
+    filter: EventFilter,
+}
+
 /// Owns all native notification handles and their callback context. IP Helper
 /// guarantees `CancelMibChangeNotify2` waits for active callbacks, so freeing
 /// `state` after cancellation cannot race a callback dereference.
@@ -718,6 +726,31 @@ impl Drop for WindowsWatch {
             Self::cancel(self.route);
             Self::cancel(self.interface);
             Self::cancel(self.address);
+            drop(Box::from_raw(self.state));
+        }
+    }
+}
+
+/// Async counterpart to [`WindowsWatch`]. It owns the registration handles
+/// and callback state for as long as the Tokio receiver remains alive.
+#[cfg(feature = "async")]
+struct WindowsTokioWatch {
+    state: *mut WindowsTokioWatchState,
+    route: HANDLE,
+    interface: HANDLE,
+    address: HANDLE,
+}
+
+#[cfg(feature = "async")]
+unsafe impl Send for WindowsTokioWatch {}
+
+#[cfg(feature = "async")]
+impl Drop for WindowsTokioWatch {
+    fn drop(&mut self) {
+        unsafe {
+            WindowsWatch::cancel(self.route);
+            WindowsWatch::cancel(self.interface);
+            WindowsWatch::cancel(self.address);
             drop(Box::from_raw(self.state));
         }
     }
@@ -791,6 +824,67 @@ unsafe extern "system" fn address_change_callback(
         };
         if state.filter.matches(event) {
             let _ = state.sender.send(event, Event::resync_all());
+        }
+    }
+}
+
+#[cfg(feature = "async")]
+unsafe extern "system" fn tokio_route_change_callback(
+    context: *const c_void,
+    row: *const MIB_IPFORWARD_ROW2,
+    notification: MIB_NOTIFICATION_TYPE,
+) {
+    if context.is_null() || row.is_null() {
+        return;
+    }
+    let state = unsafe { &*(context.cast::<WindowsTokioWatchState>()) };
+    if let Ok(Some(route)) = row_to_route(unsafe { &*row }) {
+        let event = Event::Route {
+            id: route.id,
+            kind: change_kind(notification),
+        };
+        if state.filter.matches(event) {
+            let _ = state.sender.send(event, Event::resync_all);
+        }
+    }
+}
+
+#[cfg(feature = "async")]
+unsafe extern "system" fn tokio_interface_change_callback(
+    context: *const c_void,
+    row: *const windows::Win32::NetworkManagement::IpHelper::MIB_IPINTERFACE_ROW,
+    notification: MIB_NOTIFICATION_TYPE,
+) {
+    if context.is_null() || row.is_null() {
+        return;
+    }
+    let state = unsafe { &*(context.cast::<WindowsTokioWatchState>()) };
+    let event = Event::Interface {
+        id: Id::new(unsafe { (*row).InterfaceIndex } as u64),
+        kind: change_kind(notification),
+    };
+    if state.filter.matches(event) {
+        let _ = state.sender.send(event, Event::resync_all);
+    }
+}
+
+#[cfg(feature = "async")]
+unsafe extern "system" fn tokio_address_change_callback(
+    context: *const c_void,
+    row: *const MIB_UNICASTIPADDRESS_ROW,
+    notification: MIB_NOTIFICATION_TYPE,
+) {
+    if context.is_null() || row.is_null() {
+        return;
+    }
+    let state = unsafe { &*(context.cast::<WindowsTokioWatchState>()) };
+    if let Some(address) = row_to_interface_address(unsafe { &*row }) {
+        let event = Event::Address {
+            id: address.id,
+            kind: change_kind(notification),
+        };
+        if state.filter.matches(event) {
+            let _ = state.sender.send(event, Event::resync_all);
         }
     }
 }
@@ -870,6 +964,77 @@ impl EventProvider for WindowsBackend {
         }
 
         Ok(receiver.with_subscription(WindowsWatch {
+            state,
+            route,
+            interface,
+            address,
+        }))
+    }
+}
+
+/// Native async monitoring: IP Helper invokes the callbacks directly and the
+/// callbacks enqueue into a bounded Tokio transport without blocking a system
+/// callback thread.
+#[cfg(feature = "async")]
+impl TokioEventProvider for WindowsBackend {
+    type Event = Event;
+    type EventFilter = EventFilter;
+
+    fn watch_tokio(&self, filter: Self::EventFilter) -> Result<TokioEventReceiver<Self::Event>> {
+        let (sender, receiver) = TokioEventReceiver::bounded();
+        let state = Box::into_raw(Box::new(WindowsTokioWatchState { sender, filter }));
+        let mut route = HANDLE::default();
+        let mut interface = HANDLE::default();
+        let mut address = HANDLE::default();
+        let status = unsafe {
+            NotifyRouteChange2(
+                AF_UNSPEC,
+                Some(tokio_route_change_callback),
+                state.cast(),
+                false,
+                &mut route,
+            )
+        };
+        if status.0 != 0 {
+            unsafe {
+                drop(Box::from_raw(state));
+            }
+            return Err(Error::Platform(PlatformErrorCode::Windows(status.0)));
+        }
+        let status = unsafe {
+            NotifyIpInterfaceChange(
+                AF_UNSPEC,
+                Some(tokio_interface_change_callback),
+                Some(state.cast()),
+                false,
+                &mut interface,
+            )
+        };
+        if status.0 != 0 {
+            unsafe {
+                WindowsWatch::cancel(route);
+                drop(Box::from_raw(state));
+            }
+            return Err(Error::Platform(PlatformErrorCode::Windows(status.0)));
+        }
+        let status = unsafe {
+            NotifyUnicastIpAddressChange(
+                AF_UNSPEC,
+                Some(tokio_address_change_callback),
+                Some(state.cast()),
+                false,
+                &mut address,
+            )
+        };
+        if status.0 != 0 {
+            unsafe {
+                WindowsWatch::cancel(route);
+                WindowsWatch::cancel(interface);
+                drop(Box::from_raw(state));
+            }
+            return Err(Error::Platform(PlatformErrorCode::Windows(status.0)));
+        }
+        Ok(receiver.with_subscription(WindowsTokioWatch {
             state,
             route,
             interface,
@@ -1074,6 +1239,16 @@ mod tests {
             filtered.recv_timeout(Duration::from_millis(1)).unwrap(),
             None
         );
+    }
+
+    #[cfg(feature = "async")]
+    #[test]
+    fn watch_tokio_registers_ip_helper_notifications() {
+        let backend = WindowsBackend::new().expect("failed to create Windows backend");
+        let watcher = backend
+            .watch_tokio(EventFilter::none())
+            .expect("failed to register IP Helper notifications");
+        drop(watcher);
     }
 
     /// Requires `Administrator` privileges (root, or `sudo -E cargo test -- --ignored`

@@ -27,7 +27,7 @@ use net_lattice_platform::{
     EventReceiver, InterfaceProvider, NeighborProvider, RouteProvider,
 };
 #[cfg(feature = "async")]
-use net_lattice_platform::TokioEventProvider;
+use net_lattice_platform::{TokioEventProvider, TokioEventReceiver};
 use rtnetlink::packet_route::RouteNetlinkMessage;
 use rtnetlink::packet_route::address::{AddressAttribute, AddressMessage};
 use rtnetlink::packet_route::link::{LinkAttribute, LinkLayerType, LinkMessage, State};
@@ -771,6 +771,47 @@ impl EventProvider for LinuxBackend {
     }
 }
 
+/// Native async monitoring reuses the backend's Tokio reactor and Netlink
+/// multicast socket directly. Unlike `net-lattice-async::from_receiver`, no
+/// blocking worker thread sits between the kernel notification and the stream.
+#[cfg(feature = "async")]
+impl TokioEventProvider for LinuxBackend {
+    type Event = Event;
+    type EventFilter = EventFilter;
+
+    fn watch_tokio(&self, filter: Self::EventFilter) -> Result<TokioEventReceiver<Self::Event>> {
+        let groups = [
+            MulticastGroup::Link,
+            MulticastGroup::Neigh,
+            MulticastGroup::Ipv4Route,
+            MulticastGroup::Ipv6Route,
+            MulticastGroup::Ipv4Ifaddr,
+            MulticastGroup::Ipv6Ifaddr,
+        ];
+        let _guard = self.runtime.enter();
+        let (connection, _handle, mut messages) = rtnetlink::new_multicast_connection(&groups)
+            .map_err(|err| Error::Platform(io_error_code(&err)))?;
+        let connection = self.runtime.spawn(connection);
+        let (sender, receiver) = TokioEventReceiver::bounded();
+        let events = self.runtime.spawn(async move {
+            while let Some((message, _addr)) = messages.next().await {
+                let (_header, payload) = message.into_parts();
+                let rtnetlink::packet_core::NetlinkPayload::InnerMessage(inner) = payload else {
+                    continue;
+                };
+                if let Some(event) = route_netlink_message_to_event(inner)
+                    && filter.matches(event)
+                    && !sender.send(event, Event::resync_all)
+                {
+                    return;
+                }
+            }
+            let _ = sender.send_error(Error::Disconnected);
+        });
+        Ok(receiver.with_subscription(LinuxWatch { connection, events }))
+    }
+}
+
 impl DnsProvider for LinuxBackend {
     type DnsConfig = DnsConfig;
 
@@ -890,6 +931,20 @@ mod tests {
             filtered.recv_timeout(Duration::from_millis(1)).unwrap(),
             None
         );
+    }
+
+    /// The feature-gated provider opens the same native Netlink multicast
+    /// subscription, but delivers it through the Tokio-aware transport used
+    /// by `Lattice::watch_async`.
+    #[cfg(feature = "async")]
+    #[test]
+    fn watch_tokio_opens_a_real_netlink_subscription() {
+        let _guard = kernel_test_guard();
+        let backend = LinuxBackend::new().expect("failed to open a Netlink connection");
+        let watcher = backend
+            .watch_tokio(EventFilter::none())
+            .expect("failed to subscribe to Netlink multicast groups");
+        drop(watcher);
     }
 
     #[test]

@@ -31,6 +31,8 @@ use net_lattice_platform::{
     AddressMutator, AddressProvider, Capability, CapabilityProvider, DnsProvider, EventProvider,
     EventReceiver, InterfaceProvider, NeighborProvider, RouteProvider,
 };
+#[cfg(feature = "async")]
+use net_lattice_platform::{TokioEventProvider, TokioEventReceiver};
 
 const RTM_VERSION: u8 = 5;
 const RTM_ADD: u8 = 1;
@@ -1674,6 +1676,83 @@ impl EventProvider for DarwinBackend {
     }
 }
 
+/// PF_ROUTE is a blocking descriptor on macOS. The native source therefore
+/// stays on its dedicated reader thread, but writes directly to the bounded
+/// Tokio transport consumed by the async facade; there is no intermediate
+/// synchronous `EventReceiver` or executor-blocking `recv` call.
+#[cfg(feature = "async")]
+impl TokioEventProvider for DarwinBackend {
+    type Event = Event;
+    type EventFilter = EventFilter;
+
+    fn watch_tokio(&self, filter: Self::EventFilter) -> Result<TokioEventReceiver<Self::Event>> {
+        let fd = unsafe { libc::socket(libc::PF_ROUTE, libc::SOCK_RAW, libc::AF_UNSPEC) };
+        if fd < 0 {
+            return Err(Error::Platform(io_error_code(&io::Error::last_os_error())));
+        }
+        let (sender, receiver) = TokioEventReceiver::bounded();
+        let stop = Arc::new(AtomicBool::new(false));
+        let thread_stop = Arc::clone(&stop);
+        let thread = thread::spawn(move || {
+            let words = RTM_MAXSIZE.div_ceil(mem::size_of::<libc::c_long>());
+            let mut buffer = vec![0 as libc::c_long; words];
+            while !thread_stop.load(Ordering::Acquire) {
+                let mut poll_fd = libc::pollfd {
+                    fd,
+                    events: libc::POLLIN,
+                    revents: 0,
+                };
+                let ready = unsafe { libc::poll(&mut poll_fd, 1, 200) };
+                if ready == 0
+                    || (ready < 0
+                        && io::Error::last_os_error().kind() == io::ErrorKind::Interrupted)
+                {
+                    continue;
+                }
+                if ready < 0 {
+                    break;
+                }
+                let received =
+                    unsafe { libc::recv(fd, buffer.as_mut_ptr().cast(), RTM_MAXSIZE, 0) };
+                if received <= 0 {
+                    if received < 0
+                        && io::Error::last_os_error().kind() == io::ErrorKind::Interrupted
+                    {
+                        continue;
+                    }
+                    break;
+                }
+                let mut offset = 0usize;
+                let received = received as usize;
+                while offset + mem::size_of::<RouteMessageHeader>() <= received {
+                    let message = unsafe { buffer.as_ptr().cast::<u8>().add(offset) };
+                    let common =
+                        unsafe { std::ptr::read_unaligned(message.cast::<RouteMessageHeader>()) };
+                    let len = common.msg_len as usize;
+                    if len < mem::size_of::<RouteMessageHeader>() || offset + len > received {
+                        break;
+                    }
+                    if common.version == RTM_VERSION
+                        && let Some(event) = unsafe { route_socket_message_to_event(message, len) }
+                        && filter.matches(event)
+                        && !sender.send(event, Event::resync_all)
+                    {
+                        unsafe { libc::close(fd) };
+                        return;
+                    }
+                    offset += (len + 3) & !3;
+                }
+            }
+            unsafe { libc::close(fd) };
+            let _ = sender.send_error(Error::Disconnected);
+        });
+        Ok(receiver.with_subscription(DarwinWatch {
+            stop,
+            thread: Some(thread),
+        }))
+    }
+}
+
 impl DnsProvider for DarwinBackend {
     type DnsConfig = DnsConfig;
 
@@ -1771,6 +1850,16 @@ mod tests {
             filtered.recv_timeout(Duration::from_millis(1)).unwrap(),
             None
         );
+    }
+
+    #[cfg(feature = "async")]
+    #[test]
+    fn watch_tokio_opens_a_real_route_socket() {
+        let backend = DarwinBackend::new().expect("failed to open a route socket");
+        let watcher = backend
+            .watch_tokio(EventFilter::none())
+            .expect("failed to subscribe to PF_ROUTE");
+        drop(watcher);
     }
 
     /// Diagnostic-only: formats `bytes` as a space-separated hex dump.

@@ -24,12 +24,12 @@ pub use net_lattice_model::mac::MacAddress;
 pub use net_lattice_model::neighbor::{NeighborEntry, NeighborId, NeighborState};
 pub use net_lattice_model::route::{Route, RouteId};
 pub use net_lattice_model::{IpAddress, Network};
+#[cfg(feature = "async")]
+pub use net_lattice_platform::TokioEventProvider;
 pub use net_lattice_platform::{
     AddressMutator, AddressProvider, Capability, CapabilityProvider, DnsProvider, EventProvider,
     EventReceiver, InterfaceProvider, NeighborProvider, RouteProvider,
 };
-#[cfg(feature = "async")]
-pub use net_lattice_platform::TokioEventProvider;
 
 /// Bound satisfied by any backend usable with [`Lattice`].
 ///
@@ -143,7 +143,7 @@ impl<B: LatticeBackend> Lattice<B> {
             self.backend.watch_tokio(filter)?,
         ))
     }
-    
+
     pub fn watch_filtered(&self, filter: EventFilter) -> Result<EventReceiver<Event>> {
         self.backend.watch_filtered(filter)
     }
