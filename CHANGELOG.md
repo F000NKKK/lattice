@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Stage 0.13 DNS mutation: `NewDnsConfig`, `DnsMutator`,
+  `Lattice::set_dns_config`, and `Capability::DNS_MUTATION`.
+- Linux and macOS resolver-file replacement with a resulting observed
+  `DnsConfig`; Windows resolver replacement through IP Helper DNS settings.
+- `net_lattice::backend` as the documented third-party backend extension
+  namespace; provider traits are an official extension API.
+
+### Changed
+
+- `EventReceiver` now implements `Iterator<Item = Result<E>>`, preserving
+  background errors instead of silently ending iteration; use
+  `EventReceiver::from_channel_receiver` for backend-owned channel receivers;
+  the ambiguous `EventReceiver::new` constructor was removed before 1.0.
+
 ## [0.12.3] - 2026-07-31
 
 ### Documentation
