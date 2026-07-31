@@ -21,7 +21,14 @@ use futures::channel::mpsc::{UnboundedReceiver, unbounded};
 pub use net_lattice_core::{Error, Result};
 use net_lattice_platform::{EventReceiver, TokioEventReceiver};
 
-/// A runtime-agnostic [`Stream`] forwarding events from a synchronous watcher.
+/// A runtime-agnostic asynchronous stream of network change events.
+///
+/// Depending on the connected backend, events may be delivered through a
+/// native asynchronous watcher or adapted from a synchronous
+/// [`EventReceiver`]. Applications normally obtain this stream through
+/// `Lattice::watch_async` with Net Lattice's `async` feature.
+///
+/// Implements [`Stream`].
 pub struct EventStream<E> {
     receiver: EventStreamReceiver<E>,
     stop: Arc<AtomicBool>,
