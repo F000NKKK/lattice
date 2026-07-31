@@ -848,6 +848,10 @@ impl DnsMutator for LinuxBackend {
     type NewDnsConfig = NewDnsConfig;
 
     fn set_dns_config(&self, config: Self::NewDnsConfig) -> Result<Self::DnsConfig> {
+        // `write` replaces the resolver-file contents and does not preserve
+        // directives outside Net Lattice's portable model. A write failure can
+        // leave a partial file; the trait therefore requires callers to
+        // re-read observed state after an error.
         write_resolv_conf(std::path::Path::new("/etc/resolv.conf"), &config)?;
         self.dns_config()
     }

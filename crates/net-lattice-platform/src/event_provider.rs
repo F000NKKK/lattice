@@ -57,6 +57,11 @@ impl<E> EventSender<E> {
 /// multiple dropped events are coalesced into one resynchronization event
 /// delivered before a later ordinary event.
 ///
+/// The receiver preserves the order in which its backend producer enqueues
+/// events, but makes no cross-domain ordering, causality, initial-snapshot,
+/// or self-mutation-delivery guarantee. Re-read state after any event when a
+/// coherent snapshot is required.
+///
 /// `EventReceiver<E>` is `Send` when `E` is `Send`; it is not cloneable, so a
 /// watcher has one consuming receiver. It is not guaranteed to be [`Sync`].
 ///

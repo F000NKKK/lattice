@@ -1117,7 +1117,10 @@ impl DnsMutator for WindowsBackend {
     /// Uses the IP Helper DNS settings API rather than a command-line tool.
     /// Windows stores nameservers per adapter, so the system-wide model is
     /// applied consistently to every adapter returned by
-    /// `GetAdaptersAddresses`; the global search list is updated too.
+    /// `GetAdaptersAddresses`; the global search list is updated too. Global
+    /// and adapter settings are separate native calls, so a later adapter
+    /// failure can leave an earlier update applied; callers must re-read
+    /// `dns_config` after an error.
     fn set_dns_config(&self, config: Self::NewDnsConfig) -> Result<Self::DnsConfig> {
         let nameservers = nul_terminated_wide(&config_list(&config.nameservers));
         let search_domains = nul_terminated_wide(&config.search_domains.join(","));

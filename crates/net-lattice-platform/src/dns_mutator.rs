@@ -15,6 +15,13 @@ use crate::DnsProvider;
 /// resolver manager may later replace configuration written by this operation;
 /// callers that require persistence should re-read the observed state and use
 /// a platform-specific manager integration where appropriate.
+///
+/// A failed replacement may have partially changed resolver state. This is
+/// especially relevant when a platform applies global and per-interface
+/// settings through separate native calls. After any error, callers must use
+/// [`DnsProvider::dns_config`] to obtain the authoritative observed state;
+/// rollback and atomicity are transaction-layer concerns, not guarantees of
+/// this primitive.
 pub trait DnsMutator: DnsProvider {
     /// The desired resolver configuration accepted by this backend.
     type NewDnsConfig;

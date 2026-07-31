@@ -168,10 +168,11 @@ impl Default for EventFilter {
 ///
 /// `#[non_exhaustive]`: DNS resolver configuration changes are a stated
 /// long-term goal for this enum (see ARCHITECTURE.md) but are not emitted
-/// by any backend yet — no platform in Stage 0.8 exposes a push
-/// notification for `/etc/resolv.conf`/per-adapter DNS settings changing
-/// without resorting to filesystem polling, which isn't a genuine push
-/// signal. Adding a `Dns` variant later is not a breaking change for
+/// by any backend as of Stage 0.13. Consequently, DNS mutation has no
+/// corresponding watcher-delivery guarantee. No supported
+/// platform exposes a single native push signal for all resolver-manager and
+/// per-adapter changes without filesystem polling, which is not a genuine
+/// push signal. Adding a `Dns` variant later is not a breaking change for
 /// consumers who already `match` non-exhaustively.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
