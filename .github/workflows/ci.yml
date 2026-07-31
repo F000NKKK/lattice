@@ -160,11 +160,11 @@ jobs:
 
       - name: collect coverage from privileged Linux tests
         if: matrix.os == 'ubuntu-latest'
-        run: sudo env "PATH=$PATH" "HOME=$HOME" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" "LLVM_PROFILE_FILE=$LLVM_PROFILE_FILE" cargo test -p net-lattice-backend-linux --all-features -- --ignored
+        run: sudo env "PATH=$PATH" "HOME=$HOME" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR/llvm-cov-target" "LLVM_PROFILE_FILE=$LLVM_PROFILE_FILE" cargo test -p net-lattice-backend-linux --all-features -- --ignored
 
       - name: collect coverage from privileged macOS tests
         if: matrix.os == 'macos-latest'
-        run: sudo env "PATH=$PATH" "HOME=$HOME" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" "LLVM_PROFILE_FILE=$LLVM_PROFILE_FILE" cargo test -p net-lattice-backend-darwin --all-features -- --ignored
+        run: sudo env "PATH=$PATH" "HOME=$HOME" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR/llvm-cov-target" "LLVM_PROFILE_FILE=$LLVM_PROFILE_FILE" cargo test -p net-lattice-backend-darwin --all-features -- --ignored
 
       - name: collect coverage from privileged Windows tests
         if: matrix.os == 'windows-latest'
@@ -175,4 +175,4 @@ jobs:
       # threshold checks make incomplete line, function, or region
       # coverage a hard CI failure on each native platform.
       - name: require complete native coverage
-        run: cargo llvm-cov report --workspace --show-missing-lines --fail-under-lines 100 --fail-under-functions 100 --fail-under-regions 100
+        run: cargo llvm-cov report --show-missing-lines --fail-under-lines 100 --fail-under-functions 100 --fail-under-regions 100
