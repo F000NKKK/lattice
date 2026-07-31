@@ -1237,14 +1237,14 @@ mod tests {
 
     #[test]
     fn mutation_validation_and_resolver_errors_are_explicit() {
-        assert_eq!(
+        assert!(matches!(
             resolv_conf_error(&std::io::Error::from(std::io::ErrorKind::NotFound)),
             Error::NotFound
-        );
-        assert_eq!(
+        ));
+        assert!(matches!(
             resolv_conf_error(&std::io::Error::from(std::io::ErrorKind::PermissionDenied)),
             Error::PermissionDenied
-        );
+        ));
         assert!(matches!(
             resolv_conf_error(&std::io::Error::other("resolver failure")),
             Error::Platform(PlatformErrorCode::Linux(_))
@@ -1257,7 +1257,10 @@ mod tests {
         ));
         let request = NewInterfaceAddress::new(Id::new(1), ipv6)
             .with_broadcast(Ipv4Address::new(192, 0, 2, 255));
-        assert_eq!(backend.add_address(request), Err(Error::InvalidState));
+        assert!(matches!(
+            backend.add_address(request),
+            Err(Error::InvalidState)
+        ));
     }
 
     /// Reads the real `/etc/resolv.conf` present on this test environment.
