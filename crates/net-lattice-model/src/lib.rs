@@ -14,7 +14,7 @@ pub mod neighbor;
 pub mod route;
 
 pub use address::{IpAddress, Network};
-pub use dns::DnsConfig;
+pub use dns::{DnsConfig, NewDnsConfig};
 pub use event::{ChangeKind, Event, EventDomain, EventFilter};
 pub use ifaddr::{InterfaceAddress, InterfaceAddressId, NewInterfaceAddress};
 pub use interface::{AdminState, Interface, InterfaceId, InterfaceKind, OperationalState};

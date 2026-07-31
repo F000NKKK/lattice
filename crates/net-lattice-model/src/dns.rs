@@ -31,6 +31,39 @@ impl DnsConfig {
     }
 }
 
+/// Desired system resolver configuration.
+///
+/// This input model intentionally does not include backend-observed metadata:
+/// callers state the resolver servers and search domains they want, and a
+/// successful mutation returns the resulting observed [`DnsConfig`].
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub struct NewDnsConfig {
+    /// Nameserver addresses, in resolution order.
+    pub nameservers: Vec<IpAddress>,
+    /// Search-list domains appended to unqualified lookups, in order.
+    pub search_domains: Vec<String>,
+}
+
+impl NewDnsConfig {
+    /// Creates an empty resolver configuration.
+    ///
+    /// An empty configuration requests removal of explicitly configured
+    /// nameservers and search domains where the platform supports it.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Creates a desired resolver configuration from ordered servers and
+    /// search domains.
+    pub fn with(nameservers: Vec<IpAddress>, search_domains: Vec<String>) -> Self {
+        Self {
+            nameservers,
+            search_domains,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -51,5 +84,22 @@ mod tests {
         };
         assert_eq!(config.nameservers.len(), 1);
         assert_eq!(config.search_domains, vec!["example.com".to_string()]);
+    }
+
+    #[test]
+    fn new_desired_config_has_no_entries() {
+        let config = NewDnsConfig::new();
+        assert!(config.nameservers.is_empty());
+        assert!(config.search_domains.is_empty());
+    }
+
+    #[test]
+    fn desired_config_constructor_preserves_entries() {
+        let config = NewDnsConfig::with(
+            vec![IpAddress::V4(Ipv4Address::new(9, 9, 9, 9))],
+            vec!["example.test".to_string()],
+        );
+        assert_eq!(config.nameservers.len(), 1);
+        assert_eq!(config.search_domains, ["example.test"]);
     }
 }
