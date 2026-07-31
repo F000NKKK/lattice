@@ -70,3 +70,29 @@ impl fmt::Display for Ipv6Network {
         write!(f, "{}/{}", self.address, self.prefix)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::Ipv6Addr;
+
+    #[test]
+    fn address_segments_and_std_conversions_round_trip() {
+        let address = Ipv6Address::new([0x2001, 0xdb8, 0, 0, 0, 0, 0, 1]);
+        assert_eq!(address.segments(), [0x2001, 0xdb8, 0, 0, 0, 0, 0, 1]);
+        assert_eq!(address.to_string(), "2001:db8::1");
+
+        let std_address = Ipv6Addr::from(address);
+        assert_eq!(Ipv6Address::from(std_address), address);
+    }
+
+    #[test]
+    fn network_exposes_parts_and_displays() {
+        let address = Ipv6Address::new([0x2001, 0xdb8, 0, 0, 0, 0, 0, 0]);
+        let prefix = Ipv6PrefixLength::new(32).expect("valid prefix");
+        let network = Ipv6Network::new(address, prefix);
+        assert_eq!(network.address(), address);
+        assert_eq!(network.prefix(), prefix);
+        assert_eq!(network.to_string(), "2001:db8::/32");
+    }
+}

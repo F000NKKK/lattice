@@ -60,3 +60,33 @@ impl fmt::Display for Error {
 }
 
 impl std::error::Error for Error {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_public_error_has_a_stable_display_message() {
+        let cases = [
+            (Error::PermissionDenied, "permission denied"),
+            (Error::NotFound, "not found"),
+            (Error::AlreadyExists, "already exists"),
+            (Error::Unsupported, "unsupported operation"),
+            (Error::InvalidState, "invalid state"),
+            (Error::Disconnected, "event channel disconnected"),
+        ];
+        for (error, expected) in cases {
+            assert_eq!(error.to_string(), expected);
+        }
+        assert_eq!(
+            Error::Platform(PlatformErrorCode::Linux(-1)).to_string(),
+            "platform error: Linux(-1)"
+        );
+    }
+
+    #[test]
+    fn platform_error_codes_preserve_their_platform_and_value() {
+        assert_eq!(PlatformErrorCode::Linux(-1), PlatformErrorCode::Linux(-1));
+        assert_ne!(PlatformErrorCode::Windows(1), PlatformErrorCode::Darwin(1));
+    }
+}

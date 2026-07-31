@@ -62,3 +62,41 @@ impl fmt::Display for Network {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use net_lattice_ip::{Ipv4PrefixLength, Ipv6PrefixLength};
+
+    #[test]
+    fn addresses_display_both_families() {
+        assert_eq!(
+            IpAddress::from(Ipv4Address::new(192, 0, 2, 1)).to_string(),
+            "192.0.2.1"
+        );
+        assert_eq!(
+            IpAddress::from(Ipv6Address::new([0x2001, 0xdb8, 0, 0, 0, 0, 0, 1])).to_string(),
+            "2001:db8::1"
+        );
+    }
+
+    #[test]
+    fn networks_display_both_families() {
+        assert_eq!(
+            Network::from(Ipv4Network::new(
+                Ipv4Address::new(192, 0, 2, 0),
+                Ipv4PrefixLength::new(24).expect("valid prefix"),
+            ))
+            .to_string(),
+            "192.0.2.0/24"
+        );
+        assert_eq!(
+            Network::from(Ipv6Network::new(
+                Ipv6Address::new([0x2001, 0xdb8, 0, 0, 0, 0, 0, 0]),
+                Ipv6PrefixLength::new(32).expect("valid prefix"),
+            ))
+            .to_string(),
+            "2001:db8::/32"
+        );
+    }
+}

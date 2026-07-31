@@ -163,6 +163,10 @@ mod tests {
     #[test]
     fn kind_displays() {
         assert_eq!(InterfaceKind::Ethernet.to_string(), "ethernet");
+        assert_eq!(InterfaceKind::Wireless.to_string(), "wireless");
+        assert_eq!(InterfaceKind::Loopback.to_string(), "loopback");
+        assert_eq!(InterfaceKind::PointToPoint.to_string(), "point-to-point");
+        assert_eq!(InterfaceKind::Bridge.to_string(), "bridge");
         assert_eq!(InterfaceKind::Other(42).to_string(), "other(42)");
     }
 }
