@@ -1,0 +1,18 @@
+[package]
+name = "net-lattice-async"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+categories.workspace = true
+keywords.workspace = true
+description = "Runtime-agnostic futures Stream adapter for Net Lattice event watchers."
+
+[dependencies]
+net-lattice-core = { workspace = true }
+net-lattice-platform = { workspace = true }
+
+futures = { workspace = true }
