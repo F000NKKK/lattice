@@ -91,4 +91,20 @@ mod tests {
     fn value_round_trips() {
         assert_eq!(Id::<Route>::new(42).value(), 42);
     }
+
+    #[test]
+    fn id_clone_hash_and_format_use_the_underlying_value() {
+        use std::collections::hash_map::DefaultHasher;
+
+        let id = Id::<Route>::new(42);
+        assert_eq!(id, id.clone());
+        assert_eq!(id.to_string(), "42");
+        assert_eq!(format!("{id:?}"), "Id(42)");
+
+        let mut first = DefaultHasher::new();
+        id.hash(&mut first);
+        let mut second = DefaultHasher::new();
+        Id::<Route>::new(42).hash(&mut second);
+        assert_eq!(first.finish(), second.finish());
+    }
 }

@@ -61,6 +61,9 @@ mod tests {
         assert!(Ipv4PrefixLength::new(0).is_some());
         assert!(Ipv4PrefixLength::new(32).is_some());
         assert!(Ipv4PrefixLength::new(33).is_none());
+        let prefix = Ipv4PrefixLength::new(24).expect("valid prefix");
+        assert_eq!(prefix.value(), 24);
+        assert_eq!(prefix.to_string(), "24");
     }
 
     #[test]
@@ -68,5 +71,8 @@ mod tests {
         assert!(Ipv6PrefixLength::new(0).is_some());
         assert!(Ipv6PrefixLength::new(128).is_some());
         assert!(Ipv6PrefixLength::new(129).is_none());
+        let prefix = Ipv6PrefixLength::new(64).expect("valid prefix");
+        assert_eq!(prefix.value(), 64);
+        assert_eq!(prefix.to_string(), "64");
     }
 }

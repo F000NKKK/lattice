@@ -351,4 +351,22 @@ mod tests {
         assert!(!EventFilter::none().matches(Event::resync_all()));
         assert!(EventFilter::none().routes().matches(Event::resync_all()));
     }
+
+    #[test]
+    fn resync_domain_matching_covers_interface_and_neighbor() {
+        assert!(
+            EventFilter::none()
+                .interfaces()
+                .matches(Event::ResyncRequired {
+                    domain: EventDomain::Interface,
+                })
+        );
+        assert!(
+            EventFilter::none()
+                .neighbors()
+                .matches(Event::ResyncRequired {
+                    domain: EventDomain::Neighbor,
+                })
+        );
+    }
 }

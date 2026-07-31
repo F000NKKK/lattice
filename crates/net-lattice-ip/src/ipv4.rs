@@ -65,6 +65,7 @@ impl fmt::Display for Ipv4Network {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::net::Ipv4Addr;
 
     #[test]
     fn displays_in_dotted_decimal() {
@@ -75,11 +76,20 @@ mod tests {
     }
 
     #[test]
+    fn address_octets_and_std_conversions_round_trip() {
+        let address = Ipv4Address::new(192, 0, 2, 1);
+        assert_eq!(address.octets(), [192, 0, 2, 1]);
+        assert_eq!(Ipv4Address::from(Ipv4Addr::from(address)), address);
+    }
+
+    #[test]
     fn network_displays_with_prefix() {
         let network = Ipv4Network::new(
             Ipv4Address::new(10, 0, 0, 0),
             Ipv4PrefixLength::new(24).unwrap(),
         );
         assert_eq!(network.to_string(), "10.0.0.0/24");
+        assert_eq!(network.address(), Ipv4Address::new(10, 0, 0, 0));
+        assert_eq!(network.prefix().value(), 24);
     }
 }
