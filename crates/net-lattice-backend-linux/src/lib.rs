@@ -26,6 +26,8 @@ use net_lattice_platform::{
     AddressMutator, AddressProvider, Capability, CapabilityProvider, DnsProvider, EventProvider,
     EventReceiver, InterfaceProvider, NeighborProvider, RouteProvider,
 };
+#[cfg(feature = "async")]
+use net_lattice_platform::TokioEventProvider;
 use rtnetlink::packet_route::RouteNetlinkMessage;
 use rtnetlink::packet_route::address::{AddressAttribute, AddressMessage};
 use rtnetlink::packet_route::link::{LinkAttribute, LinkLayerType, LinkMessage, State};

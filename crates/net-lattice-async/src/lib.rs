@@ -23,9 +23,13 @@ use net_lattice_platform::EventReceiver;
 
 /// A runtime-agnostic [`Stream`] forwarding events from a synchronous watcher.
 pub struct EventStream<E> {
-    receiver: UnboundedReceiver<Result<E>>,
+    receiver: EventStreamReceiver<E>,
     stop: Arc<AtomicBool>,
     worker: Option<thread::JoinHandle<()>>,
+}
+enum EventStreamReceiver<E> {
+    Futures(UnboundedReceiver<Result<E>>),
+    Tokio(tokio::sync::mpsc::UnboundedReceiver<Result<E>>),
 }
 
 /// Bridges a synchronous event receiver to a waker-aware stream.
@@ -57,17 +61,25 @@ where
         }
     });
     EventStream {
-        receiver: async_receiver,
+        receiver: EventStreamReceiver::Futures(async_receiver),
         stop,
         worker: Some(worker),
     }
+}
+
+/// Wraps a backend-native Tokio event receiver in the same public stream.
+pub fn from_tokio_receiver<E>(receiver: tokio::sync::mpsc::UnboundedReceiver<Result<E>>) -> EventStream<E> {
+    EventStream { receiver: EventStreamReceiver::Tokio(receiver), stop: Arc::new(AtomicBool::new(false)), worker: None }
 }
 
 impl<E> Stream for EventStream<E> {
     type Item = Result<E>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        Pin::new(&mut self.receiver).poll_next(cx)
+        match &mut self.receiver {
+            EventStreamReceiver::Futures(receiver) => Pin::new(receiver).poll_next(cx),
+            EventStreamReceiver::Tokio(receiver) => receiver.poll_recv(cx),
+        }
     }
 }
 
