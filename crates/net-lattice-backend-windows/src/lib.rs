@@ -1208,10 +1208,12 @@ mod tests {
             Some(IpAddress::from(Ipv4Address::new(192, 0, 2, 1)))
         );
 
-        let mut address = MIB_UNICASTIPADDRESS_ROW::default();
-        address.InterfaceIndex = 7;
-        address.Address = ip_to_sockaddr_inet(IpAddr::V4(Ipv4Address::new(192, 0, 2, 7).into()));
-        address.OnLinkPrefixLength = 24;
+        let address = MIB_UNICASTIPADDRESS_ROW {
+            InterfaceIndex: 7,
+            Address: ip_to_sockaddr_inet(IpAddr::V4(Ipv4Address::new(192, 0, 2, 7).into())),
+            OnLinkPrefixLength: 24,
+            ..Default::default()
+        };
         let observed = row_to_interface_address(&address).expect("valid address row");
         assert_eq!(observed.interface_index, 7);
         assert_eq!(
@@ -1222,12 +1224,14 @@ mod tests {
             ))
         );
 
-        let mut interface = MIB_IF_ROW2::default();
-        interface.InterfaceIndex = 7;
-        interface.Type = IF_TYPE_ETHERNET_CSMACD;
-        interface.AdminStatus = NET_IF_ADMIN_STATUS_UP;
-        interface.OperStatus = IfOperStatusUp;
-        interface.Mtu = 1500;
+        let mut interface = MIB_IF_ROW2 {
+            InterfaceIndex: 7,
+            Type: IF_TYPE_ETHERNET_CSMACD,
+            AdminStatus: NET_IF_ADMIN_STATUS_UP,
+            OperStatus: IfOperStatusUp,
+            Mtu: 1500,
+            ..Default::default()
+        };
         interface.Alias[0] = 'e' as u16;
         interface.Alias[1] = 't' as u16;
         interface.Alias[2] = 'h' as u16;
@@ -1239,11 +1243,13 @@ mod tests {
         assert_eq!(observed.operational_state, OperationalState::Up);
         assert_eq!(observed.mac, Some(MacAddress::new([0, 1, 2, 3, 4, 5])));
 
-        let mut neighbor = MIB_IPNET_ROW2::default();
-        neighbor.InterfaceIndex = 7;
-        neighbor.Address = ip_to_sockaddr_inet(IpAddr::V4(Ipv4Address::new(192, 0, 2, 1).into()));
-        neighbor.State = NlnsReachable;
-        neighbor.PhysicalAddressLength = 6;
+        let mut neighbor = MIB_IPNET_ROW2 {
+            InterfaceIndex: 7,
+            Address: ip_to_sockaddr_inet(IpAddr::V4(Ipv4Address::new(192, 0, 2, 1).into())),
+            State: NlnsReachable,
+            PhysicalAddressLength: 6,
+            ..Default::default()
+        };
         neighbor.PhysicalAddress[..6].copy_from_slice(&[5, 4, 3, 2, 1, 0]);
         let observed = row_to_neighbor(&neighbor).expect("valid neighbor row");
         assert_eq!(observed.interface_index, 7);

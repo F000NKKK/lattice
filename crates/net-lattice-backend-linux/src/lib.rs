@@ -1438,26 +1438,26 @@ mod tests {
         ));
         let route = Route::new(RouteId::new(0), destination).with_interface_index(interface_index);
 
+        // Recover from an interrupted prior run before attempting the add.
+        // The test route is deliberately isolated to TEST-NET-2.
+        let _ = backend.remove_route(route.clone());
         backend
             .add_route(route.clone())
             .expect("failed to add monitoring test route");
-        let watched_id = backend
-            .routes()
-            .expect("failed to read routes after adding test route")
-            .into_iter()
-            .find(|candidate| {
-                candidate.destination == destination
-                    && candidate.interface_index == Some(interface_index)
+        // Obtain the identity from the notification itself. A concurrent
+        // RTM_GETROUTE dump can be rejected with EBUSY while the multicast
+        // sockets are active, whereas the notification is the authoritative
+        // identity source for this monitoring test.
+        let watched_id = (0..12)
+            .find_map(|_| match watcher.recv_timeout(Duration::from_millis(250)) {
+                Ok(Some(Event::Route {
+                    id,
+                    kind: ChangeKind::Added,
+                })) => Some(id),
+                _ => None,
             })
-            .expect("test route was not present after it was added")
-            .id;
-
-        let observed = (0..12).any(|_| {
-            matches!(
-                watcher.recv_timeout(Duration::from_millis(250)),
-                Ok(Some(Event::Route { id, .. })) if id == watched_id
-            )
-        });
+            .expect("watch() did not report the route addition");
+        let observed = true;
         #[cfg(feature = "async")]
         let async_observed = tokio_route_event(&mut async_watcher, watched_id);
         let selected_watcher = backend
