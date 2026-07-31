@@ -137,25 +137,10 @@ impl<B: LatticeBackend> Lattice<B> {
 
     /// Subscribes to async change notifications selected by `filter`.
     ///
-    /// Kept for compatibility with the Stage 0.11 async API. New code may
-    /// prefer the symmetric [`Self::watch_async_filtered`] spelling.
+    /// This is the Stage 0.11 async watcher API. It has the same filter
+    /// semantics as [`Self::watch_filtered`].
     #[cfg(feature = "async")]
     pub fn watch_async(&self, filter: EventFilter) -> Result<EventStream<Event>>
-    where
-        B: TokioEventProvider<Event = Event, EventFilter = EventFilter>,
-    {
-        self.watch_async_filtered(filter)
-    }
-
-    /// Subscribes to change notifications selected by `filter`.
-    pub fn watch_filtered(&self, filter: EventFilter) -> Result<EventReceiver<Event>> {
-        self.ensure_monitoring()?;
-        self.backend.watch_filtered(filter)
-    }
-
-    /// Async counterpart to [`Self::watch_filtered`].
-    #[cfg(feature = "async")]
-    pub fn watch_async_filtered(&self, filter: EventFilter) -> Result<EventStream<Event>>
     where
         B: TokioEventProvider<Event = Event, EventFilter = EventFilter>,
     {
@@ -163,6 +148,12 @@ impl<B: LatticeBackend> Lattice<B> {
         Ok(net_lattice_async::from_tokio_receiver(
             self.backend.watch_tokio(filter)?,
         ))
+    }
+
+    /// Subscribes to change notifications selected by `filter`.
+    pub fn watch_filtered(&self, filter: EventFilter) -> Result<EventReceiver<Event>> {
+        self.ensure_monitoring()?;
+        self.backend.watch_filtered(filter)
     }
 
     fn ensure_monitoring(&self) -> Result<()> {
