@@ -1863,7 +1863,7 @@ mod tests {
         assert_eq!(ift_type_to_kind(IFT_BRIDGE), InterfaceKind::Bridge);
         assert_eq!(ift_type_to_kind(IFT_L2VLAN), InterfaceKind::Ethernet);
         assert_eq!(
-            neighbor_flags_to_state(libc::RTAF_STATIC, true),
+            neighbor_flags_to_state(RTF_STATIC, true),
             NeighborState::Permanent
         );
         assert_eq!(neighbor_flags_to_state(0, true), NeighborState::Reachable);
