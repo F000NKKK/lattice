@@ -223,7 +223,10 @@ let observed = lattice.set_dns_config(requested)?;
 ### Inspecting a mutation plan
 
 Plans are pure data in Stage 0.14. They make existing imperative operations
-inspectable without applying them; transaction execution is Stage 0.15 work.
+inspectable without applying them. Stage 0.14 also defines the typed
+`MutationOutcome`, `MutationPlanReport`, and `RollbackStatus` contracts that a
+future executor will use to report partial failure and compensation boundaries;
+transaction execution remains Stage 0.15 work.
 
 ```rust
 let plan = MutationPlan::from_operations([
