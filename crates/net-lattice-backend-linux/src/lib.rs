@@ -1084,6 +1084,82 @@ mod tests {
         assert_eq!(network_to_std(v6_network).1, 32);
     }
 
+    #[test]
+    fn netlink_message_fixtures_preserve_address_route_and_neighbor_details() {
+        let mut address = AddressMessage::default();
+        address.header.index = 7;
+        address.header.prefix_len = 24;
+        address.attributes = vec![
+            AddressAttribute::Address(IpAddr::V4(std::net::Ipv4Addr::new(192, 0, 2, 99))),
+            AddressAttribute::Local(IpAddr::V4(std::net::Ipv4Addr::new(192, 0, 2, 7))),
+            AddressAttribute::Broadcast(std::net::Ipv4Addr::new(192, 0, 2, 255)),
+        ];
+        let observed = message_to_interface_address(&address).expect("valid IPv4 address");
+        assert_eq!(observed.interface_index, 7);
+        assert_eq!(
+            observed.address,
+            Network::from(Ipv4Network::new(
+                Ipv4Address::new(192, 0, 2, 7),
+                Ipv4PrefixLength::new(24).unwrap(),
+            ))
+        );
+        assert_eq!(
+            observed.broadcast,
+            Some(IpAddress::from(Ipv4Address::new(192, 0, 2, 255)))
+        );
+        assert!(message_to_interface_address(&AddressMessage::default()).is_none());
+
+        let route = RouteMessageBuilder::<std::net::Ipv4Addr>::new()
+            .destination_prefix(std::net::Ipv4Addr::new(198, 51, 100, 0), 24)
+            .gateway(std::net::Ipv4Addr::new(192, 0, 2, 1))
+            .priority(42)
+            .output_interface(7)
+            .build();
+        let observed = message_to_route(&route).expect("valid IPv4 route");
+        assert_eq!(
+            observed.gateway,
+            Some(IpAddress::from(Ipv4Address::new(192, 0, 2, 1)))
+        );
+        assert_eq!(observed.metric, Some(42));
+        assert_eq!(observed.interface_index, Some(7));
+        assert!(message_to_route(&RouteMessage::default()).is_none());
+
+        let mut neighbor = NeighbourMessage::default();
+        neighbor.header.ifindex = 7;
+        neighbor.header.state = RtNeighbourState::Reachable;
+        neighbor.attributes = vec![
+            NeighbourAttribute::Destination(NeighbourAddress::Inet(std::net::Ipv4Addr::new(
+                192, 0, 2, 1,
+            ))),
+            NeighbourAttribute::LinkLayerAddress(vec![0, 1, 2, 3, 4, 5]),
+        ];
+        let observed = message_to_neighbor(&neighbor).expect("valid IPv4 neighbour");
+        assert_eq!(observed.interface_index, 7);
+        assert_eq!(observed.state, NeighborState::Reachable);
+        assert_eq!(observed.mac, Some(MacAddress::new([0, 1, 2, 3, 4, 5])));
+        assert!(message_to_neighbor(&NeighbourMessage::default()).is_none());
+    }
+
+    #[test]
+    fn netlink_error_and_state_mappings_are_stable() {
+        assert_eq!(
+            io_error_code(&std::io::Error::from_raw_os_error(13)),
+            PlatformErrorCode::Linux(13)
+        );
+        assert_eq!(
+            io_error_code(&std::io::Error::other("no OS error")),
+            PlatformErrorCode::Linux(0)
+        );
+        assert_eq!(
+            neighbour_state_to_state(RtNeighbourState::Failed),
+            NeighborState::Failed
+        );
+        assert_eq!(
+            neighbour_state_to_state(RtNeighbourState::Reachable),
+            NeighborState::Reachable
+        );
+    }
+
     /// Reads the real `/etc/resolv.conf` present on this test environment.
     /// Every Linux system has one (even if empty/symlinked to
     /// systemd-resolved's stub), so this exercises the real filesystem read
