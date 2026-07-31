@@ -1205,6 +1205,33 @@ mod tests {
         let _ = routes;
     }
 
+    /// Exercises a real round trip through `GetAdaptersAddresses`, no
+    /// privilege required: every Windows system has a loopback adapter.
+    #[test]
+    fn interfaces_includes_the_loopback_interface() {
+        let backend = WindowsBackend::new().expect("failed to create Windows backend");
+        let interfaces = backend
+            .interfaces()
+            .expect("GetAdaptersAddresses should not require privilege");
+        assert!(
+            interfaces
+                .iter()
+                .any(|interface| matches!(interface.kind, InterfaceKind::Loopback)),
+            "expected a loopback interface, got: {interfaces:?}"
+        );
+    }
+
+    /// Keeps the runtime capability advertisement aligned with the provider
+    /// implementations exercised by this backend's native tests.
+    #[test]
+    fn capabilities_match_the_implemented_provider_surface() {
+        let backend = WindowsBackend::new().expect("failed to create Windows backend");
+        let capabilities = backend.capabilities();
+        assert!(capabilities.contains(Capability::IPV6));
+        assert!(capabilities.contains(Capability::MONITORING));
+        assert!(capabilities.contains(Capability::DNS_MUTATION));
+    }
+
     /// Exercises a real round trip through `GetUnicastIpAddressTable`, no
     /// privilege required: every Windows system has a loopback address
     /// assigned.

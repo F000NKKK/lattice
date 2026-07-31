@@ -1836,6 +1836,33 @@ mod tests {
     }
 
     /// Exercises a real round trip through `getifaddrs`, no privilege
+    /// required: every macOS system has the `lo0` loopback interface.
+    #[test]
+    fn interfaces_includes_the_loopback_interface() {
+        let backend = DarwinBackend::new().expect("failed to open a route socket");
+        let interfaces = backend
+            .interfaces()
+            .expect("getifaddrs should not require privilege");
+        assert!(
+            interfaces.iter().any(|interface| {
+                interface.name == "lo0" && matches!(interface.kind, InterfaceKind::Loopback)
+            }),
+            "expected a `lo0` interface classified as Loopback, got: {interfaces:?}"
+        );
+    }
+
+    /// Keeps the runtime capability advertisement aligned with the provider
+    /// implementations exercised by this backend's native tests.
+    #[test]
+    fn capabilities_match_the_implemented_provider_surface() {
+        let backend = DarwinBackend::new().expect("failed to open a route socket");
+        let capabilities = backend.capabilities();
+        assert!(capabilities.contains(Capability::IPV6));
+        assert!(capabilities.contains(Capability::MONITORING));
+        assert!(capabilities.contains(Capability::DNS_MUTATION));
+    }
+
+    /// Exercises a real round trip through `getifaddrs`, no privilege
     /// required: every macOS system has `lo0`'s `127.0.0.1/8`.
     #[test]
     fn addresses_includes_loopbacks_address() {

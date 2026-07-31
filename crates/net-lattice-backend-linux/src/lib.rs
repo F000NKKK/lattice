@@ -939,6 +939,17 @@ mod tests {
         );
     }
 
+    /// The advertised capabilities are the cross-platform contract exposed
+    /// by this backend, rather than a claim about every Linux kernel feature.
+    #[test]
+    fn capabilities_match_the_implemented_provider_surface() {
+        let backend = LinuxBackend::new().expect("failed to open a Netlink connection");
+        let capabilities = backend.capabilities();
+        assert!(capabilities.contains(Capability::IPV6));
+        assert!(capabilities.contains(Capability::MONITORING));
+        assert!(capabilities.contains(Capability::DNS_MUTATION));
+    }
+
     /// Exercises a real round trip through Netlink, no privilege required:
     /// `RTM_GETADDR` dumps are readable by any user, and every Linux system
     /// has at least `lo`'s `127.0.0.1/8`.
