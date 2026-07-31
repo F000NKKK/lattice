@@ -169,4 +169,17 @@ mod tests {
         assert!(input.send(7, 0));
         forward_receiver(receiver, output, Arc::new(AtomicBool::new(false)));
     }
+
+    #[test]
+    fn worker_rechecks_an_empty_receiver_until_shutdown_is_requested() {
+        let (_sender, receiver) = EventReceiver::<u8>::bounded();
+        let (output, _async_receiver) = unbounded::<Result<u8>>();
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_later = Arc::clone(&stop);
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(75));
+            stop_later.store(true, Ordering::Release);
+        });
+        forward_receiver(receiver, output, stop);
+    }
 }
