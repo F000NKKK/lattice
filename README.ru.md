@@ -47,14 +47,13 @@ Net Lattice призвана закрыть этот пробел, предос�
 - Просмотр и изменение адресов интерфейсов
 - Просмотр и изменение маршрутов
 - Просмотр интерфейсов
-- Просмотр конфигурации DNS-резолвера
+- Просмотр и изменение конфигурации DNS-резолвера
 - Таблицы соседей (ARP/NDP)
 - Мониторинг сети и уведомления об изменениях
 - Опциональный runtime-agnostic async stream событий
 
 Запланировано:
 
-- Изменение DNS
 - VLAN
 - VRF
 - Сетевые пространства имён (namespaces)
@@ -71,15 +70,15 @@ Net Lattice призвана закрыть этот пробел, предос�
 
 ## Текущий статус
 
-Реализован этап 0.12 плана поэтапной поставки из [архитектуры](ARCHITECTURE.ru.md):
+Реализован этап 0.13 плана поэтапной поставки из [архитектуры](ARCHITECTURE.ru.md):
 
 - `net-lattice-core`, `net-lattice-ip`
-- модули `route`, `mac`, `interface`, `dns`, `neighbor`, `ifaddr` и `event` в `net-lattice-model`; `NewInterfaceAddress` выражает намерение назначить адрес отдельно от наблюдаемого `InterfaceAddress`
-- `RouteProvider`, `InterfaceProvider`, `DnsProvider`, `NeighborProvider`, `AddressProvider`, `AddressMutator`, `CapabilityProvider`, синхронные `EventProvider`/bounded `EventReceiver` и опциональная async-поддержка мониторинга в `net-lattice-platform`
+- модули `route`, `mac`, `interface`, `dns`, `neighbor`, `ifaddr` и `event` в `net-lattice-model`; `NewInterfaceAddress` и `NewDnsConfig` выражают намерение изменения отдельно от наблюдаемого состояния
+- `RouteProvider`, `InterfaceProvider`, `DnsProvider`, `DnsMutator`, `NeighborProvider`, `AddressProvider`, `AddressMutator`, `CapabilityProvider`, синхронные `EventProvider`/bounded `EventReceiver` и опциональная async-поддержка мониторинга в `net-lattice-platform`
 - `net-lattice-async`, предоставляющий единый runtime-agnostic тип `EventStream`
-- фасад `net-lattice`, включая `Lattice::add_address()`, `Lattice::remove_address()`, `Lattice::capabilities()`, `Lattice::supports()`, `Lattice::watch()`, `Lattice::watch_filtered()` и feature-gated `Lattice::watch_async()`
+- фасад `net-lattice`, включая `Lattice::add_address()`, `Lattice::remove_address()`, `Lattice::set_dns_config()`, `Lattice::capabilities()`, `Lattice::supports()`, `Lattice::watch()`, `Lattice::watch_filtered()` и feature-gated `Lattice::watch_async()`
 
-Это даёт реальное управление маршрутами и IP-адресами интерфейсов, просмотр интерфейсов, чтение DNS-конфигурации резолвера, чтение таблиц соседей (ARP/NDP) и bounded-мониторинг сетевых изменений на Linux, Windows и macOS. Создание адреса принимает `NewInterfaceAddress` и возвращает результирующий наблюдаемый `InterfaceAddress`, поэтому потребитель не конструирует ID адреса самостоятельно. `EventFilter` сочетает селекторы доменов (`routes()`) и объектов (`route(route_id)`); каждый backend применяет filter до помещения обычного события в очередь. В переносимом коде перед watching проверяйте `Lattice::supports(Capability::MONITORING)`; когда мониторинг недоступен, фасад возвращает `Error::Unsupported` до открытия watcher. Feature `async` в Net Lattice использует и реэкспортирует реализацию `EventStream` из `net-lattice-async`; приложению достаточно включить эту feature фасада. `Lattice::watch_async(filter)` остаётся async API Stage 0.11 и имеет ту же семантику filter, что и `Lattice::watch_filtered(filter)`. Tokio используется внутри там, где этого требует нативная реализация, а приложения взаимодействуют только с runtime-independent интерфейсом `futures::Stream`. Платформенные backend'ы используют Netlink в Linux, IP Helper API в Windows и BSD routing sockets, `getifaddrs` и address ioctl в macOS. Это всё ещё не полноценная библиотека: изменение DNS, VLAN, VRF, namespaces, интеграция с firewall, транзакционная конфигурация, декларативная настройка сети и другие продвинутые возможности ещё впереди; см. [ARCHITECTURE.ru.md](ARCHITECTURE.ru.md) для поэтапной дорожной карты и [CHANGELOG.md](CHANGELOG.md) для того, что реально вышло.
+Это даёт реальное управление маршрутами и IP-адресами интерфейсов, просмотр интерфейсов, просмотр и изменение DNS-конфигурации резолвера, чтение таблиц соседей (ARP/NDP) и bounded-мониторинг сетевых изменений на Linux, Windows и macOS. Создание адреса принимает `NewInterfaceAddress` и возвращает результирующий наблюдаемый `InterfaceAddress`; замена конфигурации резолвера принимает `NewDnsConfig` и возвращает результирующий наблюдаемый `DnsConfig`. `EventFilter` сочетает селекторы доменов (`routes()`) и объектов (`route(route_id)`); каждый backend применяет filter до помещения обычного события в очередь. В переносимом коде перед watching проверяйте `Lattice::supports(Capability::MONITORING)`, а перед заменой DNS-конфигурации — `Lattice::supports(Capability::DNS_MUTATION)`. Unix-менеджеры резолвера могут позднее перегенерировать `/etc/resolv.conf`; при необходимости постоянного состояния используйте конфигурационный интерфейс владеющего менеджера. Feature `async` в Net Lattice использует и реэкспортирует реализацию `EventStream` из `net-lattice-async`; приложению достаточно включить эту feature фасада. `Lattice::watch_async(filter)` остаётся async API Stage 0.11 и имеет ту же семантику filter, что и `Lattice::watch_filtered(filter)`. Tokio используется внутри там, где этого требует нативная реализация, а приложения взаимодействуют только с runtime-independent интерфейсом `futures::Stream`. Платформенные backend'ы используют Netlink в Linux, IP Helper API в Windows и BSD routing sockets, `getifaddrs` и address ioctl в macOS. Это всё ещё не полноценная библиотека: VLAN, VRF, namespaces, интеграция с firewall, транзакционная конфигурация, декларативная настройка сети и другие продвинутые возможности ещё впереди; см. [ARCHITECTURE.ru.md](ARCHITECTURE.ru.md) для поэтапной дорожной карты и [CHANGELOG.md](CHANGELOG.md) для того, что реально вышло.
 
 | Возможность | Linux | Windows | macOS |
 |---|:---:|:---:|:---:|
@@ -90,6 +89,7 @@ Net Lattice призвана закрыть этот пробел, предос�
 | Изменение адресов интерфейсов | ✅ | ✅ | ✅ |
 | Просмотр таблицы соседей | ✅ | ✅ | ✅ |
 | Просмотр DNS-резолвера | ✅ | ✅ | ✅ |
+| Изменение DNS-резолвера | ✅ | ✅ | ✅ |
 | Мониторинг изменений | ✅ | ✅ | ✅ |
 | Асинхронный мониторинг изменений | ✅ | ✅ | ✅ |
 
@@ -170,6 +170,21 @@ let request = NewInterfaceAddress::new(
 let observed = lattice.add_address(request)?;
 ```
 
+### Замена конфигурации резолвера
+
+Для замены DNS используется desired-state input, а метод возвращает то, что
+платформа затем наблюдает. Как правило, требуются права администратора.
+
+```rust
+use net_lattice::{IpAddress, Ipv4Address, NewDnsConfig};
+
+let requested = NewDnsConfig::with(
+    vec![IpAddress::from(Ipv4Address::new(1, 1, 1, 1))],
+    vec!["example.test".to_string()],
+);
+let observed = lattice.set_dns_config(requested)?;
+```
+
 ## Дорожная карта
 
 1. **Bootstrap** *(завершён)* — инфраструктура репозитория, лицензирование, файлы для сообщества и настройка инструментов.
@@ -180,7 +195,7 @@ let observed = lattice.add_address(request)?;
 6. **Stage 0.10: Семантика событий** *(завершён)* — bounded delivery, сигнализация overflow и resynchronization, filtering, cancellation и распространение ошибок.
 7. **Stage 0.11: Async events** *(завершён)* — опциональная feature фасада `async`, единый runtime-agnostic `EventStream` и нативная Tokio-backed доставка в каждом платформенном backend.
 8. **Stage 0.12: Стабилизация API watcher'ов** *(завершён)* — composable filters по объектам/доменам, filtering до помещения в очередь, validation capability мониторинга и одинаковая семантика filter для sync/async watcher'ов с сохранением опубликованного API 0.11.
-9. **Stage 0.13: Изменение DNS** — конфигурация резолвера через поддерживаемые нативные системные механизмы, закрытая capability.
+9. **Stage 0.13: Изменение DNS** *(завершён)* — замена конфигурации резолвера через поддерживаемые системные механизмы, закрытая capability, на Linux, Windows и macOS.
 10. **Stage 0.14: Примитивы транзакций** — планы, применение, сообщения об ошибках и границы rollback для мутаций.
 11. **Stage 0.15: Декларативная сеть** — `CurrentState`, `DesiredState`, `Diff` и `ApplyPlan`, построенные на стабильной основе мутаций.
 12. **Stage 0.16+: Домены Capability** — VLAN, VRF, namespaces, firewall и tunnel, закрытые явными runtime capabilities.
