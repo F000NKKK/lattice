@@ -5,7 +5,7 @@
 //! appropriate for the host before running it with sufficient privilege.
 
 use net_lattice::{
-    InterfaceId, Ipv4Address, Ipv4Network, Ipv4PrefixLength, Lattice, Network, NewInterfaceAddress,
+    Error, Ipv4Address, Ipv4Network, Ipv4PrefixLength, Lattice, Network, NewInterfaceAddress,
     Result,
 };
 
@@ -19,8 +19,13 @@ fn main() -> Result<()> {
     };
 
     let lattice = Lattice::connect()?;
+    let interface = lattice
+        .interfaces()?
+        .into_iter()
+        .find(|interface| interface.index == index)
+        .ok_or(Error::NotFound)?;
     let request = NewInterfaceAddress::new(
-        InterfaceId::new(index as u64),
+        interface.id,
         Network::from(Ipv4Network::new(
             Ipv4Address::new(192, 0, 2, 10),
             Ipv4PrefixLength::new(24).expect("24 is a valid IPv4 prefix length"),

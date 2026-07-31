@@ -132,12 +132,16 @@ async fn monitor() -> Result<()> {
 
 ```rust
 use net_lattice::{
-    InterfaceId, Ipv4Address, Ipv4Network, Ipv4PrefixLength, Network,
-    NewInterfaceAddress,
+    Error, Ipv4Address, Ipv4Network, Ipv4PrefixLength, Network, NewInterfaceAddress,
 };
 
+let interface = lattice
+    .interfaces()?
+    .into_iter()
+    .next()
+    .ok_or(Error::NotFound)?;
 let request = NewInterfaceAddress::new(
-    InterfaceId::new(2),
+    interface.id,
     Network::from(Ipv4Network::new(
         Ipv4Address::new(192, 0, 2, 10),
         Ipv4PrefixLength::new(24)?,
