@@ -27,3 +27,11 @@ pub use event_provider::{EventProvider, EventReceiver, EventSender};
 pub use interface_provider::InterfaceProvider;
 pub use neighbor_provider::NeighborProvider;
 pub use route_provider::RouteProvider;
+
+/// Tokio watcher contract, available with the `async` feature.
+#[cfg(feature = "async")]
+pub trait TokioEventProvider {
+    type Event;
+    type EventFilter;
+    fn watch_tokio(&self, filter: Self::EventFilter) -> net_lattice_core::Result<tokio::sync::mpsc::UnboundedReceiver<net_lattice_core::Result<Self::Event>>>;
+}
