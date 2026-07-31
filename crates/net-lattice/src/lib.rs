@@ -52,6 +52,22 @@ pub use net_lattice_platform::{
     EventReceiver, InterfaceProvider, NeighborProvider, RouteProvider,
 };
 
+/// Contracts for implementing a third-party Net Lattice backend.
+///
+/// These traits are a supported extension API. A backend must preserve the
+/// documented read, mutation, event-delivery, and cancellation semantics of
+/// each trait it implements. The root re-exports remain available for
+/// compatibility; new backend code may import from this module.
+pub mod backend {
+    pub use crate::LatticeBackend;
+    pub use net_lattice_platform::{
+        AddressMutator, AddressProvider, CapabilityProvider, DnsProvider, EventProvider,
+        EventReceiver, EventSender, InterfaceProvider, NeighborProvider, RouteProvider,
+    };
+    #[cfg(feature = "async")]
+    pub use net_lattice_platform::{TokioEventProvider, TokioEventReceiver, TokioEventSender};
+}
+
 /// Bound satisfied by any backend usable with [`Lattice`].
 ///
 /// This is where model convergence is enforced: a backend whose

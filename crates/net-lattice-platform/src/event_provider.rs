@@ -3,35 +3,7 @@ use std::time::Duration;
 
 use net_lattice_core::{Error, Result};
 
-/// A bounded synchronous receiver of network change events.
-///
-/// Receivers are normally created through the facade's `Lattice::watch` or
-/// `Lattice::watch_filtered` methods.
-///
-/// [`Self::recv`] blocks, while [`Self::try_recv`] and
-/// [`Self::recv_timeout`] do not wait indefinitely. Dropping the receiver
-/// also drops any backend-owned subscription guard, allowing its native
-/// watcher to stop. If its producer shuts down, receive methods return
-/// [`Error::Disconnected`]. When a slow consumer fills the bounded queue,
-/// multiple dropped events are coalesced into one resynchronization event
-/// delivered before a later ordinary event.
-///
-/// `EventReceiver<E>` is `Send` when `E` is `Send`; it is not cloneable, so a
-/// watcher has one consuming receiver. It is not guaranteed to be [`Sync`].
-///
-/// Mirrors [`std::sync::mpsc::Receiver`] deliberately — a bare channel
-/// receiver, not a `futures_core::Stream`, so that neither
-/// `net-lattice-platform` nor `net-lattice-core` ever depend on an async
-/// runtime (see ARCHITECTURE.md's Async Model: `EventProvider` is
-/// inherently push-based on every platform, but that decision must not
-/// force Tokio, async-std, smol, or any executor onto every consumer of
-/// this crate). A consumer already committed to async can wrap this in
-/// `spawn_blocking`, or a separate crate can offer a `Stream` adapter on
-/// top without this crate ever knowing async exists.
-///
-/// Also implements [`Iterator`], for `for event in receiver { ... }` —
-/// iteration ends (`None`) exactly when the channel disconnects, the same
-/// way `mpsc::Receiver`'s `Iterator` impl does.
+/// Default number of ordinary events buffered for one synchronous watcher.
 pub const DEFAULT_EVENT_QUEUE_CAPACITY: usize = 256;
 
 /// Non-blocking backend producer for a bounded event receiver.
@@ -72,6 +44,24 @@ impl<E> EventSender<E> {
     }
 }
 
+/// A bounded synchronous receiver of network change events.
+///
+/// Receivers are normally created through the facade's `Lattice::watch` or
+/// `Lattice::watch_filtered` methods.
+///
+/// [`Self::recv`] blocks, while [`Self::try_recv`] and
+/// [`Self::recv_timeout`] do not wait indefinitely. Dropping the receiver
+/// also drops any backend-owned subscription guard, allowing its native
+/// watcher to stop. If its producer shuts down, receive methods return
+/// [`Error::Disconnected`]. When a slow consumer fills the bounded queue,
+/// multiple dropped events are coalesced into one resynchronization event
+/// delivered before a later ordinary event.
+///
+/// `EventReceiver<E>` is `Send` when `E` is `Send`; it is not cloneable, so a
+/// watcher has one consuming receiver. It is not guaranteed to be [`Sync`].
+///
+/// Also implements [`Iterator`], yielding the same [`Result`] values as
+/// [`Self::recv`]. Iteration ends only after the watcher disconnects.
 pub struct EventReceiver<E> {
     receiver: mpsc::Receiver<Result<E>>,
     // Owns backend-specific cancellation state (for example, a Windows IP
@@ -121,11 +111,20 @@ impl<E> EventReceiver<E> {
     /// This constructor is intended for backend implementations. Applications
     /// normally obtain an `EventReceiver` through `Lattice::watch` or
     /// `Lattice::watch_filtered`.
-    pub fn new(receiver: mpsc::Receiver<Result<E>>) -> Self {
+    pub fn from_channel_receiver(receiver: mpsc::Receiver<Result<E>>) -> Self {
         Self {
             receiver,
             _subscription: None,
         }
+    }
+
+    /// Alias for [`Self::from_channel_receiver`].
+    ///
+    /// Deprecated because the source channel is an implementation detail;
+    /// backend code should use the explicit constructor name instead.
+    #[deprecated(note = "use EventReceiver::from_channel_receiver instead")]
+    pub fn new(receiver: mpsc::Receiver<Result<E>>) -> Self {
+        Self::from_channel_receiver(receiver)
     }
 
     /// Wraps a channel receiver and attaches a backend-owned subscription
@@ -209,17 +208,19 @@ impl<E> EventReceiver<E> {
     }
 }
 
-/// Iterates over events until receiving an event fails.
+/// Iterates over events until the backend watcher disconnects.
 ///
 /// Calling [`Iterator::next`] blocks in the same way as [`Self::recv`].
-/// Because the iterator item type is `E`, receiver errors terminate iteration
-/// and are not yielded to the caller. Use [`Self::recv`] directly when errors
-/// must be distinguished from normal iterator termination.
+/// Receiver errors are yielded to the caller as `Err` values.
 impl<E> Iterator for EventReceiver<E> {
-    type Item = E;
+    type Item = Result<E>;
 
-    fn next(&mut self) -> Option<E> {
-        self.recv().ok()
+    fn next(&mut self) -> Option<Result<E>> {
+        match self.recv() {
+            Ok(event) => Some(Ok(event)),
+            Err(Error::Disconnected) => None,
+            Err(error) => Some(Err(error)),
+        }
     }
 }
 
@@ -281,15 +282,15 @@ mod tests {
             assert!(sender.send(1, 0));
             assert!(sender.send(2, 0));
         });
-        let received: Vec<u32> = receiver.collect();
-        assert_eq!(received, vec![1, 2]);
+        let received: Vec<Result<u32>> = receiver.collect();
+        assert!(matches!(received.as_slice(), [Ok(1), Ok(2)]));
     }
 
     #[test]
-    fn iterator_terminates_on_a_producer_error() {
+    fn iterator_yields_a_producer_error() {
         let (sender, mut receiver) = EventReceiver::<u32>::bounded();
         assert!(sender.send_error(Error::InvalidState));
-        assert_eq!(receiver.next(), None);
+        assert!(matches!(receiver.next(), Some(Err(Error::InvalidState))));
     }
 
     #[test]
