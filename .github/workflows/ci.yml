@@ -128,10 +128,11 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     env:
-      # Keep profiles outside the checkout so privileged native tests can add
-      # their coverage without modifying repository-owned files.
-      CARGO_TARGET_DIR: ${{ runner.temp }}/net-lattice-coverage-target
-      LLVM_PROFILE_FILE: ${{ runner.temp }}/net-lattice-%p-%m.profraw
+      # Keep coverage artifacts in a dedicated target directory. Privileged
+      # native tests add profiles to this same location after regular tests
+      # have built the instrumented binaries.
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target/coverage
+      LLVM_PROFILE_FILE: ${{ github.workspace }}/target/coverage/net-lattice-%p-%m.profraw
     steps:
       - uses: actions/checkout@v7
 
@@ -150,9 +151,10 @@ jobs:
         with:
           key: coverage-${{ matrix.os }}
 
-      # Build and run all ordinary tests under LLVM source-based coverage.
-      # The platform-specific test commands below reuse these instrumented
-      # artifacts and add profiles for the privileged mutation/watch paths.
+      # Build and run every ordinary synchronous and async test under LLVM
+      # source-based coverage. The platform-specific root/Administrator
+      # commands below reuse these instrumented artifacts and add profiles
+      # for privileged mutation and event-delivery paths.
       - name: collect coverage from workspace tests
         run: cargo llvm-cov test --workspace --all-features --no-report
 
