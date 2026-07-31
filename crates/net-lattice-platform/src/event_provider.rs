@@ -433,6 +433,29 @@ mod tests {
         assert!(receiver.recv().is_err());
     }
 
+    fn exercise_sender_paths<E: Clone>(event: E, resync: E) {
+        let (sender, receiver) = EventReceiver::bounded_with_capacity(1);
+        assert!(sender.send(event.clone(), resync.clone()));
+        assert!(sender.send(event.clone(), resync.clone()));
+        assert!(sender.send(event.clone(), resync.clone()));
+        assert!(receiver.recv().is_ok());
+        assert!(sender.send(event.clone(), resync.clone()));
+        assert!(receiver.recv().is_ok());
+        drop(receiver);
+        assert!(!sender.send(event, resync));
+    }
+
+    #[test]
+    fn sender_paths_cover_common_generic_instantiations() {
+        exercise_sender_paths::<u8>(1, 9);
+        exercise_sender_paths::<u16>(1, 9);
+        exercise_sender_paths::<u32>(1, 9);
+        exercise_sender_paths::<u64>(1, 9);
+        exercise_sender_paths::<i32>(1, 9);
+        exercise_sender_paths::<usize>(1, 9);
+        exercise_sender_paths::<()>((), ());
+    }
+
     #[test]
     fn receive_methods_propagate_queued_errors_and_disconnects() {
         let (sender, receiver) = EventReceiver::<u32>::bounded();

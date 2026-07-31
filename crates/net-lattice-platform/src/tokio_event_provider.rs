@@ -241,6 +241,11 @@ mod tests {
         }
         assert!(sender.send(event, || resync));
         assert!(poll(&mut receiver).is_ready());
+        assert!(poll(&mut receiver).is_ready());
+        drop(sender);
+        assert!(matches!(poll(&mut receiver), Poll::Ready(None)));
+
+        let (sender, receiver) = TokioEventReceiver::bounded();
         drop(receiver);
         assert!(!sender.send(event, || resync));
         assert!(!sender.send_error(net_lattice_core::Error::InvalidState));
