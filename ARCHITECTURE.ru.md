@@ -8,9 +8,9 @@
 дизайна, лежащие в её основе. Он отражает предполагаемое направление, а не
 текущее состояние: см. [CHANGELOG.md](CHANGELOG.md) и [README.md](README.md)
 для того, что реально существует в репозитории на данный момент. На момент
-написания реализован этап 0.11 плана поэтапной поставки ниже: `net-lattice-core`,
+написания реализован этап 0.12 плана поэтапной поставки ниже: `net-lattice-core`,
 `net-lattice-ip`, модули `route`, `interface`, `dns`, `neighbor` и `ifaddr` в `net-lattice-model`,
-`RouteProvider`, `InterfaceProvider`, `DnsProvider`, `NeighborProvider`, `AddressProvider`, `AddressMutator`, `CapabilityProvider`, синхронный `EventProvider` и feature-gated `TokioEventProvider` в `net-lattice-platform`,
+`RouteProvider`, `InterfaceProvider`, `DnsProvider`, `NeighborProvider`, `AddressProvider`, `AddressMutator`, `CapabilityProvider`, синхронный `EventProvider`, feature-gated `TokioEventProvider` и object/domain selectors `EventFilter` в `net-lattice-platform`,
 поддержка маршрутов, адресов интерфейсов, DNS, соседей (ARP/NDP) и нативного мониторинга событий в `net-lattice-backend-linux`,
 `net-lattice-backend-windows`, `net-lattice-backend-darwin`, crate потока
 событий `net-lattice-async` и feature-gated async-фасад — всё, что описано
@@ -612,7 +612,7 @@ provider-traits, а не другой контракт backend'а. Дорабо�
 | 0.9 ✅ | `NewInterfaceAddress` + `AddressMutator`; нативное назначение/удаление IPv4/IPv6-адресов через Netlink (Linux), IP Helper (Windows) и address ioctl (macOS). |
 | 0.10 ✅ | Семантика событий: bounded delivery, overflow/resynchronization, filtering, cancellation и распространение ошибок фонового watcher'а. |
 | 0.11 ✅ | Опциональная feature `async` в `net-lattice`; `net-lattice-async` предоставляет один runtime-agnostic `EventStream`, а Linux (Tokio Netlink), Windows (callbacks IP Helper) и macOS (reader PF_ROUTE) доставляют события прямо в bounded Tokio transports. |
-| 0.12 | Паритет API фильтров watcher'ов между синхронными и async точками входа без изменения опубликованного API 0.11. |
+| 0.12 ✅ | Стабилизация API watcher'ов: composable object/domain filters до помещения в очередь, validation capability мониторинга и паритет `watch_async_filtered` без изменения опубликованного API 0.11. |
 | 0.13 | Изменение DNS с моделью intent/observed state. |
 | 0.14 | Примитивы транзакций: планы, применение, сообщения об ошибках и границы rollback. |
 | 0.15 | Декларативные `CurrentState`/`DesiredState`/`Diff`/`ApplyPlan` на стабильной основе мутаций. |

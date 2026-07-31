@@ -7,13 +7,13 @@
 This document describes the planned workspace structure for Net Lattice and the
 design principles behind it. It reflects intended direction, not current
 state: see [CHANGELOG.md](CHANGELOG.md) and [README.md](README.md) for what
-actually exists in the repository today. As of this writing, Stage 0.11 of
+actually exists in the repository today. As of this writing, Stage 0.12 of
 the Incremental Delivery Plan below has landed: `net-lattice-core`,
 `net-lattice-ip`, `net-lattice-model`'s `route`, `interface`, `dns`,
 `neighbor`, and `ifaddr` modules, `net-lattice-platform`'s `RouteProvider`,
 `InterfaceProvider`, `DnsProvider`, `NeighborProvider`, and
 `AddressProvider`, `AddressMutator`, `CapabilityProvider`, synchronous `EventProvider`,
-and feature-gated `TokioEventProvider`,
+feature-gated `TokioEventProvider`, and object/domain `EventFilter` selectors,
 route/interface-address/DNS/neighbor support and native event monitoring in
 `net-lattice-backend-linux`, `net-lattice-backend-windows`, and
 `net-lattice-backend-darwin`, the `net-lattice-async` event stream crate, and
@@ -605,7 +605,7 @@ are introduced only when there is real implementation work for them:
 | 0.9 ✅ | `NewInterfaceAddress` + `AddressMutator`; native IPv4/IPv6 address assignment/removal via Netlink (Linux), IP Helper (Windows), and address ioctls (macOS). |
 | 0.10 ✅ | Event semantics: bounded delivery, overflow/resynchronization, filtering, cancellation, and background-error propagation. |
 | 0.11 ✅ | Optional `net-lattice` `async` feature; `net-lattice-async` exposes one runtime-agnostic `EventStream`, while Linux (Tokio Netlink), Windows (IP Helper callbacks), and macOS (PF_ROUTE reader) deliver directly into bounded Tokio transports. |
-| 0.12 | Watcher filter API parity across synchronous and async entry points, without changing the released 0.11 API. |
+| 0.12 ✅ | Watcher API stabilization: composable object/domain filters applied before enqueueing, monitoring-capability validation, and `watch_async_filtered` parity without changing the released 0.11 API. |
 | 0.13 | DNS mutation with an intent/observed-state model. |
 | 0.14 | Transaction primitives: plans, application, failure reporting, and rollback boundaries. |
 | 0.15 | Declarative `CurrentState`/`DesiredState`/`Diff`/`ApplyPlan` on the stable mutation foundation. |
