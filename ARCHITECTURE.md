@@ -606,7 +606,7 @@ are introduced only when there is real implementation work for them:
 | 0.10 ✅ | Event semantics: bounded delivery, overflow/resynchronization, filtering, cancellation, and background-error propagation. |
 | 0.11 ✅ | Optional `net-lattice` `async` feature; `net-lattice-async` exposes one runtime-agnostic `EventStream`, while Linux (Tokio Netlink), Windows (IP Helper callbacks), and macOS (PF_ROUTE reader) deliver directly into bounded Tokio transports. |
 | 0.12 ✅ | Watcher API stabilization: composable object/domain filters applied before enqueueing, monitoring-capability validation, and consistent synchronous/async filter semantics without changing the released 0.11 API. |
-| 0.13 | DNS mutation with an intent/observed-state model, implemented and verified on Linux, Windows, and macOS before the stage is complete. |
+| 0.13 ✅ | DNS mutation with an intent/observed-state model: `NewDnsConfig` is applied through supported system mechanisms and the resulting `DnsConfig` is re-read on Linux, Windows, and macOS. |
 | 0.14 | Transaction primitives: plans, application, failure reporting, and rollback boundaries. |
 | 0.15 | Declarative `CurrentState`/`DesiredState`/`Diff`/`ApplyPlan` on the stable mutation foundation. |
 | 0.16+ | Capability-gated VLAN, VRF, firewall, tunnel, and namespace domains. |

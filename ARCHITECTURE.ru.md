@@ -613,7 +613,7 @@ provider-traits, а не другой контракт backend'а. Дорабо�
 | 0.10 ✅ | Семантика событий: bounded delivery, overflow/resynchronization, filtering, cancellation и распространение ошибок фонового watcher'а. |
 | 0.11 ✅ | Опциональная feature `async` в `net-lattice`; `net-lattice-async` предоставляет один runtime-agnostic `EventStream`, а Linux (Tokio Netlink), Windows (callbacks IP Helper) и macOS (reader PF_ROUTE) доставляют события прямо в bounded Tokio transports. |
 | 0.12 ✅ | Стабилизация API watcher'ов: composable object/domain filters до помещения в очередь, validation capability мониторинга и одинаковая sync/async семантика filter без изменения опубликованного API 0.11. |
-| 0.13 | Изменение DNS с моделью intent/observed state; этап завершается только после реализации и проверки на Linux, Windows и macOS. |
+| 0.13 ✅ | Изменение DNS с моделью intent/observed state: `NewDnsConfig` применяется через поддерживаемые системные механизмы, а результирующий `DnsConfig` повторно читается на Linux, Windows и macOS. |
 | 0.14 | Примитивы транзакций: планы, применение, сообщения об ошибках и границы rollback. |
 | 0.15 | Декларативные `CurrentState`/`DesiredState`/`Diff`/`ApplyPlan` на стабильной основе мутаций. |
 | 0.16+ | Домены VLAN, VRF, firewall, tunnel и namespace, закрытые Capability. |
