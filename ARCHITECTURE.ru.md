@@ -8,13 +8,13 @@
 дизайна, лежащие в её основе. Он отражает предполагаемое направление, а не
 текущее состояние: см. [CHANGELOG.md](CHANGELOG.md) и [README.md](README.md)
 для того, что реально существует в репозитории на данный момент. На момент
-написания реализован этап 0.10 плана поэтапной поставки ниже: `net-lattice-core`,
+написания реализован этап 0.11 плана поэтапной поставки ниже: `net-lattice-core`,
 `net-lattice-ip`, модули `route`, `interface`, `dns`, `neighbor` и `ifaddr` в `net-lattice-model`,
-`RouteProvider`, `InterfaceProvider`, `DnsProvider`, `NeighborProvider`, `AddressProvider`, `AddressMutator`, `CapabilityProvider` и `EventProvider` в `net-lattice-platform`,
+`RouteProvider`, `InterfaceProvider`, `DnsProvider`, `NeighborProvider`, `AddressProvider`, `AddressMutator`, `CapabilityProvider`, синхронный `EventProvider` и feature-gated `TokioEventProvider` в `net-lattice-platform`,
 поддержка маршрутов, адресов интерфейсов, DNS, соседей (ARP/NDP) и нативного мониторинга событий в `net-lattice-backend-linux`,
-`net-lattice-backend-windows` и `net-lattice-backend-darwin`, а также фасад
-`net-lattice` — всё, что описано дальше этого этапа, по-прежнему только цель,
-а не текущее состояние.
+`net-lattice-backend-windows`, `net-lattice-backend-darwin`, crate потока
+событий `net-lattice-async` и feature-gated async-фасад — всё, что описано
+дальше этого этапа, по-прежнему только цель, а не текущее состояние.
 
 ## Руководящий принцип
 
@@ -481,13 +481,18 @@ runtime-агностичный: `watch() -> Result<EventReceiver<Event>>`.
 `recv`, `try_recv`, `recv_timeout` и реализует `Iterator`. Это сохраняет
 возможность использования без async runtime.
 
-Крейты platform и core не получают async-зависимостей. Будущий опциональный
-crate `net-lattice-async` сможет представить `futures_core::Stream`, не меняя
-этот контракт и не навязывая Tokio, async-std или smol всем потребителям. Это
-не будет zero-cost обёрткой над `EventReceiver`: `std::sync::mpsc::Receiver`
-не может зарегистрировать waker. Адаптер обязан явно реализовать bridge,
-например worker thread или async-aware канал, а runtime-specific интеграции
-могут оставаться опциональными features.
+Синхронный контракт остаётся доступен без async-зависимости. Этап 0.11 добавил
+опциональную feature `async` в `net-lattice`: она реэкспортирует единый
+runtime-agnostic `net-lattice-async::EventStream` и добавляет
+`Lattice::watch_async(filter)`. `EventStream` реализует `futures::Stream`,
+поэтому приложения сохраняют свободу выбора executor. Это не zero-cost wrapper
+вокруг `EventReceiver`: `std::sync::mpsc::Receiver` не может регистрировать
+waker. Отдельный async crate сохраняет явный worker-thread bridge для
+произвольного синхронного receiver, но фасад использует нативный Tokio-aware
+путь каждого backend: Netlink опрашивается существующим Tokio runtime Linux,
+callbacks IP Helper Windows пишут в bounded Tokio channel, а reader PF_ROUTE
+macOS пишет прямо в этот channel. Все нативные async transports имеют ту же
+семантику bounded delivery и resynchronization, что и `EventReceiver`.
 
 ## Модель состояния: императивно сейчас, декларативно позже
 
@@ -606,7 +611,7 @@ provider-traits, а не другой контракт backend'а. Дорабо�
 | 0.8 ✅ | модуль `event` + синхронные `EventProvider`/`EventReceiver`; мониторинг через Netlink multicast (Linux), PF_ROUTE (macOS) и уведомления IP Helper (Windows). |
 | 0.9 ✅ | `NewInterfaceAddress` + `AddressMutator`; нативное назначение/удаление IPv4/IPv6-адресов через Netlink (Linux), IP Helper (Windows) и address ioctl (macOS). |
 | 0.10 ✅ | Семантика событий: bounded delivery, overflow/resynchronization, filtering, cancellation и распространение ошибок фонового watcher'а. |
-| 0.11 ✅ | `net-lattice-async`: runtime-agnostic async-адаптер событий в отдельном crate с явным worker-thread bridge от синхронного receiver. |
+| 0.11 ✅ | Опциональная feature `async` в `net-lattice`; `net-lattice-async` предоставляет один runtime-agnostic `EventStream`, а Linux (Tokio Netlink), Windows (callbacks IP Helper) и macOS (reader PF_ROUTE) доставляют события прямо в bounded Tokio transports. |
 | 0.12+ | Дальнейший паритет операций записи (включая DNS), примитивы транзакций, декларативные `CurrentState`/`DesiredState`/`Diff`/`ApplyPlan`, затем домены VLAN, VRF, firewall, tunnel и namespace под Capability. |
 
 Ожидается, что каждый этап проверяет архитектуру перед началом следующего;

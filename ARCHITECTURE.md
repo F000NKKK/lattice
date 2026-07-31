@@ -7,16 +7,18 @@
 This document describes the planned workspace structure for Net Lattice and the
 design principles behind it. It reflects intended direction, not current
 state: see [CHANGELOG.md](CHANGELOG.md) and [README.md](README.md) for what
-actually exists in the repository today. As of this writing, Stage 0.10 of
+actually exists in the repository today. As of this writing, Stage 0.11 of
 the Incremental Delivery Plan below has landed: `net-lattice-core`,
 `net-lattice-ip`, `net-lattice-model`'s `route`, `interface`, `dns`,
 `neighbor`, and `ifaddr` modules, `net-lattice-platform`'s `RouteProvider`,
 `InterfaceProvider`, `DnsProvider`, `NeighborProvider`, and
-`AddressProvider`, `AddressMutator`, `CapabilityProvider`, and `EventProvider`,
+`AddressProvider`, `AddressMutator`, `CapabilityProvider`, synchronous `EventProvider`,
+and feature-gated `TokioEventProvider`,
 route/interface-address/DNS/neighbor support and native event monitoring in
 `net-lattice-backend-linux`, `net-lattice-backend-windows`, and
-`net-lattice-backend-darwin`, and the `net-lattice` facade — everything past
-that stage is still a target, not current state.
+`net-lattice-backend-darwin`, the `net-lattice-async` event stream crate, and
+the feature-gated async facade — everything past that stage is still a target,
+not current state.
 
 ## Guiding Principle
 
@@ -477,13 +479,18 @@ and runtime-agnostic: `watch() -> Result<EventReceiver<Event>>`.
 `try_recv`, and `recv_timeout`, and implements `Iterator`. This keeps the
 core usable by synchronous programs and avoids imposing an async runtime.
 
-The platform and core crates remain free of async dependencies. A future
-optional `net-lattice-async` adapter crate may expose a `futures_core::Stream`
-without changing this contract or choosing Tokio, async-std, or smol for all
-consumers. That is not a zero-cost wrapper around `EventReceiver`: a
-`std::sync::mpsc::Receiver` cannot register a waker. The adapter must make
-its bridge explicit, for example with a worker thread or an async-aware
-channel, while runtime-specific integrations may remain optional features.
+The synchronous contract remains available without an async dependency. Stage
+0.11 adds the optional `net-lattice` `async` feature, which re-exports the
+single runtime-agnostic `net-lattice-async::EventStream` and adds
+`Lattice::watch_async(filter)`. `EventStream` implements `futures::Stream`,
+so applications remain free to choose an executor. This is not a zero-cost
+wrapper around `EventReceiver`: `std::sync::mpsc::Receiver` cannot register a
+waker. The separate async crate retains an explicit worker-thread bridge for
+an arbitrary synchronous receiver, but the facade uses each backend's native
+Tokio-aware path: Netlink is polled by Linux's existing Tokio runtime, Windows
+IP Helper callbacks write to a bounded Tokio channel, and macOS's PF_ROUTE
+reader thread writes directly to that channel. All native async transports use
+the same bounded delivery and resynchronization semantics as `EventReceiver`.
 
 ## State Model: Imperative Now, Declarative Later
 
@@ -597,7 +604,7 @@ are introduced only when there is real implementation work for them:
 | 0.8 ✅ | `event` module + synchronous `EventProvider`/`EventReceiver`; monitoring via Netlink multicast (Linux), PF_ROUTE (macOS), and IP Helper notifications (Windows). |
 | 0.9 ✅ | `NewInterfaceAddress` + `AddressMutator`; native IPv4/IPv6 address assignment/removal via Netlink (Linux), IP Helper (Windows), and address ioctls (macOS). |
 | 0.10 ✅ | Event semantics: bounded delivery, overflow/resynchronization, filtering, cancellation, and background-error propagation. |
-| 0.11 ✅ | `net-lattice-async`: runtime-agnostic async event adapter in a separate crate, with an explicit worker-thread bridge from the synchronous receiver. |
+| 0.11 ✅ | Optional `net-lattice` `async` feature; `net-lattice-async` exposes one runtime-agnostic `EventStream`, while Linux (Tokio Netlink), Windows (IP Helper callbacks), and macOS (PF_ROUTE reader) deliver directly into bounded Tokio transports. |
 | 0.12+ | Further write parity (including DNS), transaction primitives, declarative `CurrentState`/`DesiredState`/`Diff`/`ApplyPlan`, then capability-gated VLAN, VRF, firewall, tunnel, and namespace domains. |
 
 Each stage is expected to validate the architecture before the next is
