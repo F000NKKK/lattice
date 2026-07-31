@@ -1768,6 +1768,28 @@ mod tests {
     use super::*;
     use net_lattice_ip::{Ipv4Address, Ipv4Network, Ipv4PrefixLength};
 
+    #[cfg(feature = "async")]
+    fn tokio_route_event(watcher: &mut TokioEventReceiver<Event>, id: RouteId) -> bool {
+        use std::pin::Pin;
+        use std::task::{Context, Poll, Waker};
+        use std::time::Duration;
+
+        let waker = Waker::noop();
+        let mut context = Context::from_waker(waker);
+        for _ in 0..12 {
+            match Pin::new(&mut *watcher).poll_recv(&mut context) {
+                Poll::Ready(Some(Ok(Event::Route { id: event_id, .. }))) if event_id == id => {
+                    return true;
+                }
+                Poll::Ready(None) => return false,
+                Poll::Ready(Some(_)) | Poll::Pending => {
+                    std::thread::sleep(Duration::from_millis(250))
+                }
+            }
+        }
+        false
+    }
+
     #[test]
     fn sockaddr_in_preserves_ipv4_octet_order() {
         let input = std::net::Ipv4Addr::new(192, 0, 2, 9);
@@ -2241,6 +2263,10 @@ mod tests {
         let backend = DarwinBackend::new().expect("failed to open a route socket");
         assert!(backend.capabilities().contains(Capability::MONITORING));
         let watcher = backend.watch().expect("failed to open PF_ROUTE watcher");
+        #[cfg(feature = "async")]
+        let mut async_watcher = backend
+            .watch_tokio(EventFilter::none().routes())
+            .expect("failed to open async PF_ROUTE watcher");
         let interface_index = loopback_interface_index(&backend);
         let destination = Network::from(Ipv4Network::new(
             // TEST-NET-2 is distinct from the route CRUD test's TEST-NET-3
@@ -2261,7 +2287,14 @@ mod tests {
                 Ok(Some(Event::Route { id, .. })) if id == watched_id
             )
         });
+        #[cfg(feature = "async")]
+        let async_observed = tokio_route_event(&mut async_watcher, watched_id);
         let _ = backend.remove_route(route);
         assert!(observed, "watch() did not report the route mutation");
+        #[cfg(feature = "async")]
+        assert!(
+            async_observed,
+            "watch_tokio() did not report the route mutation"
+        );
     }
 }

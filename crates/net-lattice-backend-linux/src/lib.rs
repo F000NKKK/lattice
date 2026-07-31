@@ -828,6 +828,31 @@ mod tests {
     use net_lattice_ip::{Ipv4Address, Ipv4Network, Ipv4PrefixLength};
     use std::sync::{Mutex, MutexGuard, OnceLock};
 
+    #[cfg(feature = "async")]
+    fn tokio_route_event(watcher: &mut TokioEventReceiver<Event>, id: RouteId) -> bool {
+        use std::pin::Pin;
+        use std::task::{Context, Poll, Waker};
+        use std::time::Duration;
+
+        let waker = Waker::noop();
+        let mut context = Context::from_waker(waker);
+        for _ in 0..12 {
+            match Pin::new(&mut *watcher).poll_recv(&mut context) {
+                Poll::Ready(Some(Ok(Event::Route { id: event_id, .. }))) if event_id == id => {
+                    return true;
+                }
+                Poll::Ready(Some(_)) | Poll::Pending => thread_sleep(Duration::from_millis(250)),
+                Poll::Ready(None) => return false,
+            }
+        }
+        false
+    }
+
+    #[cfg(feature = "async")]
+    fn thread_sleep(duration: std::time::Duration) {
+        std::thread::sleep(duration);
+    }
+
     /// The kernel can reject simultaneous Netlink dumps in a shared CI
     /// network namespace with `EBUSY`. All tests that open a real Netlink
     /// socket take this guard; pure parser tests intentionally do not.
@@ -1131,6 +1156,10 @@ mod tests {
         let watcher = backend
             .watch()
             .expect("failed to subscribe to Netlink events");
+        #[cfg(feature = "async")]
+        let mut async_watcher = backend
+            .watch_tokio(EventFilter::none().routes())
+            .expect("failed to subscribe to async Netlink events");
         let interface_index = loopback_interface_index(&backend);
         let destination = Network::from(Ipv4Network::new(
             Ipv4Address::new(198, 51, 100, 0),
@@ -1158,7 +1187,14 @@ mod tests {
                 Ok(Some(Event::Route { id, .. })) if id == watched_id
             )
         });
+        #[cfg(feature = "async")]
+        let async_observed = tokio_route_event(&mut async_watcher, watched_id);
         let _ = backend.remove_route(route);
         assert!(observed, "watch() did not report the route mutation");
+        #[cfg(feature = "async")]
+        assert!(
+            async_observed,
+            "watch_tokio() did not report the route mutation"
+        );
     }
 }

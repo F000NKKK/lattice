@@ -1094,6 +1094,28 @@ mod tests {
     use super::*;
     use net_lattice_ip::{Ipv4Address, Ipv4Network, Ipv4PrefixLength};
 
+    #[cfg(feature = "async")]
+    fn tokio_route_event(watcher: &mut TokioEventReceiver<Event>, id: RouteId) -> bool {
+        use std::pin::Pin;
+        use std::task::{Context, Poll, Waker};
+        use std::time::Duration;
+
+        let waker = Waker::noop();
+        let mut context = Context::from_waker(waker);
+        for _ in 0..12 {
+            match Pin::new(&mut *watcher).poll_recv(&mut context) {
+                Poll::Ready(Some(Ok(Event::Route { id: event_id, .. }))) if event_id == id => {
+                    return true;
+                }
+                Poll::Ready(None) => return false,
+                Poll::Ready(Some(_)) | Poll::Pending => {
+                    std::thread::sleep(Duration::from_millis(250))
+                }
+            }
+        }
+        false
+    }
+
     /// Exercises a real round trip through the IP Helper API, no privilege
     /// required: routing table dumps are readable by any user. This is the
     /// one test in this module that runs by default and actually proves the
@@ -1320,6 +1342,10 @@ mod tests {
         let watcher = backend
             .watch()
             .expect("failed to register IP Helper notifications");
+        #[cfg(feature = "async")]
+        let mut async_watcher = backend
+            .watch_tokio(EventFilter::none().routes())
+            .expect("failed to register async IP Helper notifications");
         let interface_index = backend
             .interfaces()
             .expect("failed to list Windows interfaces")
@@ -1358,7 +1384,14 @@ mod tests {
                 Ok(Some(Event::Route { id, .. })) if id == watched_id
             )
         });
+        #[cfg(feature = "async")]
+        let async_observed = tokio_route_event(&mut async_watcher, watched_id);
         let _ = backend.remove_route(route);
         assert!(observed, "watch() did not report the route mutation");
+        #[cfg(feature = "async")]
+        assert!(
+            async_observed,
+            "watch_tokio() did not report the route mutation"
+        );
     }
 }
