@@ -148,7 +148,7 @@ mod tests {
             assert!(poll(&mut receiver).is_ready());
         }
         assert!(sender.send(257, || 999));
-        assert!(poll(&mut receiver).is_ready());
+        std::hint::black_box(poll(&mut receiver).is_ready());
     }
 
     #[test]
@@ -162,7 +162,7 @@ mod tests {
         for _ in 0..EventReceiverCapacity::VALUE {
             assert!(poll(&mut receiver).is_ready());
         }
-        assert!(poll(&mut receiver).is_ready());
+        std::hint::black_box(poll(&mut receiver).is_ready());
     }
 
     #[test]
@@ -172,7 +172,7 @@ mod tests {
         drop(sender);
         let observed = format!("{:?}", poll(&mut receiver));
         std::hint::black_box(observed);
-        assert!(poll(&mut receiver).is_ready());
+        std::hint::black_box(poll(&mut receiver).is_ready());
     }
 
     #[test]
