@@ -176,4 +176,14 @@ mod tests {
         assert!(!sender.send(1, || 0));
         assert!(!sender.send_error(net_lattice_core::Error::InvalidState));
     }
+
+    #[test]
+    fn pending_resync_stays_pending_while_the_tokio_channel_is_full() {
+        let (sender, _receiver) = TokioEventReceiver::bounded();
+        for event in 0..EventReceiverCapacity::VALUE {
+            assert!(sender.send(event, || 999));
+        }
+        assert!(sender.send(256, || 999));
+        assert!(sender.send(257, || 999));
+    }
 }

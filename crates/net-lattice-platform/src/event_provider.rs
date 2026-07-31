@@ -370,4 +370,35 @@ mod tests {
         assert!(!sender.send(1, 0));
         assert!(!sender.send_error(Error::InvalidState));
     }
+
+    #[test]
+    fn receive_methods_propagate_queued_errors_and_disconnects() {
+        let (sender, receiver) = EventReceiver::<u32>::bounded();
+        assert!(sender.send_error(Error::InvalidState));
+        assert!(matches!(receiver.try_recv(), Err(Error::InvalidState)));
+        drop(sender);
+        assert!(matches!(receiver.try_recv(), Err(Error::Disconnected)));
+
+        let (sender, receiver) = EventReceiver::<u32>::bounded();
+        assert!(sender.send_error(Error::InvalidState));
+        assert!(matches!(
+            receiver.recv_timeout(Duration::from_secs(1)),
+            Err(Error::InvalidState)
+        ));
+        drop(sender);
+        assert!(matches!(
+            receiver.recv_timeout(Duration::ZERO),
+            Err(Error::Disconnected)
+        ));
+    }
+
+    #[test]
+    fn pending_resync_handles_full_and_disconnected_channels() {
+        let (sender, receiver) = EventReceiver::bounded_with_capacity(1);
+        assert!(sender.send(1, 99));
+        assert!(sender.send(2, 99));
+        assert!(sender.send(3, 99));
+        drop(receiver);
+        assert!(!sender.send(4, 99));
+    }
 }
