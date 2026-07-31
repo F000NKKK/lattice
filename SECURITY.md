@@ -31,7 +31,7 @@ informed as the issue is investigated and resolved.
 
 ## Scope
 
-Net Lattice has landed Stage 0.11 of its [architecture](ARCHITECTURE.md)'s
+Net Lattice has landed Stage 0.13 of its [architecture](ARCHITECTURE.md)'s
 Incremental Delivery Plan: route, interface, DNS-read, neighbor-read, and
 address-read and address-mutation providers for Linux (`net-lattice-backend-linux`, via Netlink
 and `/etc/resolv.conf`), Windows (`net-lattice-backend-windows`, via the IP
