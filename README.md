@@ -39,7 +39,7 @@ Net Lattice is intended to fill this gap by providing a single, well-designed ab
 - **Correctness and safety first.** Networking configuration is sensitive; the library should make incorrect states difficult to represent.
 - **Incremental, well-considered growth.** Features are added deliberately, with attention to API design and long-term maintainability, rather than rushed to cover every possible use case.
 
-## Capability Roadmap
+## Capabilities
 
 Implemented:
 
@@ -74,14 +74,18 @@ Stage 0.11 of the [architecture](ARCHITECTURE.md)'s Incremental Delivery Plan ha
 
 - `net-lattice-core`, `net-lattice-ip`
 - `net-lattice-model`'s `route`, `mac`, `interface`, `dns`, `neighbor`, `ifaddr`, and `event` modules; `NewInterfaceAddress` expresses address-assignment intent separately from an observed `InterfaceAddress`
-- `net-lattice-platform`'s `RouteProvider`, `InterfaceProvider`, `DnsProvider`, `NeighborProvider`, `AddressProvider`, `AddressMutator`, `CapabilityProvider`, synchronous `EventProvider`/bounded `EventReceiver`, and feature-gated `TokioEventProvider`
+- `net-lattice-platform`'s `RouteProvider`, `InterfaceProvider`, `DnsProvider`, `NeighborProvider`, `AddressProvider`, `AddressMutator`, `CapabilityProvider`, synchronous `EventProvider`/bounded `EventReceiver`, and optional async monitoring support
 - `net-lattice-backend-linux` (routes, interfaces, neighbors, address reads and mutations, and monitoring via Netlink; DNS via `/etc/resolv.conf`)
 - `net-lattice-backend-windows` (routes and interfaces via the Windows IP Helper API, DNS via `GetAdaptersAddresses`, neighbors via `GetIpNetTable2`, address reads and mutations via the unicast-address IP Helper API, monitoring via IP Helper notifications)
 - `net-lattice-backend-darwin` (routes, neighbors, and monitoring via macOS BSD routing facilities; interfaces and address reads via `getifaddrs`; address mutations via native address ioctls; DNS via `/etc/resolv.conf`)
 - `net-lattice-async`, which exposes the single runtime-agnostic `EventStream` type
 - the `net-lattice` facade, including `Lattice::add_address()`, `Lattice::remove_address()`, `Lattice::capabilities()`, `Lattice::supports()`, `Lattice::watch()`, and feature-gated `Lattice::watch_async()`
 
-This gives real route and interface-address management, interface listing, DNS resolver reads, neighbor (ARP/NDP) table reads, and bounded network-change monitoring on Linux, Windows, and macOS. Address creation accepts `NewInterfaceAddress` and returns the resulting observed `InterfaceAddress`, so callers never invent an address ID. `Lattice::watch_filtered(EventFilter::none().routes())` limits delivered domains; if `Event::ResyncRequired` arrives, re-read the affected state because a slow consumer overflowed the bounded queue. Query `Lattice::supports(Capability::MONITORING)` before watching in portable code. With the optional `async` feature, `Lattice::watch_async(filter)` returns the same `EventStream` on every platform: Linux reads Netlink through its Tokio reactor, Windows writes native IP Helper callbacks to the Tokio transport, and macOS bridges its native PF_ROUTE reader to that transport. The stream implements `futures::Stream` and does not select an application executor. This is still not a complete library: DNS mutation, VLANs, VRFs, namespaces, firewall integration, transactional configuration, declarative networking, and other advanced capabilities are still ahead; see [ARCHITECTURE.md](ARCHITECTURE.md)'s Incremental Delivery Plan for the staged roadmap and [CHANGELOG.md](CHANGELOG.md) for what has actually shipped.
+This gives real route and interface-address management, interface listing, DNS resolver reads, neighbor (ARP/NDP) table reads, and bounded network-change monitoring on Linux, Windows, and macOS. Address creation accepts `NewInterfaceAddress` and returns the resulting observed `InterfaceAddress`, so callers never invent an address ID. `Lattice::watch_filtered(EventFilter::none().routes())` limits delivered domains. Query `Lattice::supports(Capability::MONITORING)` before watching in portable code. With the optional `async` feature, `Lattice::watch_async(filter)` exposes the same `EventStream` API on every platform. Tokio is used internally where the native implementation requires it, while applications interact only with the runtime-independent `futures::Stream` interface. This is still not a complete library: DNS mutation, VLANs, VRFs, namespaces, firewall integration, transactional configuration, declarative networking, and other advanced capabilities are still ahead; see [ARCHITECTURE.md](ARCHITECTURE.md)'s Incremental Delivery Plan for the staged roadmap and [CHANGELOG.md](CHANGELOG.md) for what has actually shipped.
+
+### Event delivery
+
+Event streams are bounded. If a consumer falls behind, the watcher emits `Event::ResyncRequired { .. }` instead of retaining an unbounded backlog. Re-read the corresponding provider state before continuing to consume events.
 
 ## Quick Example
 
@@ -121,6 +125,24 @@ async fn monitor() -> Result<()> {
     }
     Ok(())
 }
+```
+
+Address assignment uses a request type, so callers never construct an observed address ID:
+
+```rust
+use net_lattice::{
+    InterfaceId, Ipv4Address, Ipv4Network, Ipv4PrefixLength, Network,
+    NewInterfaceAddress,
+};
+
+let request = NewInterfaceAddress::new(
+    InterfaceId::new(2),
+    Network::from(Ipv4Network::new(
+        Ipv4Address::new(192, 0, 2, 10),
+        Ipv4PrefixLength::new(24)?,
+    )),
+);
+let observed = lattice.add_address(request)?;
 ```
 
 ## Roadmap
