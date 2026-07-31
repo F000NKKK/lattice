@@ -3,8 +3,8 @@
 ## Supported Versions
 
 Net Lattice follows a rolling support policy. Security fixes are provided only
-for the latest stable release series. With the release of Stage 0.11, support
-for the 0.1.x-0.10.x series has ended — upgrade to 0.11.x to receive fixes.
+for the latest stable release series. With the release of 0.13.0, support for
+the 0.1.x-0.12.x series has ended — upgrade to 0.13.x to receive fixes.
 
 | Version | Supported |
 | ------- | --------- |
@@ -32,14 +32,21 @@ informed as the issue is investigated and resolved.
 ## Scope
 
 Net Lattice has landed Stage 0.13 of its [architecture](ARCHITECTURE.md)'s
-Incremental Delivery Plan: route, interface, DNS-read, neighbor-read, and
-address-read and address-mutation providers for Linux (`net-lattice-backend-linux`, via Netlink
-and `/etc/resolv.conf`), Windows (`net-lattice-backend-windows`, via the IP
-Helper API), and macOS (`net-lattice-backend-darwin`, via BSD routing sockets,
-`getifaddrs`, address ioctls, and `/etc/resolv.conf`), plus monitoring via Netlink multicast
-(Linux), PF_ROUTE (macOS), and IP Helper notifications (Windows), with bounded delivery and explicit overflow resynchronization. Route
-Route, interface, and address-mutation operations are privileged (see ARCHITECTURE.md's Privilege
-Model) — vulnerability reports involving unintended route manipulation,
-privilege confusion, or memory-safety issues in route, interface, DNS,
-neighbor, address, or monitoring message/data handling are in scope. No
-other domain (firewall, ...) exists yet.
+Incremental Delivery Plan: route inspection and mutation, interface
+inspection, DNS resolver inspection and mutation, neighbor inspection, and
+interface-address inspection and mutation on Linux
+(`net-lattice-backend-linux`, via Netlink and `/etc/resolv.conf`), Windows
+(`net-lattice-backend-windows`, via the IP Helper API), and macOS
+(`net-lattice-backend-darwin`, via BSD routing sockets, `getifaddrs`, address
+ioctls, and `/etc/resolv.conf`). Monitoring is bounded with explicit overflow
+resynchronization: Linux observes routes, links, neighbors, and addresses via
+Netlink multicast; Windows observes routes, interfaces, and unicast addresses
+via IP Helper; macOS observes routes, interfaces, neighbors, and addresses via
+PF_ROUTE. DNS changes do not currently produce watcher events.
+
+Route, interface-address, and DNS-mutation operations are privileged (see
+[ARCHITECTURE.md](ARCHITECTURE.md)'s Privilege Model). Reports involving
+unintended network mutation, partial DNS application, privilege confusion, or
+memory-safety issues in route, interface, DNS, neighbor, address, or
+monitoring message/data handling are in scope. Firewall, VLAN, VRF,
+namespace, and tunnel domains do not exist yet.
