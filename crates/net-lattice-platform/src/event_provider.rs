@@ -167,7 +167,11 @@ impl<E> EventReceiver<E> {
     /// and no further events can arrive. Other producer errors are propagated
     /// unchanged.
     pub fn recv(&self) -> Result<E> {
-        self.receiver.recv().map_err(|_| Error::Disconnected)?
+        match self.receiver.recv() {
+            Ok(Ok(event)) => Ok(event),
+            Ok(Err(error)) => Err(error),
+            Err(_) => Err(Error::Disconnected),
+        }
     }
 
     /// Attempts to receive an event without blocking.
