@@ -625,8 +625,8 @@ started; earlier stages may inform adjustments to later ones.
   and backend-facing constructors. Existing root re-exports remain available
   for compatibility.
 - **Receiver constructor naming:** backend code should use
-  `EventReceiver::from_channel_receiver`; `EventReceiver::new` remains a
-  deprecated compatibility alias.
+  `EventReceiver::from_channel_receiver`; the ambiguous `EventReceiver::new`
+  constructor was removed before 1.0.
 - **Provider trait status:** provider traits are an official extension API for
   third-party backends. Implementations must preserve each trait's documented
   read, mutation, event-delivery, filtering, cancellation, and error

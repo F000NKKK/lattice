@@ -632,8 +632,8 @@ provider-traits, а не другой контракт backend'а. Дорабо�
   событий и backend-конструкторов. Существующие re-export'ы из корня остаются
   для совместимости.
 - **Имена конструкторов receiver:** backend-код должен использовать
-  `EventReceiver::from_channel_receiver`; `EventReceiver::new` остаётся
-  deprecated compatibility alias.
+  `EventReceiver::from_channel_receiver`; неоднозначный конструктор
+  `EventReceiver::new` удалён до 1.0.
 - **Статус provider traits:** provider-trait'ы — официальный extension API для
   сторонних backend'ов. Реализации обязаны сохранять документированные
   семантики чтения, изменения, доставки событий, filtering, cancellation и
