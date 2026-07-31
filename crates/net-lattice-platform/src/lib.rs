@@ -32,11 +32,29 @@ pub use route_provider::RouteProvider;
 #[cfg(feature = "async")]
 pub use tokio_event_provider::{TokioEventReceiver, TokioEventSender};
 
-/// Tokio watcher contract, available with the `async` feature.
+/// Backend contract for native Tokio-based event delivery.
+///
+/// Implementations can expose operating-system notification mechanisms
+/// directly through a Tokio-aware receiver without routing events through a
+/// synchronous [`EventReceiver`] and a blocking adapter thread.
+///
+/// This trait is intended for backend implementations. Applications normally
+/// subscribe through `Lattice::watch_async`.
+///
+/// Available with the `async` feature.
 #[cfg(feature = "async")]
 pub trait TokioEventProvider {
+    /// The event type produced by the native watcher.
     type Event;
+    /// The filter type accepted when creating a native watcher.
     type EventFilter;
+
+    /// Creates a native Tokio-based watcher using `filter`.
+    ///
+    /// This method is intended for backend integration. Applications normally
+    /// use `Lattice::watch_async`. The returned receiver owns the native
+    /// subscription; dropping it releases associated backend resources and
+    /// cancels event delivery.
     fn watch_tokio(
         &self,
         filter: Self::EventFilter,

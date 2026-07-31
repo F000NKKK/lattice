@@ -5,15 +5,19 @@ use net_lattice_core::{Error, Result};
 
 /// A bounded synchronous receiver of network change events.
 ///
+/// Receivers are normally created through the facade's `Lattice::watch` or
+/// `Lattice::watch_filtered` methods.
+///
 /// [`Self::recv`] blocks, while [`Self::try_recv`] and
 /// [`Self::recv_timeout`] do not wait indefinitely. Dropping the receiver
-/// cancels its native watcher subscription. If its producer shuts down,
-/// receive methods return [`Error::Disconnected`]. When a slow consumer
-/// fills the bounded queue, multiple dropped events are coalesced into one
-/// resynchronization event delivered before a later ordinary event.
+/// also drops any backend-owned subscription guard, allowing its native
+/// watcher to stop. If its producer shuts down, receive methods return
+/// [`Error::Disconnected`]. When a slow consumer fills the bounded queue,
+/// multiple dropped events are coalesced into one resynchronization event
+/// delivered before a later ordinary event.
 ///
 /// `EventReceiver<E>` is `Send` when `E` is `Send`; it is not cloneable, so a
-/// watcher has one consuming receiver.
+/// watcher has one consuming receiver. It is not guaranteed to be [`Sync`].
 ///
 /// Mirrors [`std::sync::mpsc::Receiver`] deliberately — a bare channel
 /// receiver, not a `futures_core::Stream`, so that neither
@@ -78,9 +82,25 @@ pub struct EventReceiver<E> {
 }
 
 impl<E> EventReceiver<E> {
+    /// Creates a bounded event channel using the default capacity.
+    ///
+    /// This constructor is intended for backend implementations. Applications
+    /// normally obtain an `EventReceiver` through `Lattice::watch` or
+    /// `Lattice::watch_filtered`. The returned sender applies Net Lattice's
+    /// bounded-delivery and overflow semantics.
     pub fn bounded() -> (EventSender<E>, Self) {
         Self::bounded_with_capacity(DEFAULT_EVENT_QUEUE_CAPACITY)
     }
+
+    /// Creates a bounded event channel with the requested capacity.
+    ///
+    /// This constructor is intended for backend implementations. Applications
+    /// normally obtain an `EventReceiver` through `Lattice::watch` or
+    /// `Lattice::watch_filtered`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `capacity` is zero.
     pub fn bounded_with_capacity(capacity: usize) -> (EventSender<E>, Self) {
         assert!(capacity > 0, "event queue capacity must be non-zero");
         let (sender, receiver) = mpsc::sync_channel(capacity);
@@ -95,9 +115,12 @@ impl<E> EventReceiver<E> {
             },
         )
     }
-    /// Wraps a channel receiver a backend's background watcher thread/task
-    /// sends events into. The `Sender` half is not exposed here — only the
-    /// backend that spawned the watcher should be able to produce events.
+    /// Wraps a channel receiver that a backend watcher thread or task sends
+    /// events into.
+    ///
+    /// This constructor is intended for backend implementations. Applications
+    /// normally obtain an `EventReceiver` through `Lattice::watch` or
+    /// `Lattice::watch_filtered`.
     pub fn new(receiver: mpsc::Receiver<Result<E>>) -> Self {
         Self {
             receiver,
@@ -105,9 +128,16 @@ impl<E> EventReceiver<E> {
         }
     }
 
-    /// Associates a backend-owned cancellation guard with this receiver.
-    /// Backends use this after registering a native watcher; dropping the
-    /// receiver drops the guard and therefore stops the native subscription.
+    /// Wraps a channel receiver and attaches a backend-owned subscription
+    /// guard.
+    ///
+    /// The guard is retained for the lifetime of the returned receiver.
+    /// Dropping the receiver drops the guard, allowing the associated native
+    /// subscription to stop.
+    ///
+    /// This constructor is intended for backend implementations. Applications
+    /// normally obtain an `EventReceiver` through `Lattice::watch` or
+    /// `Lattice::watch_filtered`.
     pub fn from_receiver_with_subscription<S>(
         receiver: mpsc::Receiver<Result<E>>,
         subscription: S,
@@ -120,6 +150,14 @@ impl<E> EventReceiver<E> {
             _subscription: Some(Box::new(subscription)),
         }
     }
+
+    /// Attaches a backend-owned subscription guard to this receiver.
+    ///
+    /// The guard is retained for the lifetime of the receiver and dropped
+    /// when the receiver is dropped. If a guard is already attached, it is
+    /// dropped and replaced by the new guard.
+    ///
+    /// This method is intended for backend implementations.
     pub fn with_subscription<S>(mut self, subscription: S) -> Self
     where
         S: Send + 'static,
@@ -128,17 +166,24 @@ impl<E> EventReceiver<E> {
         self
     }
 
-    /// Blocks until an event arrives. Returns `Err(Error::Disconnected)`
-    /// once the backend's watcher has shut down and no further event will
-    /// ever arrive.
+    /// Blocks until the next event is available.
+    ///
+    /// A temporarily empty queue does not cause this method to return. The
+    /// receiver retains any attached subscription guard throughout the wait.
+    /// Returns [`Error::Disconnected`] after the backend watcher has stopped
+    /// and no further events can arrive. Other producer errors are propagated
+    /// unchanged.
     pub fn recv(&self) -> Result<E> {
         self.receiver.recv().map_err(|_| Error::Disconnected)?
     }
 
-    /// Returns immediately: `Ok(Some(event))` if one is already queued,
-    /// `Ok(None)` if none is available right now (not an error — there is
-    /// simply nothing to report yet), or `Err(Error::Disconnected)` if the
-    /// watcher has shut down.
+    /// Attempts to receive an event without blocking.
+    ///
+    /// Returns `Ok(Some(event))` when an event is already queued, `Ok(None)`
+    /// when no event is currently available, or [`Error::Disconnected`] when
+    /// the watcher has stopped and no further events can arrive. A temporarily
+    /// empty queue is not an error. Other producer errors are propagated
+    /// unchanged.
     pub fn try_recv(&self) -> Result<Option<E>> {
         match self.receiver.try_recv() {
             Ok(Ok(event)) => Ok(Some(event)),
@@ -148,9 +193,12 @@ impl<E> EventReceiver<E> {
         }
     }
 
-    /// Blocks for at most `timeout`: `Ok(Some(event))` if one arrives in
-    /// time, `Ok(None)` on timeout (again, not an error), or
-    /// `Err(Error::Disconnected)` if the watcher has shut down.
+    /// Waits for an event for at most `timeout`.
+    ///
+    /// Returns `Ok(Some(event))` when an event arrives before the timeout,
+    /// `Ok(None)` when the timeout expires, or [`Error::Disconnected`] when
+    /// the watcher has stopped and no further events can arrive. A timeout is
+    /// not an error. Other producer errors are propagated unchanged.
     pub fn recv_timeout(&self, timeout: Duration) -> Result<Option<E>> {
         match self.receiver.recv_timeout(timeout) {
             Ok(Ok(event)) => Ok(Some(event)),
@@ -161,6 +209,12 @@ impl<E> EventReceiver<E> {
     }
 }
 
+/// Iterates over events until receiving an event fails.
+///
+/// Calling [`Iterator::next`] blocks in the same way as [`Self::recv`].
+/// Because the iterator item type is `E`, receiver errors terminate iteration
+/// and are not yielded to the caller. Use [`Self::recv`] directly when errors
+/// must be distinguished from normal iterator termination.
 impl<E> Iterator for EventReceiver<E> {
     type Item = E;
 
@@ -196,7 +250,16 @@ pub trait EventProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::thread;
+
+    struct DropGuard(Arc<AtomicUsize>);
+
+    impl Drop for DropGuard {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
 
     #[test]
     fn recv_returns_disconnected_once_the_sender_is_dropped() {
@@ -220,6 +283,40 @@ mod tests {
         });
         let received: Vec<u32> = receiver.collect();
         assert_eq!(received, vec![1, 2]);
+    }
+
+    #[test]
+    fn iterator_terminates_on_a_producer_error() {
+        let (sender, mut receiver) = EventReceiver::<u32>::bounded();
+        assert!(sender.send_error(Error::InvalidState));
+        assert_eq!(receiver.next(), None);
+    }
+
+    #[test]
+    fn dropping_receiver_drops_subscription_guard() {
+        let drops = Arc::new(AtomicUsize::new(0));
+        let (_sender, receiver) = EventReceiver::<u32>::bounded();
+        drop(receiver.with_subscription(DropGuard(Arc::clone(&drops))));
+        assert_eq!(drops.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn replacing_subscription_drops_the_previous_guard() {
+        let first = Arc::new(AtomicUsize::new(0));
+        let second = Arc::new(AtomicUsize::new(0));
+        let (_sender, receiver) = EventReceiver::<u32>::bounded();
+        let receiver = receiver.with_subscription(DropGuard(Arc::clone(&first)));
+        let receiver = receiver.with_subscription(DropGuard(Arc::clone(&second)));
+        assert_eq!(first.load(Ordering::SeqCst), 1);
+        assert_eq!(second.load(Ordering::SeqCst), 0);
+        drop(receiver);
+        assert_eq!(second.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "event queue capacity must be non-zero")]
+    fn zero_capacity_is_rejected() {
+        let _ = EventReceiver::<u32>::bounded_with_capacity(0);
     }
 
     #[test]
