@@ -970,7 +970,7 @@ mod tests {
             use std::pin::Pin;
             use std::task::{Context, Poll, Waker};
 
-            let (sender, mut receiver) = TokioEventReceiver::bounded();
+            let (sender, mut receiver) = TokioEventReceiver::<Event>::bounded();
             for _ in 0..256 {
                 assert!(sender.send(Event::resync_all(), Event::resync_all));
             }
@@ -1003,6 +1003,14 @@ mod tests {
             drop(receiver);
             assert!(!sender.send(Event::resync_all(), Event::resync_all));
             assert!(!sender.send_error(Error::Disconnected));
+
+            let (sender, mut receiver) = TokioEventReceiver::bounded();
+            assert!(sender.send_error(Error::InvalidState));
+            drop(sender);
+            assert!(matches!(
+                Pin::new(&mut receiver).poll_recv(&mut cx),
+                Poll::Ready(Some(Err(Error::InvalidState)))
+            ));
         }
     }
 
