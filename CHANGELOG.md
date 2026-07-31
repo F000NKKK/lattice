@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Stage 0.14 mutation operation model: inspectable `Mutation` values and
+  ordered `MutationPlan`s for the existing route, interface-address, and DNS
+  mutations.
+- Explicit `MutationSemantics` for preconditions, idempotency, elevated
+  privilege, completion confirmation, reversibility, and partial-application
+  risk. Plans are data only; execution remains Stage 0.15 work.
+
 ## [0.13.0] - 2026-08-01
 
 ### Added
