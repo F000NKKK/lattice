@@ -1,7 +1,7 @@
 use std::any::Any;
 use std::pin::Pin;
 use std::sync::{
-    Arc,
+    Arc, Mutex,
     atomic::{AtomicBool, Ordering},
 };
 use std::task::{Context, Poll};
@@ -18,6 +18,7 @@ use net_lattice_core::Result;
 pub struct TokioEventSender<E> {
     sender: tokio::sync::mpsc::Sender<Result<E>>,
     resync_pending: Arc<AtomicBool>,
+    terminal_error: Arc<Mutex<Option<net_lattice_core::Error>>>,
 }
 
 /// Tokio receiver that owns the native subscription which produces its events.
@@ -27,6 +28,7 @@ pub struct TokioEventSender<E> {
 pub struct TokioEventReceiver<E> {
     receiver: tokio::sync::mpsc::Receiver<Result<E>>,
     subscription: Option<Box<dyn Any + Send>>,
+    terminal_error: Arc<Mutex<Option<net_lattice_core::Error>>>,
 }
 
 impl<E> TokioEventReceiver<E> {
@@ -34,14 +36,17 @@ impl<E> TokioEventReceiver<E> {
     pub fn bounded() -> (TokioEventSender<E>, Self) {
         let (sender, receiver) = tokio::sync::mpsc::channel(EventReceiverCapacity::VALUE);
         let pending = Arc::new(AtomicBool::new(false));
+        let terminal_error = Arc::new(Mutex::new(None));
         (
             TokioEventSender {
                 sender,
                 resync_pending: pending,
+                terminal_error: Arc::clone(&terminal_error),
             },
             Self {
                 receiver,
                 subscription: None,
+                terminal_error,
             },
         )
     }
@@ -57,7 +62,16 @@ impl<E> TokioEventReceiver<E> {
 
     /// Polls the next event without tying the platform crate to a futures API.
     pub fn poll_recv(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Result<E>>> {
-        Pin::new(&mut self.receiver).poll_recv(cx)
+        match Pin::new(&mut self.receiver).poll_recv(cx) {
+            Poll::Ready(None) => Poll::Ready(
+                self.terminal_error
+                    .lock()
+                    .expect("Tokio event sender poisoned")
+                    .take()
+                    .map(Err),
+            ),
+            other => other,
+        }
     }
 }
 
@@ -86,7 +100,14 @@ impl<E> TokioEventSender<E> {
 
     /// Reports a terminal backend error if the consumer is still connected.
     pub fn send_error(&self, error: net_lattice_core::Error) -> bool {
-        self.sender.try_send(Err(error)).is_ok()
+        if self.sender.is_closed() {
+            return false;
+        }
+        *self
+            .terminal_error
+            .lock()
+            .expect("Tokio event sender poisoned") = Some(error);
+        true
     }
 }
 
@@ -94,4 +115,46 @@ impl<E> TokioEventSender<E> {
 struct EventReceiverCapacity;
 impl EventReceiverCapacity {
     const VALUE: usize = 256;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn poll<E>(receiver: &mut TokioEventReceiver<E>) -> Poll<Option<Result<E>>> {
+        let waker = std::task::Waker::noop();
+        let mut context = Context::from_waker(waker);
+        Pin::new(receiver).poll_recv(&mut context)
+    }
+
+    #[test]
+    fn overflow_delivers_resync_before_a_later_event() {
+        let (sender, mut receiver) = TokioEventReceiver::bounded();
+        for event in 0..EventReceiverCapacity::VALUE {
+            assert!(sender.send(event, || 999));
+        }
+        assert!(sender.send(256, || 999));
+        for event in 0..EventReceiverCapacity::VALUE {
+            assert!(matches!(poll(&mut receiver), Poll::Ready(Some(Ok(value))) if value == event));
+        }
+        assert!(sender.send(257, || 999));
+        assert!(matches!(poll(&mut receiver), Poll::Ready(Some(Ok(999)))));
+    }
+
+    #[test]
+    fn terminal_error_survives_a_full_queue() {
+        let (sender, mut receiver) = TokioEventReceiver::bounded();
+        for event in 0..EventReceiverCapacity::VALUE {
+            assert!(sender.send(event, || 999));
+        }
+        assert!(sender.send_error(net_lattice_core::Error::InvalidState));
+        drop(sender);
+        for _ in 0..EventReceiverCapacity::VALUE {
+            assert!(matches!(poll(&mut receiver), Poll::Ready(Some(Ok(_)))));
+        }
+        assert!(matches!(
+            poll(&mut receiver),
+            Poll::Ready(Some(Err(net_lattice_core::Error::InvalidState)))
+        ));
+    }
 }
