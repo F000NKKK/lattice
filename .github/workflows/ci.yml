@@ -71,3 +71,48 @@ jobs:
       - name: cargo test --ignored (privileged, Windows — already Administrator)
         if: matrix.os == 'windows-latest'
         run: cargo test -p net-lattice-backend-windows -- --ignored
+
+  async-test:
+    name: async (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust (MSRV)
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.93"
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      # This is intentionally a separate matrix from the synchronous API.
+      # It proves that the opt-in facade compiles cleanly, while preserving a
+      # default build with no async facade code.
+      - name: cargo clippy --workspace --all-targets --all-features -- -D warnings
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: cargo test --workspace --all-features
+        run: cargo test --workspace --all-features
+
+      - name: cargo doc --no-deps --workspace --all-features
+        run: cargo doc --no-deps --workspace --all-features
+
+      # The ignored route round-trip tests now assert delivery through both
+      # `watch()` and the backend-native `watch_tokio()` path. Native runners
+      # therefore verify the full async event path on every supported OS.
+      - name: cargo test --ignored --features async (privileged, Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo env "PATH=$PATH" "HOME=$HOME" cargo test -p net-lattice-backend-linux --features async -- --ignored
+
+      - name: cargo test --ignored --features async (privileged, macOS)
+        if: matrix.os == 'macos-latest'
+        run: sudo env "PATH=$PATH" "HOME=$HOME" cargo test -p net-lattice-backend-darwin --features async -- --ignored
+
+      - name: cargo test --ignored --features async (privileged, Windows)
+        if: matrix.os == 'windows-latest'
+        run: cargo test -p net-lattice-backend-windows --features async -- --ignored
