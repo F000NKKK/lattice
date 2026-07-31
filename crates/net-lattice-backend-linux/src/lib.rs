@@ -950,6 +950,48 @@ mod tests {
         assert!(capabilities.contains(Capability::DNS_MUTATION));
     }
 
+    #[test]
+    fn event_transport_covers_model_event_paths() {
+        let (sender, receiver) = EventReceiver::bounded_with_capacity(1);
+        assert!(sender.send(Event::resync_all(), Event::resync_all()));
+        assert!(sender.send(Event::resync_all(), Event::resync_all()));
+        assert!(sender.send(Event::resync_all(), Event::resync_all()));
+        assert!(receiver.recv().is_ok());
+        assert!(sender.send(Event::resync_all(), Event::resync_all()));
+        assert!(receiver.recv().is_ok());
+        drop(receiver);
+        assert!(!sender.send(Event::resync_all(), Event::resync_all()));
+
+        #[cfg(feature = "async")]
+        {
+            use std::pin::Pin;
+            use std::task::{Context, Poll, Waker};
+
+            let (sender, mut receiver) = TokioEventReceiver::bounded();
+            for _ in 0..256 {
+                assert!(sender.send(Event::resync_all(), Event::resync_all));
+            }
+            assert!(sender.send(Event::resync_all(), Event::resync_all));
+            assert!(sender.send(Event::resync_all(), Event::resync_all));
+            let waker = Waker::noop();
+            let mut cx = Context::from_waker(waker);
+            for _ in 0..256 {
+                assert!(matches!(
+                    Pin::new(&mut receiver).poll_recv(&mut cx),
+                    Poll::Ready(_)
+                ));
+            }
+            assert!(sender.send(Event::resync_all(), Event::resync_all));
+            assert!(matches!(
+                Pin::new(&mut receiver).poll_recv(&mut cx),
+                Poll::Ready(_)
+            ));
+            drop(receiver);
+            assert!(!sender.send(Event::resync_all(), Event::resync_all));
+            assert!(!sender.send_error(Error::Disconnected));
+        }
+    }
+
     /// Exercises a real round trip through Netlink, no privilege required:
     /// `RTM_GETADDR` dumps are readable by any user, and every Linux system
     /// has at least `lo`'s `127.0.0.1/8`.
@@ -1332,6 +1374,26 @@ mod tests {
             .dns_config()
             .expect("/etc/resolv.conf should be readable");
         let _ = config;
+    }
+
+    #[test]
+    #[ignore = "requires a working Netlink socket; run with the privileged backend coverage job"]
+    fn invalid_mutations_exercise_kernel_error_paths() {
+        let _guard = kernel_test_guard();
+        let backend = LinuxBackend::new().expect("failed to open a Netlink connection");
+        let network = Network::from(Ipv4Network::new(
+            Ipv4Address::new(203, 0, 113, 250),
+            Ipv4PrefixLength::new(32).expect("valid prefix"),
+        ));
+        let requested = NewInterfaceAddress::new(Id::new(u64::from(u32::MAX)), network);
+        assert!(backend.add_address(requested).is_err());
+
+        let missing = InterfaceAddress::new(Id::new(u64::MAX), u32::MAX, network);
+        assert!(backend.remove_address(missing).is_err());
+
+        let route = Route::new(RouteId::new(0), network).with_interface_index(u32::MAX);
+        assert!(backend.add_route(route.clone()).is_err());
+        assert!(backend.remove_route(route).is_err());
     }
 
     fn loopback_interface_index(backend: &LinuxBackend) -> u32 {
