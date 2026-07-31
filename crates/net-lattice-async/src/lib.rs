@@ -81,7 +81,6 @@ impl<E> Drop for EventStream<E> {
 }
 
 /// Tokio-specific event stream, available with the `tokio` feature.
-#[cfg(feature = "tokio")]
 pub struct TokioEventStream<E> {
     receiver: tokio::sync::mpsc::UnboundedReceiver<Result<E>>,
     stop: Arc<AtomicBool>,
@@ -89,7 +88,6 @@ pub struct TokioEventStream<E> {
 }
 
 /// Bridges a watcher to Tokio's waker-aware channel.
-#[cfg(feature = "tokio")]
 pub fn tokio_stream<E>(receiver: EventReceiver<E>) -> TokioEventStream<E>
 where
     E: Send + 'static,
@@ -120,7 +118,6 @@ where
     }
 }
 
-#[cfg(feature = "tokio")]
 impl<E> Stream for TokioEventStream<E> {
     type Item = Result<E>;
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -128,7 +125,6 @@ impl<E> Stream for TokioEventStream<E> {
     }
 }
 
-#[cfg(feature = "tokio")]
 impl<E> Drop for TokioEventStream<E> {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Release);
