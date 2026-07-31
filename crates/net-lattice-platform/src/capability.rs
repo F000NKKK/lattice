@@ -7,6 +7,17 @@ bitflags::bitflags! {
     /// Whether the *running* kernel has, say, VRF support enabled is a fact
     /// about the current machine, not the crate — see ARCHITECTURE.md's
     /// `net-lattice-platform` section.
+    ///
+    /// Capabilities describe the backend's view when queried; callers should
+    /// still handle operation errors because permissions or system
+    /// configuration may change later. Use them as a portable feature gate,
+    /// for example:
+    ///
+    /// ```ignore
+    /// if lattice.supports(Capability::MONITORING) {
+    ///     let watcher = lattice.watch()?;
+    /// }
+    /// ```
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct Capability: u64 {
         const IPV6 = 1 << 0;

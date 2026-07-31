@@ -10,4 +10,5 @@ mod id;
 pub use error::{Error, PlatformErrorCode};
 pub use id::Id;
 
+/// A result returned by Net Lattice operations.
 pub type Result<T> = core::result::Result<T, Error>;

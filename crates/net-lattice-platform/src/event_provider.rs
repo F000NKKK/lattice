@@ -3,8 +3,17 @@ use std::time::Duration;
 
 use net_lattice_core::{Error, Result};
 
-/// A blocking, synchronous source of events pushed by a backend's
-/// background watcher.
+/// A bounded synchronous receiver of network change events.
+///
+/// [`Self::recv`] blocks, while [`Self::try_recv`] and
+/// [`Self::recv_timeout`] do not wait indefinitely. Dropping the receiver
+/// cancels its native watcher subscription. If its producer shuts down,
+/// receive methods return [`Error::Disconnected`]. When a slow consumer
+/// fills the bounded queue, multiple dropped events are coalesced into one
+/// resynchronization event delivered before a later ordinary event.
+///
+/// `EventReceiver<E>` is `Send` when `E` is `Send`; it is not cloneable, so a
+/// watcher has one consuming receiver.
 ///
 /// Mirrors [`std::sync::mpsc::Receiver`] deliberately — a bare channel
 /// receiver, not a `futures_core::Stream`, so that neither
@@ -160,7 +169,8 @@ impl<E> Iterator for EventReceiver<E> {
     }
 }
 
-/// Subscribes to change notifications for the domains a backend supports.
+/// Subscribes to filtered change notifications for the domains and objects a
+/// backend supports.
 ///
 /// Generic over an associated `Event` type rather than naming
 /// `net_lattice_model::event::Event` directly — `net-lattice-platform` does

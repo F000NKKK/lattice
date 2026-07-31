@@ -27,7 +27,7 @@ pub enum EventDomain {
     All,
 }
 
-/// Selects which domains an event watcher delivers.
+/// A composable filter for event domains and individual network objects.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct EventFilter {
     routes: bool,

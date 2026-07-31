@@ -1,6 +1,12 @@
 use crate::IpAddress;
 
-/// The system's current DNS resolver configuration.
+/// The resolver configuration observed through the active platform backend.
+///
+/// This is an observed resolver view, not a promise of complete persistent or
+/// per-interface DNS state. For example, Unix backends currently read the
+/// active resolver file, while Windows collects adapter-provided resolver
+/// data. Server and search-domain order is preserved as reported by the
+/// backend.
 ///
 /// `#[non_exhaustive]`: platforms surface DNS configuration differently
 /// (a flat `/etc/resolv.conf` on Linux/BSD/macOS vs. per-adapter DNS server

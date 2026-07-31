@@ -1,4 +1,25 @@
-//! The public-facing facade of Net Lattice.
+//! Cross-platform inspection, mutation, and monitoring of operating-system
+//! networking through a strongly typed Rust API.
+//!
+//! Start with [`Lattice::connect`] to inspect interfaces, addresses, routes,
+//! DNS configuration, and neighbor tables; perform supported mutations; or
+//! subscribe to network change events.
+//!
+//! # Example
+//!
+//! ```no_run
+//! use net_lattice::{Lattice, Result};
+//!
+//! fn main() -> Result<()> {
+//!     let lattice = Lattice::connect()?;
+//!     for interface in lattice.interfaces()? {
+//!         println!("{interface:?}");
+//!     }
+//!     Ok(())
+//! }
+//! ```
+//!
+//! # Facade design
 //!
 //! Re-exports the types consumers need from `net-lattice-model` and
 //! `net-lattice-ip`, selects a default backend based on `cfg(target_os =
