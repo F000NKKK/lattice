@@ -35,7 +35,7 @@ pub use net_lattice_core::{Error, Id, PlatformErrorCode, Result};
 pub use net_lattice_ip::{
     Ipv4Address, Ipv4Network, Ipv4PrefixLength, Ipv6Address, Ipv6Network, Ipv6PrefixLength,
 };
-pub use net_lattice_model::dns::DnsConfig;
+pub use net_lattice_model::dns::{DnsConfig, NewDnsConfig};
 pub use net_lattice_model::event::{ChangeKind, Event, EventDomain, EventFilter};
 pub use net_lattice_model::ifaddr::{InterfaceAddress, InterfaceAddressId, NewInterfaceAddress};
 pub use net_lattice_model::interface::{
@@ -48,8 +48,8 @@ pub use net_lattice_model::{IpAddress, Network};
 #[cfg(feature = "async")]
 pub use net_lattice_platform::TokioEventProvider;
 pub use net_lattice_platform::{
-    AddressMutator, AddressProvider, Capability, CapabilityProvider, DnsProvider, EventProvider,
-    EventReceiver, InterfaceProvider, NeighborProvider, RouteProvider,
+    AddressMutator, AddressProvider, Capability, CapabilityProvider, DnsMutator, DnsProvider,
+    EventProvider, EventReceiver, InterfaceProvider, NeighborProvider, RouteProvider,
 };
 
 /// Contracts for implementing a third-party Net Lattice backend.
@@ -61,8 +61,9 @@ pub use net_lattice_platform::{
 pub mod backend {
     pub use crate::LatticeBackend;
     pub use net_lattice_platform::{
-        AddressMutator, AddressProvider, CapabilityProvider, DnsProvider, EventProvider,
-        EventReceiver, EventSender, InterfaceProvider, NeighborProvider, RouteProvider,
+        AddressMutator, AddressProvider, CapabilityProvider, DnsMutator, DnsProvider,
+        EventProvider, EventReceiver, EventSender, InterfaceProvider, NeighborProvider,
+        RouteProvider,
     };
     #[cfg(feature = "async")]
     pub use net_lattice_platform::{TokioEventProvider, TokioEventReceiver, TokioEventSender};
@@ -84,7 +85,7 @@ pub mod backend {
 pub trait LatticeBackend:
     RouteProvider<Route = Route>
     + InterfaceProvider<Interface = Interface>
-    + DnsProvider<DnsConfig = DnsConfig>
+    + DnsMutator<NewDnsConfig = NewDnsConfig, DnsConfig = DnsConfig>
     + NeighborProvider<NeighborEntry = NeighborEntry>
     + AddressProvider<InterfaceAddress = InterfaceAddress>
     + AddressMutator<NewInterfaceAddress = NewInterfaceAddress, InterfaceAddress = InterfaceAddress>
@@ -96,7 +97,7 @@ pub trait LatticeBackend:
 impl<B> LatticeBackend for B where
     B: RouteProvider<Route = Route>
         + InterfaceProvider<Interface = Interface>
-        + DnsProvider<DnsConfig = DnsConfig>
+        + DnsMutator<NewDnsConfig = NewDnsConfig, DnsConfig = DnsConfig>
         + NeighborProvider<NeighborEntry = NeighborEntry>
         + AddressProvider<InterfaceAddress = InterfaceAddress>
         + AddressMutator<
@@ -131,6 +132,12 @@ impl<B: LatticeBackend> Lattice<B> {
 
     pub fn dns_config(&self) -> Result<DnsConfig> {
         self.backend.dns_config()
+    }
+
+    /// Replaces resolver configuration and returns the resulting observed
+    /// resolver view.
+    pub fn set_dns_config(&self, config: NewDnsConfig) -> Result<DnsConfig> {
+        self.backend.set_dns_config(config)
     }
 
     pub fn neighbors(&self) -> Result<Vec<NeighborEntry>> {
