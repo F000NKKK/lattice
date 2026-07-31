@@ -396,6 +396,44 @@ mod tests {
     }
 
     #[test]
+    fn sender_reports_disconnected_string_consumer() {
+        let (sender, receiver) = EventReceiver::<String>::bounded_with_capacity(1);
+        drop(receiver);
+        assert!(!sender.send("event".to_owned(), "resync".to_owned()));
+    }
+
+    #[test]
+    fn string_sender_covers_pending_and_error_paths() {
+        let (sender, receiver) = EventReceiver::<String>::bounded_with_capacity(1);
+        assert!(sender.send("first".into(), "resync".into()));
+        assert!(sender.send("second".into(), "resync".into()));
+        assert!(sender.send("third".into(), "resync".into()));
+        assert_eq!(receiver.recv().unwrap(), "first");
+        assert!(sender.send("fourth".into(), "resync".into()));
+        assert_eq!(receiver.recv().unwrap(), "resync");
+        assert!(sender.send_error(Error::InvalidState));
+        assert!(receiver.recv().is_err());
+
+        let (sender, receiver) = EventReceiver::<String>::bounded();
+        drop(sender);
+        assert!(receiver.recv().is_err());
+    }
+
+    #[test]
+    fn default_integer_sender_covers_pending_full_and_disconnect() {
+        let (sender, receiver) = EventReceiver::bounded_with_capacity(1);
+        assert!(sender.send(1, 99));
+        assert!(sender.send(2, 99));
+        assert!(sender.send(3, 99));
+        drop(receiver);
+        assert!(!sender.send(4, 99));
+
+        let (sender, receiver) = EventReceiver::<i32>::bounded();
+        drop(sender);
+        assert!(receiver.recv().is_err());
+    }
+
+    #[test]
     fn receive_methods_propagate_queued_errors_and_disconnects() {
         let (sender, receiver) = EventReceiver::<u32>::bounded();
         assert!(sender.send_error(Error::InvalidState));

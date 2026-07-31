@@ -222,4 +222,33 @@ mod tests {
         assert!(sender.send(256, || 999));
         assert!(sender.send(257, || 999));
     }
+
+    #[test]
+    fn poll_recv_reports_pending_while_connected_and_empty() {
+        let (_sender, mut receiver) = TokioEventReceiver::<u32>::bounded();
+        assert!(matches!(poll(&mut receiver), Poll::Pending));
+    }
+
+    fn exercise_sender_paths<E: Copy + Send + 'static>(event: E, resync: E) {
+        let (sender, mut receiver) = TokioEventReceiver::bounded();
+        for _ in 0..EventReceiverCapacity::VALUE {
+            assert!(sender.send(event, || resync));
+        }
+        assert!(sender.send(event, || resync));
+        assert!(sender.send(event, || resync));
+        for _ in 0..EventReceiverCapacity::VALUE {
+            assert!(poll(&mut receiver).is_ready());
+        }
+        assert!(sender.send(event, || resync));
+        assert!(poll(&mut receiver).is_ready());
+        drop(receiver);
+        assert!(!sender.send(event, || resync));
+        assert!(!sender.send_error(net_lattice_core::Error::InvalidState));
+    }
+
+    #[test]
+    fn sender_paths_are_exercised_for_common_event_types() {
+        exercise_sender_paths::<u32>(1, 99);
+        exercise_sender_paths::<i32>(1, 99);
+    }
 }

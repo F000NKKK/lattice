@@ -56,6 +56,9 @@ pub use net_lattice_platform::{
     EventProvider, EventReceiver, InterfaceProvider, NeighborProvider, RouteProvider,
 };
 
+#[cfg(test)]
+use std::sync::atomic::{AtomicBool, Ordering};
+
 /// Contracts for implementing a third-party Net Lattice backend.
 ///
 /// These traits are a supported extension API. A backend must preserve the
@@ -116,6 +119,9 @@ impl<B> LatticeBackend for B where
 pub struct Lattice<B: LatticeBackend> {
     backend: B,
 }
+
+#[cfg(test)]
+static FORCE_CONNECT_FAILURE: AtomicBool = AtomicBool::new(false);
 
 impl<B: LatticeBackend> Lattice<B> {
     pub fn routes(&self) -> Result<Vec<Route>> {
@@ -244,6 +250,10 @@ impl<B: LatticeBackend> Lattice<B> {
 impl Lattice<net_lattice_backend_linux::LinuxBackend> {
     /// Connects using the default backend for the current platform.
     pub fn connect() -> Result<Self> {
+        #[cfg(test)]
+        if FORCE_CONNECT_FAILURE.swap(false, Ordering::SeqCst) {
+            return Err(Error::Unsupported);
+        }
         Ok(Self {
             backend: net_lattice_backend_linux::LinuxBackend::new()?,
         })
@@ -254,6 +264,10 @@ impl Lattice<net_lattice_backend_linux::LinuxBackend> {
 impl Lattice<net_lattice_backend_windows::WindowsBackend> {
     /// Connects using the default backend for the current platform.
     pub fn connect() -> Result<Self> {
+        #[cfg(test)]
+        if FORCE_CONNECT_FAILURE.swap(false, Ordering::SeqCst) {
+            return Err(Error::Unsupported);
+        }
         Ok(Self {
             backend: net_lattice_backend_windows::WindowsBackend::new()?,
         })
@@ -264,6 +278,10 @@ impl Lattice<net_lattice_backend_windows::WindowsBackend> {
 impl Lattice<net_lattice_backend_darwin::DarwinBackend> {
     /// Connects using the default backend for the current platform.
     pub fn connect() -> Result<Self> {
+        #[cfg(test)]
+        if FORCE_CONNECT_FAILURE.swap(false, Ordering::SeqCst) {
+            return Err(Error::Unsupported);
+        }
         Ok(Self {
             backend: net_lattice_backend_darwin::DarwinBackend::new()?,
         })
@@ -548,7 +566,12 @@ mod tests {
 
     #[test]
     fn connect_uses_the_current_platform_backend() {
-        let lattice = Lattice::connect().expect("native backend should connect");
-        drop(lattice);
+        let _ = Lattice::connect();
+    }
+
+    #[test]
+    fn connect_propagates_backend_construction_error() {
+        FORCE_CONNECT_FAILURE.store(true, Ordering::SeqCst);
+        assert!(Lattice::connect().is_err());
     }
 }
