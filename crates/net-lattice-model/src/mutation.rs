@@ -353,7 +353,7 @@ mod tests {
 
         let operation = Mutation::AddRoute(Route::new(crate::route::RouteId::new(1), network()));
         plan.push(operation.clone());
-        assert_eq!(plan.operations(), [operation.clone()]);
+        assert_eq!(plan.operations(), std::slice::from_ref(&operation));
         assert_eq!(plan.into_iter().collect::<Vec<_>>(), vec![operation]);
     }
 }
