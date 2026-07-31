@@ -539,6 +539,51 @@ type in `net-lattice-model` — so that it is built in from the first `*Config`
 type rather than retrofitted after `CurrentState`/`DesiredState` have
 already been conflated into one type.
 
+## Mutation and Event Contract Before Transactions
+
+The current imperative API is useful, but it is not an atomic configuration
+engine. Stage 0.14 must turn the following observed behavior into explicit
+operation metadata before a transaction API can make stronger promises.
+
+| Domain | Current mutation contract | Required normalization before declarative apply |
+|---|---|---|
+| Routes | `RouteProvider` adds and removes through native acknowledgements. `Route` is currently both the observed record and mutation input; deletion matching is platform-specific. | Introduce a distinct route intent and an operation precondition/match rule. Define duplicate, absent, and ambiguous-match outcomes. |
+| Interface addresses | `AddressMutator::add_address` returns a re-read `InterfaceAddress`; removal accepts that observed record. IDs are synthesized from interface and network rather than kernel-issued stable identities. | Record identity scope, collision assumptions, and removal preconditions in the operation model. |
+| DNS | `DnsMutator` replaces the portable resolver view and re-reads `DnsConfig`. Unix rewrites the active resolver file and drops directives outside the portable model; Windows changes global search settings and each enumerated adapter through separate calls. | Surface scope, manager ownership, persistence, and partial-application results in the operation report. Do not promise atomic DNS replacement or automatic rollback. |
+| Interface configuration | Read-only today. | Add a separate desired configuration for admin state and MTU; do not reuse observed `Interface`. |
+| Neighbors | Read-only today. | Add distinct static-neighbor intent and lifecycle semantics before exposing mutation. |
+
+Every future mutation operation must state: its target identity and matching
+rule; preconditions; idempotent result; required privilege; whether the OS
+acknowledges completion; whether Net Lattice re-reads observed state; whether
+partial application is possible; and whether a compensating operation is safe.
+`ApplyPlan` may use this metadata, but must never infer rollback safety from a
+successful call alone.
+
+Event delivery is deliberately a separate, eventually consistent signal path:
+
+- A watcher does not provide an initial snapshot, a global order across
+  domains, causal correlation with a caller's mutation, or a guarantee that a
+  successful mutation produces an event. A snapshot comes from the read
+  providers.
+- Linux monitors routes, links, neighbors, and interface addresses through
+  Netlink. Windows monitors routes, interfaces, and unicast addresses through
+  IP Helper; it has no neighbor watcher. macOS monitors routes, interfaces,
+  neighbors, and addresses through PF_ROUTE.
+- No backend emits DNS events in Stage 0.13. DNS mutation must be followed by
+  `dns_config()` when a caller needs the resulting view.
+- A backend preserves its enqueue order, not a cross-domain total order. A
+  full bounded queue coalesces loss into `Event::ResyncRequired`; consumers
+  must re-read the indicated domain before interpreting subsequent ordinary
+  events.
+- Native sources frequently cannot distinguish create from modification.
+  `ChangeKind::Changed` is therefore the conservative result where the OS
+  does not provide an unambiguous lifecycle transition.
+
+Stages 0.14–0.20 must build transactions and declarative apply on these
+constraints rather than retroactively claiming atomicity or event guarantees
+that the native sources do not provide.
+
 ## API Stability Rules
 
 Once published, different crates in this workspace are expected to change

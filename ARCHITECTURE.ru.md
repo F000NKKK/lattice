@@ -544,6 +544,51 @@ transaction-контрактов и оставшейся imperative mutation-п�
 доделано после того, как `CurrentState`/`DesiredState` уже были бы слиты в
 один тип.
 
+## Контракт mutation и событий до транзакций
+
+Текущий imperative API полезен, но ещё не является atomic configuration
+engine. На Stage 0.14 нужно превратить следующее наблюдаемое поведение в
+явные метаданные операций, прежде чем transaction API сможет давать более
+сильные обещания.
+
+| Домен | Текущий контракт mutation | Нормализация, необходимая до declarative apply |
+|---|---|---|
+| Routes | `RouteProvider` добавляет и удаляет через native acknowledgements. `Route` пока одновременно observed record и mutation input; matching при удалении зависит от платформы. | Ввести отдельный route intent и правило precondition/match для операции. Определить результаты duplicate, absent и ambiguous match. |
+| Адреса интерфейсов | `AddressMutator::add_address` возвращает повторно прочитанный `InterfaceAddress`; удаление принимает этот observed record. ID синтезируются из интерфейса и сети, а не выдаются ядром как стабильные identities. | Зафиксировать scope identity, assumptions о collision и preconditions удаления в модели операций. |
+| DNS | `DnsMutator` заменяет portable resolver view и повторно читает `DnsConfig`. Unix переписывает active resolver file и отбрасывает directives вне portable model; Windows меняет global search settings и каждый перечисленный adapter отдельными вызовами. | Отражать scope, manager ownership, persistence и partial-application results в operation report. Не обещать atomic DNS replacement или automatic rollback. |
+| Конфигурация интерфейсов | Пока только чтение. | Добавить отдельную desired configuration для admin state и MTU; не переиспользовать observed `Interface`. |
+| Соседи | Пока только чтение. | Добавить отдельный static-neighbor intent и lifecycle semantics до публикации mutation. |
+
+Каждая будущая mutation-операция должна задавать: target identity и match rule;
+preconditions; idempotent result; нужные privileges; подтверждает ли ОС
+завершение; перечитывает ли Net Lattice observed state; возможна ли partial
+application; и безопасна ли compensating operation. `ApplyPlan` может
+использовать эти метаданные, но не должен выводить безопасность rollback лишь
+из успешного вызова.
+
+Доставка событий — намеренно отдельный eventually consistent signal path:
+
+- Watcher не предоставляет initial snapshot, global order между доменами,
+  causal correlation с mutation вызывающего или гарантии, что успешная
+  mutation породит событие. Snapshot получают через read providers.
+- Linux отслеживает routes, links, neighbors и interface addresses через
+  Netlink. Windows отслеживает routes, interfaces и unicast addresses через
+  IP Helper; watcher соседей отсутствует. macOS отслеживает routes,
+  interfaces, neighbors и addresses через PF_ROUTE.
+- Ни один backend не выдаёт DNS events в Stage 0.13. После DNS mutation нужно
+  вызвать `dns_config()`, когда требуется результирующий view.
+- Backend сохраняет свой enqueue order, но не cross-domain total order.
+  Заполненная bounded queue сворачивает потерю в `Event::ResyncRequired`;
+  consumer обязан перечитать указанный домен до интерпретации последующих
+  ordinary events.
+- Native sources часто не могут отличить создание от изменения.
+  Поэтому `ChangeKind::Changed` — консервативный результат, когда ОС не
+  предоставляет однозначный lifecycle transition.
+
+Stages 0.14–0.20 должны строить transactions и declarative apply поверх этих
+ограничений, а не задним числом обещать atomicity или event guarantees,
+которых не предоставляют native sources.
+
 ## Правила стабильности API
 
 После публикации разные крейты в этом workspace будут меняться с разной
