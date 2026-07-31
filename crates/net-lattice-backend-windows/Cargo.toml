@@ -11,6 +11,9 @@ categories.workspace = true
 keywords.workspace = true
 description = "Windows backend for Net Lattice: implements net-lattice-platform's provider traits via the Windows IP Helper API."
 
+[features]
+async = ["net-lattice-platform/async"]
+
 [target.'cfg(target_os = "windows")'.dependencies]
 net-lattice-core = { workspace = true }
 net-lattice-ip = { workspace = true }

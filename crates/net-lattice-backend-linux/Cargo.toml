@@ -11,6 +11,9 @@ categories.workspace = true
 keywords.workspace = true
 description = "Linux backend for Net Lattice: implements net-lattice-platform's provider traits via Netlink."
 
+[features]
+async = ["net-lattice-platform/async"]
+
 [target.'cfg(target_os = "linux")'.dependencies]
 net-lattice-core = { workspace = true }
 net-lattice-ip = { workspace = true }
