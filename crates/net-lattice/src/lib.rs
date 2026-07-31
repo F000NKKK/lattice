@@ -405,6 +405,27 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "async")]
+    impl TokioEventProvider for TestBackend {
+        type Event = Event;
+        type EventFilter = EventFilter;
+
+        fn watch_tokio(
+            &self,
+            filter: Self::EventFilter,
+        ) -> Result<net_lattice_platform::TokioEventReceiver<Self::Event>> {
+            let (sender, receiver) = net_lattice_platform::TokioEventReceiver::bounded();
+            let event = Event::Route {
+                id: RouteId::new(1),
+                kind: ChangeKind::Added,
+            };
+            if filter.matches(event) {
+                assert!(sender.send(event, Event::resync_all));
+            }
+            Ok(receiver)
+        }
+    }
+
     fn lattice(capabilities: Capability) -> Lattice<TestBackend> {
         Lattice {
             backend: TestBackend { capabilities },
@@ -460,5 +481,20 @@ mod tests {
                 .recv(),
             Ok(Event::Route { .. })
         ));
+    }
+
+    #[cfg(feature = "async")]
+    #[test]
+    fn async_facade_uses_the_backend_native_watcher_contract() {
+        use futures::StreamExt;
+
+        futures::executor::block_on(async {
+            let lattice = lattice(Capability::MONITORING);
+            let mut events = lattice
+                .watch_async(EventFilter::none().route(RouteId::new(1)))
+                .expect("async watch");
+            assert!(matches!(events.next().await, Some(Ok(Event::Route { .. }))));
+            assert!(events.next().await.is_none());
+        });
     }
 }
