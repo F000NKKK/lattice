@@ -107,6 +107,22 @@ fn main() -> Result<()> {
 }
 ```
 
+Enable the optional async facade with `net-lattice = { version = "0.11", features = ["async"] }`. It returns the same `futures::Stream` on each supported platform:
+
+```rust
+use futures::StreamExt;
+use net_lattice::{EventFilter, Lattice, Result};
+
+async fn monitor() -> Result<()> {
+    let lattice = Lattice::connect()?;
+    let mut events = lattice.watch_async(EventFilter::ALL)?;
+    while let Some(event) = events.next().await {
+        println!("{:?}", event?);
+    }
+    Ok(())
+}
+```
+
 ## Roadmap
 
 1. **Bootstrap** *(completed)* — repository infrastructure, licensing, community health files, and tooling configuration.

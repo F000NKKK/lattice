@@ -107,6 +107,22 @@ fn main() -> Result<()> {
 }
 ```
 
+Включите опциональный async-фасад через `net-lattice = { version = "0.11", features = ["async"] }`. На каждой поддерживаемой платформе он возвращает одинаковый `futures::Stream`:
+
+```rust
+use futures::StreamExt;
+use net_lattice::{EventFilter, Lattice, Result};
+
+async fn monitor() -> Result<()> {
+    let lattice = Lattice::connect()?;
+    let mut events = lattice.watch_async(EventFilter::ALL)?;
+    while let Some(event) = events.next().await {
+        println!("{:?}", event?);
+    }
+    Ok(())
+}
+```
+
 ## Дорожная карта
 
 1. **Bootstrap** *(завершён)* — инфраструктура репозитория, лицензирование, файлы для сообщества и настройка инструментов.
