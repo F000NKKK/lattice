@@ -227,7 +227,9 @@ inspectable without applying them. Stage 0.14 also defines the typed
 `MutationOutcome`, `MutationPlanReport`, and `RollbackStatus` contracts used by
 the Stage 0.15 executor to report partial failure and compensation boundaries.
 `MutationPlan` itself remains data-only; execution is explicit at the connected
-`Lattice` boundary.
+`Lattice` boundary. Callers that already hold a prior-state snapshot can use
+`Lattice::execute_plan_with_compensation` to supply the compensating operation;
+the executor never infers one.
 
 ```rust
 let plan = MutationPlan::from_operations([
