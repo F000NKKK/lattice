@@ -1,26 +1,46 @@
 # net-lattice
 
-The public Net Lattice facade for cross-platform network inspection and
-configuration. It selects the native backend for Linux, Windows, or macOS and
-exposes one strongly typed `Lattice` API.
+Cross-platform network inspection and configuration through one strongly typed
+Rust API. This is the application-facing Net Lattice crate.
 
-The facade covers routes, interfaces, addresses, DNS, neighbors, monitoring,
-and Stage 0.15 ordered mutation-plan execution through `ExecutionOptions`.
-Enable the optional `async` feature for the runtime-independent event stream.
+## What it provides
 
-The crate documentation on docs.rs contains the complete public API.
+- automatic native backend selection on Linux, Windows, and macOS;
+- inspection of interfaces, addresses, routes, neighbors, and DNS;
+- imperative route, address, and resolver mutation;
+- filtered native change monitoring;
+- ordered `MutationPlan` execution with runtime validation, cancellation,
+  snapshots, explicit compensation, and per-operation reports.
 
-## Example
+Enable the optional `async` feature for a runtime-independent
+`futures::Stream` watcher surface.
+
+## Quick start
 
 ```rust,no_run
-use net_lattice::{ExecutionOptions, Lattice, MutationPlan};
+use net_lattice::{Lattice, Result};
 
-fn inspect_plan<B: net_lattice::LatticeBackend>(
-    lattice: &Lattice<B>,
-    plan: &MutationPlan,
-) {
-    let mut options = ExecutionOptions::default();
-    let report = lattice.execute_plan(plan, &mut options);
-    println!("{report:?}");
+fn main() -> Result<()> {
+    let lattice = Lattice::connect()?;
+    for interface in lattice.interfaces()? {
+        println!("{interface:?}");
+    }
+    Ok(())
 }
 ```
+
+## Transaction execution
+
+`MutationPlan` is data only. Pass a plan and one `ExecutionOptions` value to
+`Lattice::execute_plan`; callbacks can request cancellation, capture prior
+state, and perform explicit compensation without multiplying facade methods.
+The returned report preserves plan indices and distinguishes validation,
+snapshot, execution, cancellation, and compensation boundaries.
+
+## Platform and privilege notes
+
+Read-only APIs are generally unprivileged. Network mutations require the
+native privileges and policy allowed by the operating system. Runtime
+capabilities describe implemented surfaces, not a guarantee that the current
+process is authorized. Prefer a read-after-write check when the operation's
+confirmation contract requires it.

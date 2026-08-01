@@ -1,12 +1,19 @@
 # net-lattice-ip
 
-Strongly typed IPv4/IPv6 addresses, networks, and prefix lengths used by Net
-Lattice domain models. The crate is platform-independent and provides display
-and standard-library conversion helpers.
+Strongly typed IPv4 and IPv6 primitives used by Net Lattice. This crate is
+platform-independent and performs no network I/O.
 
-The published `net-lattice` facade provides the public API.
+## What it provides
 
-## Example
+- validated IPv4 and IPv6 prefix lengths;
+- address and network types with canonical display formatting;
+- conversions to and from the Rust standard library's IP types;
+- family-safe APIs that keep IPv4 and IPv6 values distinct.
+
+Applications using the full library normally import these types from
+`net-lattice`; protocol tooling can depend on `net-lattice-ip` directly.
+
+## Usage
 
 ```rust
 use net_lattice_ip::{Ipv4Address, Ipv4Network, Ipv4PrefixLength};
@@ -17,3 +24,6 @@ let network = Ipv4Network::new(
 );
 assert_eq!(network.to_string(), "192.0.2.0/24");
 ```
+
+Invalid prefix lengths are rejected during construction rather than being
+stored as malformed networks.

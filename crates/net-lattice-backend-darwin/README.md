@@ -1,17 +1,36 @@
 # net-lattice-backend-darwin
 
 macOS backend for Net Lattice using BSD routing sockets, `getifaddrs`, and
-native interface/address ioctls. It implements the generic provider contracts
-for routes, interfaces, addresses, DNS, neighbors, and monitoring.
+native ioctls. It implements the generic `net-lattice-platform` contracts.
 
-Applications normally use the `net-lattice` facade. Privileged mutation tests
-run in the macOS CI job with the required permissions.
+## What it provides
 
-## Example
+- interface, address, route, neighbor, and resolver inspection;
+- route, address, and resolver mutation where macOS exposes portable
+  semantics;
+- routing-socket monitoring and optional async delivery;
+- preservation of native error codes in the shared error model.
+
+Applications should normally use the `net-lattice` facade, which selects this
+backend automatically on macOS. Direct use is intended for backend integration
+and diagnostics.
+
+## Direct usage
 
 ```rust,no_run
-let backend = net_lattice_backend_darwin::DarwinBackend::new()?;
-let interfaces = net_lattice_platform::InterfaceProvider::interfaces(&backend)?;
-println!("{} interfaces", interfaces.len());
-# Ok::<(), net_lattice_core::Error>(())
+use net_lattice_platform::InterfaceProvider;
+
+fn main() -> net_lattice_core::Result<()> {
+    let backend = net_lattice_backend_darwin::DarwinBackend::new()?;
+    for interface in backend.interfaces()? {
+        println!("{interface:?}");
+    }
+    Ok(())
+}
 ```
+
+## Privileges and safety
+
+Inspection is normally unprivileged. Mutations can require root or specific
+system entitlements and may interact with macOS network configuration
+services. Privileged tests run separately and must restore changed state.

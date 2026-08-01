@@ -1,19 +1,31 @@
 # net-lattice-core
 
-Shared foundation types for Net Lattice: the workspace-wide `Error`/`Result`
-model, platform-tagged error codes, and typed identifiers.
+Shared foundation types for the Net Lattice workspace. This crate is
+platform-independent and performs no operating-system or network I/O.
 
-This crate has no operating-system dependency and is used by the IP, model,
-platform, backend, and facade crates.
+## What it provides
 
-The published `net-lattice` facade provides the user-facing API.
+- `Error` and `Result<T>` used across every Net Lattice crate;
+- `PlatformErrorCode` for preserving native Linux, Windows, and macOS errors;
+- `Id<T>`, a strongly typed identifier that prevents mixing object domains.
 
-## Example
+Most applications should use these types through the `net-lattice` facade.
+Depend on this crate directly when implementing a backend or a library that
+shares Net Lattice's foundational contracts.
+
+## Usage
 
 ```rust
-use net_lattice_core::{Error, Result};
+use net_lattice_core::{Id, Result};
 
-fn lookup() -> Result<()> {
-    Err(Error::NotFound)
+struct Interface;
+
+fn selected_interface() -> Result<Id<Interface>> {
+    Ok(Id::new(7))
 }
+
+assert_eq!(selected_interface().unwrap().value(), 7);
 ```
+
+`Id<Route>` and `Id<Interface>` remain different Rust types even when their
+numeric values match.

@@ -1,22 +1,34 @@
 # net-lattice-async
 
-Runtime-independent asynchronous event-stream adapter for Net Lattice. It
-exposes a `futures::Stream` surface while platform backends provide native
-watcher transports behind the facade's optional `async` feature.
+Runtime-independent asynchronous event-stream adapter for Net Lattice.
 
-Enable the `async` feature on the published `net-lattice` crate to use it.
+## What it provides
 
-## Example
+- `EventStream<E>`, a `futures::Stream<Item = Result<E>>` surface;
+- adaptation of blocking `EventReceiver` transports using one worker thread;
+- direct wrapping of backend-native Tokio receivers;
+- deterministic shutdown when the stream is dropped.
+
+Applications normally enable the `async` feature on `net-lattice` and obtain
+the stream from its facade. Depend on this crate directly only when adapting a
+custom backend transport.
+
+## Usage
 
 ```rust
 use futures::StreamExt;
+use net_lattice_async::{EventStream, Result};
 
-async fn consume<S>(mut stream: S)
+async fn next_event<E>(stream: &mut EventStream<E>) -> Option<Result<E>>
 where
-    S: futures::Stream<Item = net_lattice_model::Event> + Unpin,
+    E: Unpin,
 {
-    while let Some(event) = stream.next().await {
-        println!("{event:?}");
-    }
+    stream.next().await
 }
 ```
+
+## Runtime behavior
+
+The adapter does not select an async runtime. A blocking receiver uses a
+dedicated worker because `std::sync::mpsc::Receiver` cannot register a waker;
+a native Tokio receiver is exposed without that worker.
