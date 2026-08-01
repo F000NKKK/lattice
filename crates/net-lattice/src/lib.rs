@@ -1155,6 +1155,129 @@ mod tests {
         ));
     }
 
+    /// Restores the observed MTU through the same public facade a consumer
+    /// uses. The privileged acceptance test arms this before its first native
+    /// submission so a panic cannot leave an attempted configuration behind.
+    #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+    struct InterfaceMtuRestore<'a, B: LatticeBackend> {
+        lattice: &'a Lattice<B>,
+        config: InterfaceConfig,
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+    impl<B: LatticeBackend> Drop for InterfaceMtuRestore<'_, B> {
+        fn drop(&mut self) {
+            let _ = self.lattice.set_interface_config(self.config.clone());
+        }
+    }
+
+    /// Exercises interface configuration through the complete public facade:
+    /// capability check, direct read-after-write submission, transaction-plan
+    /// dispatch with a public snapshot callback, and restoration. It submits
+    /// only the interface's observed MTU, so it does not deliberately alter
+    /// shared-runner networking state.
+    #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+    #[test]
+    #[ignore = "requires native networking privilege; run with the platform privileged test job"]
+    fn native_facade_interface_configuration_round_trip() {
+        let lattice = Lattice::connect().expect("failed to connect native backend");
+        assert!(
+            lattice.supports(Capability::INTERFACE_MTU),
+            "native backend does not advertise interface MTU configuration"
+        );
+        let interfaces = lattice
+            .interfaces()
+            .expect("failed to list interfaces through the public facade");
+
+        #[cfg(target_os = "windows")]
+        let addresses = lattice
+            .addresses()
+            .expect("failed to list interface addresses through the public facade");
+
+        #[cfg(target_os = "windows")]
+        let original = interfaces
+            .iter()
+            .find(|interface| {
+                !matches!(interface.kind, InterfaceKind::Loopback)
+                    && interface.mtu.is_some()
+                    && addresses
+                        .iter()
+                        .any(|address| address.interface_index == interface.index)
+            })
+            .cloned()
+            .unwrap_or_else(|| {
+                panic!(
+                    "no non-loopback MTU-bearing interface with a public address was available: \
+                     interfaces={interfaces:?}, addresses={addresses:?}"
+                )
+            });
+
+        #[cfg(not(target_os = "windows"))]
+        let original = interfaces
+            .iter()
+            .find(|interface| {
+                !matches!(interface.kind, InterfaceKind::Loopback) && interface.mtu.is_some()
+            })
+            .cloned()
+            .unwrap_or_else(|| {
+                panic!(
+                    "no non-loopback MTU-bearing interface was available: interfaces={interfaces:?}"
+                )
+            });
+
+        let config = InterfaceConfig::new(original.id, None, original.mtu)
+            .expect("an observed nonzero MTU forms a valid patch");
+
+        {
+            let _restore = InterfaceMtuRestore {
+                lattice: &lattice,
+                config: config.clone(),
+            };
+            let direct = lattice
+                .set_interface_config(config.clone())
+                .expect("direct MTU-only facade configuration failed");
+            assert_eq!(direct.id, original.id);
+            assert_eq!(direct.mtu, original.mtu);
+
+            let plan = MutationPlan::from_operations([Mutation::SetInterfaceConfig(config)]);
+            let mut captured_snapshot = false;
+            let mut snapshot = |_, operation: &Mutation| {
+                let result = lattice.snapshot_for_mutation(operation);
+                captured_snapshot = matches!(
+                    &result,
+                    Ok(MutationSnapshot::Interface(Some(interface)))
+                        if interface.id == original.id
+                );
+                result
+            };
+            let mut options = ExecutionOptions::default().snapshot(&mut snapshot);
+            let report = lattice.execute_plan(&plan, &mut options);
+
+            assert!(report.is_success(), "interface plan report: {report:?}");
+            assert!(matches!(report.outcome(0), Some(MutationOutcome::Applied)));
+            assert!(
+                captured_snapshot,
+                "public snapshot callback missed the target"
+            );
+
+            let observed = lattice
+                .interfaces()
+                .expect("failed to read interface after plan execution")
+                .into_iter()
+                .find(|interface| interface.id == original.id)
+                .expect("configured interface disappeared during plan execution");
+            assert_eq!(observed.mtu, original.mtu);
+        }
+
+        let restored = lattice
+            .interfaces()
+            .expect("failed to read interface after restoration")
+            .into_iter()
+            .find(|interface| interface.id == original.id)
+            .expect("configured interface disappeared during restoration");
+        assert_eq!(restored.mtu, original.mtu);
+    }
+
     /// Exercises the complete facade transaction path against the native
     /// backend. This is intentionally ignored because route mutation requires
     /// root/CAP_NET_ADMIN/Administrator and changes the host routing table.
