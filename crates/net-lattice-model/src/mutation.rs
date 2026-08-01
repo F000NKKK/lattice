@@ -97,6 +97,7 @@ pub enum MutationReversibility {
 
 /// Static metadata describing one [`Mutation`]'s current contract.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub struct MutationSemantics {
     /// The requested effect.
     pub kind: MutationKind,
@@ -222,8 +223,10 @@ pub enum RollbackStatus {
 ///
 /// A report is intentionally not called a transaction: operations may have
 /// been partially applied, and rollback is reported separately rather than
-/// implied. Callers should re-read affected state whenever an outcome says
-/// that application was possible or rollback was not completed.
+/// implied. The outcome at index `n` corresponds to
+/// `MutationPlan::operation(n)`. Callers should re-read affected state
+/// whenever an outcome says that application was possible or rollback was not
+/// completed.
 #[derive(Debug)]
 pub struct MutationPlanReport {
     outcomes: Vec<MutationOutcome>,
@@ -245,6 +248,21 @@ impl MutationPlanReport {
     /// Returns one outcome for each operation attempted or skipped.
     pub fn outcomes(&self) -> &[MutationOutcome] {
         &self.outcomes
+    }
+
+    /// Returns the outcome at a plan-local operation index, if present.
+    pub fn outcome(&self, index: usize) -> Option<&MutationOutcome> {
+        self.outcomes.get(index)
+    }
+
+    /// Returns the number of recorded outcomes.
+    pub fn len(&self) -> usize {
+        self.outcomes.len()
+    }
+
+    /// Whether no outcomes have been recorded.
+    pub fn is_empty(&self) -> bool {
+        self.outcomes.is_empty()
     }
 
     /// Returns the rollback status recorded by the executor.
@@ -299,6 +317,14 @@ impl MutationPlan {
     /// Returns the operations in their declared order.
     pub fn operations(&self) -> &[Mutation] {
         &self.operations
+    }
+
+    /// Returns the operation at `index`, if present.
+    ///
+    /// Executors use this stable plan-local index to associate an operation
+    /// with the corresponding entry in [`MutationPlanReport::outcomes`].
+    pub fn operation(&self, index: usize) -> Option<&Mutation> {
+        self.operations.get(index)
     }
 
     /// Whether the plan has no operations.
@@ -386,6 +412,8 @@ mod tests {
         let second = Mutation::RemoveRoute(Route::new(crate::route::RouteId::new(2), network()));
         let plan = MutationPlan::from_operations([first.clone(), second.clone()]);
         assert_eq!(plan.operations(), [first, second]);
+        assert!(plan.operation(0).is_some());
+        assert!(plan.operation(2).is_none());
         assert_eq!(plan.len(), 2);
         assert!(!plan.is_empty());
     }
@@ -475,6 +503,9 @@ mod tests {
         assert!(!report.is_success());
         assert_eq!(report.applied_count(), 1);
         assert_eq!(report.not_attempted_count(), 1);
+        assert_eq!(report.len(), 3);
+        assert!(!report.is_empty());
+        assert!(report.outcome(3).is_none());
         assert!(matches!(report.rollback(), RollbackStatus::NotAttempted));
         assert!(matches!(
             &report.outcomes()[1],
