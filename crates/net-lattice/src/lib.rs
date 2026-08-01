@@ -337,7 +337,7 @@ impl<B: LatticeBackend> Lattice<B> {
                 || options
                     .cancellation
                     .as_mut()
-                    .is_some_and(|callback| callback(index, operation.clone()))
+                    .is_some_and(|callback| callback(index, operation))
             {
                 outcomes.push(MutationOutcome::NotAttempted);
                 rollback_boundary |= !applied.is_empty();
@@ -346,7 +346,7 @@ impl<B: LatticeBackend> Lattice<B> {
             }
 
             let prior = match options.snapshot.as_mut() {
-                Some(snapshot) => match snapshot(index, operation.clone()) {
+                Some(snapshot) => match snapshot(index, operation) {
                     Ok(prior) => Some(prior),
                     Err(error) => {
                         outcomes.push(MutationOutcome::Failed {
@@ -397,7 +397,7 @@ impl<B: LatticeBackend> Lattice<B> {
                 let mut status = RollbackStatus::Completed;
                 for (index, prior) in applied.into_iter().rev() {
                     if let Err(error) =
-                        compensate(index, plan.operation(index).expect("index").clone(), prior)
+                        compensate(index, plan.operation(index).expect("index"), prior.as_ref())
                     {
                         status = RollbackStatus::Failed {
                             operation_index: index,
@@ -791,7 +791,7 @@ mod tests {
             Mutation::RemoveRoute(planned_route()),
         ]);
 
-        let mut cancelled = |index, _: Mutation| index == 1;
+        let mut cancelled = |index, _: &Mutation| index == 1;
         let mut options = ExecutionOptions::default().cancellation(&mut cancelled);
         let report = lattice.execute_plan(&plan, &mut options);
 
@@ -937,7 +937,7 @@ mod tests {
         let route = Route::new(RouteId::new(0), destination).with_interface_index(interface.index);
 
         let add_plan = MutationPlan::from_operations([Mutation::AddRoute(route.clone())]);
-        let mut snapshot = |_, operation: Mutation| lattice.snapshot_for_mutation(&operation);
+        let mut snapshot = |_, operation: &Mutation| lattice.snapshot_for_mutation(operation);
         let mut options = ExecutionOptions::default().snapshot(&mut snapshot);
         let add_report = lattice.execute_plan(&add_plan, &mut options);
 
@@ -980,8 +980,9 @@ mod tests {
             Mutation::AddRoute(route.clone()),
         ]);
 
-        let mut snapshot = |_, operation: Mutation| lattice.snapshot_for_mutation(&operation);
-        let mut compensate = |_, operation: Mutation, _| match operation {
+        let mut snapshot = |_, operation: &Mutation| lattice.snapshot_for_mutation(operation);
+        let mut compensate = |_, operation: &Mutation, _: Option<&MutationSnapshot>| match operation
+        {
             Mutation::AddRoute(route) => lattice.remove_route(route.clone()),
             _ => Ok(()),
         };
@@ -1007,8 +1008,8 @@ mod tests {
         ]);
         let mut compensated = Vec::new();
 
-        let mut cancelled = |index, _: Mutation| index == 1;
-        let mut compensate = |index, _: Mutation, _: Option<MutationSnapshot>| {
+        let mut cancelled = |index, _: &Mutation| index == 1;
+        let mut compensate = |index, _: &Mutation, _: Option<&MutationSnapshot>| {
             compensated.push(index);
             Ok(())
         };
@@ -1031,12 +1032,12 @@ mod tests {
         let mut captured = Vec::new();
         let mut restored = Vec::new();
 
-        let mut cancelled = |index, _: Mutation| index == 1;
-        let mut snapshot = |index, _: Mutation| {
+        let mut cancelled = |index, _: &Mutation| index == 1;
+        let mut snapshot = |index, _: &Mutation| {
             captured.push(index);
             Ok(MutationSnapshot::Dns(DnsConfig::default()))
         };
-        let mut compensate = |index, _: Mutation, state: Option<MutationSnapshot>| {
+        let mut compensate = |index, _: &Mutation, state: Option<&MutationSnapshot>| {
             restored.push((index, state.is_some()));
             Ok(())
         };
@@ -1059,8 +1060,9 @@ mod tests {
             Mutation::RemoveRoute(planned_route()),
         ]);
 
-        let mut cancelled = |index, _: Mutation| index == 1;
-        let mut compensate = |_, _: Mutation, _: Option<MutationSnapshot>| Err(Error::InvalidState);
+        let mut cancelled = |index, _: &Mutation| index == 1;
+        let mut compensate =
+            |_, _: &Mutation, _: Option<&MutationSnapshot>| Err(Error::InvalidState);
         let mut options = ExecutionOptions::default()
             .cancellation(&mut cancelled)
             .compensation(&mut compensate);
