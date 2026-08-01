@@ -22,14 +22,17 @@ use net_lattice_core::{Error, Id, PlatformErrorCode, Result};
 use net_lattice_model::dns::{DnsConfig, NewDnsConfig};
 use net_lattice_model::event::{ChangeKind, Event, EventFilter};
 use net_lattice_model::ifaddr::{InterfaceAddress, InterfaceAddressId, NewInterfaceAddress};
-use net_lattice_model::interface::{AdminState, Interface, InterfaceKind, OperationalState};
+use net_lattice_model::interface::{
+    AdminState, DesiredAdminState, Interface, InterfaceConfig, InterfaceKind, OperationalState,
+};
 use net_lattice_model::mac::MacAddress;
 use net_lattice_model::neighbor::{NeighborEntry, NeighborId, NeighborState};
 use net_lattice_model::route::{Route, RouteId};
 use net_lattice_model::{IpAddress, Network};
 use net_lattice_platform::{
     AddressMutator, AddressProvider, Capability, CapabilityProvider, DnsMutator, DnsProvider,
-    EventProvider, EventReceiver, InterfaceProvider, NeighborProvider, RouteProvider,
+    EventProvider, EventReceiver, InterfaceMutator, InterfaceProvider, NeighborProvider,
+    RouteProvider,
 };
 #[cfg(feature = "async")]
 use net_lattice_platform::{TokioEventProvider, TokioEventReceiver};
@@ -142,6 +145,18 @@ fn route_socket_error(err: &io::Error) -> Error {
         Some(libc::EPERM) | Some(libc::EACCES) => Error::PermissionDenied,
         Some(libc::ESRCH) | Some(libc::ENOENT) => Error::NotFound,
         Some(libc::EEXIST) => Error::AlreadyExists,
+        _ => Error::Platform(io_error_code(err)),
+    }
+}
+
+/// Maps interface-configuration ioctl errors into the portable taxonomy where
+/// Darwin's errno makes the cause unambiguous. Other kernel policy and driver
+/// failures retain their native code for diagnostics.
+fn interface_ioctl_error(err: &io::Error) -> Error {
+    match err.raw_os_error() {
+        Some(libc::EPERM) | Some(libc::EACCES) => Error::PermissionDenied,
+        Some(libc::ENXIO) | Some(libc::ENODEV) | Some(libc::ENOENT) => Error::NotFound,
+        Some(libc::EINVAL) => Error::InvalidState,
         _ => Error::Platform(io_error_code(err)),
     }
 }
@@ -906,17 +921,52 @@ fn siocgifmtu() -> libc::c_ulong {
     IOC_INOUT | ((size & IOCPARM_MASK) << 16) | ((b'i' as libc::c_ulong) << 8) | 51
 }
 
+// `<sys/sockio.h>` exposes the complementary write operations as
+// `_IOW('i', 16, struct ifreq)` and `_IOW('i', 52, struct ifreq)`.  They are
+// intentionally calculated from the compiled Darwin `ifreq` layout for the
+// same reason as `SIOCGIFMTU` above: the request encodes its payload size.
+fn siocgifflags() -> libc::c_ulong {
+    let size = mem::size_of::<libc::ifreq>() as libc::c_ulong;
+    IOC_INOUT | ((size & IOCPARM_MASK) << 16) | ((b'i' as libc::c_ulong) << 8) | 17
+}
+
+fn siocsifflags() -> libc::c_ulong {
+    let size = mem::size_of::<libc::ifreq>() as libc::c_ulong;
+    IOC_IN | ((size & IOCPARM_MASK) << 16) | ((b'i' as libc::c_ulong) << 8) | 16
+}
+
+fn siocsifmtu() -> libc::c_ulong {
+    let size = mem::size_of::<libc::ifreq>() as libc::c_ulong;
+    IOC_IN | ((size & IOCPARM_MASK) << 16) | ((b'i' as libc::c_ulong) << 8) | 52
+}
+
+/// Builds an `ifreq` addressed to the observed Darwin interface name.
+///
+/// `ifreq` names are fixed-size byte arrays. Refusing an overlong or embedded
+/// NUL name is safer than truncating it and accidentally configuring another
+/// interface. The mutator obtains this name from the observed interface list,
+/// not from caller input.
+fn interface_request(name: &str) -> Result<libc::ifreq> {
+    let name_bytes = name.as_bytes();
+    if name_bytes.len() >= libc::IFNAMSIZ || name_bytes.contains(&0) {
+        return Err(Error::InvalidState);
+    }
+
+    let mut request: libc::ifreq = unsafe { mem::zeroed() };
+    for (dst, &src) in request.ifr_name.iter_mut().zip(name_bytes) {
+        *dst = src as libc::c_char;
+    }
+    Ok(request)
+}
+
 /// Reads an interface's MTU via `ioctl(SIOCGIFMTU)` on `sock` — `getifaddrs`
 /// doesn't carry MTU itself, this is the standard BSD way to fetch it.
 /// `sock` only needs to be any open `AF_INET`/`SOCK_DGRAM` socket; it is
 /// never connected or written to.
 fn interface_mtu(sock: i32, name: &str) -> Option<u32> {
-    let mut req: libc::ifreq = unsafe { mem::zeroed() };
-    let name_bytes = name.as_bytes();
-    let len = name_bytes.len().min(req.ifr_name.len() - 1);
-    for (dst, &src) in req.ifr_name[..len].iter_mut().zip(&name_bytes[..len]) {
-        *dst = src as libc::c_char;
-    }
+    let Ok(mut req) = interface_request(name) else {
+        return None;
+    };
 
     let status = unsafe { libc::ioctl(sock, siocgifmtu(), &mut req) };
     if status != 0 {
@@ -959,6 +1009,70 @@ impl InterfaceProvider for DarwinBackend {
         };
         unsafe { libc::close(mtu_sock) };
         Ok(interfaces)
+    }
+}
+
+impl InterfaceMutator for DarwinBackend {
+    type InterfaceConfig = InterfaceConfig;
+
+    /// Applies the requested MTU and/or administrative state through BSD
+    /// ioctls, then re-reads the interface before reporting success.
+    ///
+    /// Darwin exposes these settings through two distinct ioctls. A combined
+    /// patch may therefore have applied its MTU before the flags ioctl fails;
+    /// callers must treat an error as potentially partially applied and use
+    /// only explicit transaction-layer compensation when restoration matters.
+    fn set_interface_config(&self, config: Self::InterfaceConfig) -> Result<Self::Interface> {
+        let target = self
+            .interfaces()?
+            .into_iter()
+            .find(|interface| interface.id == config.interface_id())
+            .ok_or(Error::NotFound)?;
+
+        let socket = unsafe { libc::socket(libc::AF_INET, libc::SOCK_DGRAM, 0) };
+        if socket < 0 {
+            return Err(interface_ioctl_error(&io::Error::last_os_error()));
+        }
+
+        let result = (|| {
+            if let Some(mtu) = config.mtu() {
+                let mut request = interface_request(&target.name)?;
+                request.ifr_ifru.ifru_mtu =
+                    libc::c_int::try_from(mtu).map_err(|_| Error::InvalidState)?;
+                if unsafe { libc::ioctl(socket, siocsifmtu(), &mut request) } != 0 {
+                    return Err(interface_ioctl_error(&io::Error::last_os_error()));
+                }
+            }
+
+            if let Some(admin_state) = config.admin_state() {
+                let mut request = interface_request(&target.name)?;
+                if unsafe { libc::ioctl(socket, siocgifflags(), &mut request) } != 0 {
+                    return Err(interface_ioctl_error(&io::Error::last_os_error()));
+                }
+
+                let mut flags = unsafe { request.ifr_ifru.ifru_flags } as libc::c_int;
+                match admin_state {
+                    DesiredAdminState::Up => flags |= libc::IFF_UP,
+                    DesiredAdminState::Down => flags &= !libc::IFF_UP,
+                    // The model enum is non-exhaustive. Reject an intent a
+                    // newer model knows but this backend cannot map rather
+                    // than panicking during a privileged operation.
+                    _ => return Err(Error::Unsupported),
+                }
+                request.ifr_ifru.ifru_flags = flags as libc::c_short;
+                if unsafe { libc::ioctl(socket, siocsifflags(), &mut request) } != 0 {
+                    return Err(interface_ioctl_error(&io::Error::last_os_error()));
+                }
+            }
+            Ok(())
+        })();
+        unsafe { libc::close(socket) };
+        result?;
+
+        self.interfaces()?
+            .into_iter()
+            .find(|interface| interface.id == config.interface_id())
+            .ok_or(Error::NotFound)
     }
 }
 
@@ -1608,7 +1722,11 @@ impl CapabilityProvider for DarwinBackend {
     /// equivalent and Net Lattice does not implement either domain.
     /// equivalent to begin with.
     fn capabilities(&self) -> Capability {
-        Capability::IPV6 | Capability::MONITORING | Capability::DNS_MUTATION
+        Capability::IPV6
+            | Capability::MONITORING
+            | Capability::DNS_MUTATION
+            | Capability::INTERFACE_ADMIN_STATE
+            | Capability::INTERFACE_MTU
     }
 }
 
@@ -1895,6 +2013,128 @@ mod tests {
         assert!(capabilities.contains(Capability::IPV6));
         assert!(capabilities.contains(Capability::MONITORING));
         assert!(capabilities.contains(Capability::DNS_MUTATION));
+        assert!(capabilities.contains(Capability::INTERFACE_ADMIN_STATE));
+        assert!(capabilities.contains(Capability::INTERFACE_MTU));
+    }
+
+    #[test]
+    fn interface_configuration_requests_preserve_name_and_ioctl_layout() {
+        let request = interface_request("en0").expect("valid Darwin interface name");
+        let name = unsafe { std::ffi::CStr::from_ptr(request.ifr_name.as_ptr()) };
+        assert_eq!(name.to_bytes(), b"en0");
+        assert!(matches!(
+            interface_request(&"x".repeat(libc::IFNAMSIZ)),
+            Err(Error::InvalidState)
+        ));
+        assert!(matches!(
+            interface_request("en\0"),
+            Err(Error::InvalidState)
+        ));
+
+        // macOS SDK `<sys/sockio.h>` defines these requests for its stable
+        // 32-byte `struct ifreq` ABI. These literal values intentionally do
+        // not repeat the helper implementation: a wrong ioctl direction,
+        // ordinal, or layout would fail this fixture on both supported 64-bit
+        // macOS targets.
+        assert_eq!(mem::size_of::<libc::ifreq>(), 32);
+        assert_eq!(siocgifflags(), 0xc020_6911);
+        assert_eq!(siocsifflags(), 0x8020_6910);
+        assert_eq!(siocgifmtu(), 0xc020_6933);
+        assert_eq!(siocsifmtu(), 0x8020_6934);
+    }
+
+    #[test]
+    fn interface_info_messages_map_to_changed_interface_events() {
+        let mut header: libc::if_msghdr = unsafe { mem::zeroed() };
+        header.ifm_msglen = mem::size_of::<libc::if_msghdr>() as libc::c_ushort;
+        header.ifm_version = RTM_VERSION;
+        header.ifm_type = libc::RTM_IFINFO as libc::c_uchar;
+        header.ifm_index = 42;
+
+        let event = unsafe {
+            route_socket_message_to_event(
+                (&raw const header).cast::<u8>(),
+                mem::size_of::<libc::if_msghdr>(),
+            )
+        };
+        assert!(matches!(
+            event,
+            Some(Event::Interface {
+                id,
+                kind: ChangeKind::Changed,
+            }) if id == Id::new(42)
+        ));
+    }
+
+    fn restoration_config(interface: &Interface) -> InterfaceConfig {
+        let admin_state = match interface.admin_state {
+            AdminState::Up => DesiredAdminState::Up,
+            AdminState::Down => DesiredAdminState::Down,
+            AdminState::Unknown => panic!("Darwin interface flags must expose admin state"),
+            _ => panic!("unexpected future administrative state"),
+        };
+        InterfaceConfig::new(interface.id, Some(admin_state), interface.mtu)
+            .expect("observed Darwin interface is a valid restoration patch")
+    }
+
+    struct InterfaceConfigRestore<'a> {
+        backend: &'a DarwinBackend,
+        config: InterfaceConfig,
+    }
+
+    impl Drop for InterfaceConfigRestore<'_> {
+        fn drop(&mut self) {
+            // Keep a privileged runner safe even if an assertion below fails.
+            // The original observed settings are the only restoration input;
+            // production compensation remains explicitly caller-owned.
+            let _ = self.backend.set_interface_config(self.config.clone());
+        }
+    }
+
+    /// Verifies the privileged ioctl path without changing a working
+    /// interface's values: the current non-loopback MTU/admin state is
+    /// submitted back to the kernel and read after write. The `Drop` guard
+    /// attempts restoration on every exit path, including a failed assertion.
+    ///
+    /// A shared macOS runner cannot safely create and destroy a disposable
+    /// interface, so this test deliberately does not claim to prove a
+    /// value-changing mutation or end-to-end `PF_ROUTE` event delivery. The
+    /// deterministic `RTM_IFINFO` fixture above covers the event mapping; an
+    /// isolated-interface CI environment is required for the remaining
+    /// end-to-end proof.
+    #[test]
+    #[ignore = "requires root; run with `sudo -E cargo test -p net-lattice-backend-darwin interface_configuration_round_trips_observed_state -- --ignored`"]
+    fn interface_configuration_round_trips_observed_state() {
+        let backend = DarwinBackend::new().expect("failed to open a route socket");
+        let original = backend
+            .interfaces()
+            .expect("getifaddrs should list interfaces")
+            .into_iter()
+            .find(|interface| {
+                !matches!(interface.kind, InterfaceKind::Loopback) && interface.mtu.is_some()
+            })
+            .expect("expected a non-loopback interface with an observed MTU");
+        let restore = InterfaceConfigRestore {
+            backend: &backend,
+            config: restoration_config(&original),
+        };
+
+        let observed = backend
+            .set_interface_config(restoration_config(&original))
+            .expect("setting the observed values should succeed as root");
+        assert_eq!(observed.id, original.id);
+        assert_eq!(observed.admin_state, original.admin_state);
+        assert_eq!(observed.mtu, original.mtu);
+
+        drop(restore);
+        let restored = backend
+            .interfaces()
+            .expect("getifaddrs should list restored interface")
+            .into_iter()
+            .find(|interface| interface.id == original.id)
+            .expect("configured interface must still exist");
+        assert_eq!(restored.admin_state, original.admin_state);
+        assert_eq!(restored.mtu, original.mtu);
     }
 
     /// Exercises a real round trip through `getifaddrs`, no privilege

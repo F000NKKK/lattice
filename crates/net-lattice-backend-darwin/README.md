@@ -8,6 +8,8 @@ native ioctls. It implements the generic `net-lattice-platform` contracts.
 - interface, address, route, neighbor, and resolver inspection;
 - route, address, and resolver mutation where macOS exposes portable
   semantics;
+- administrative-state and MTU configuration through `SIOCSIFFLAGS` and
+  `SIOCSIFMTU`, with fresh observed-interface readback;
 - routing-socket monitoring and optional async delivery;
 - preservation of native error codes in the shared error model.
 
@@ -29,8 +31,50 @@ fn main() -> net_lattice_core::Result<()> {
 }
 ```
 
+## Interface configuration
+
+`InterfaceConfig` is a partial desired-state patch, distinct from the
+observed `Interface`. The backend resolves its target from the observed ID,
+updates the requested MTU and/or administrative state, and re-reads the
+interface before returning success.
+
+```rust,no_run
+use net_lattice_model::interface::{DesiredAdminState, InterfaceConfig};
+use net_lattice_platform::{InterfaceMutator, InterfaceProvider};
+
+fn main() -> net_lattice_core::Result<()> {
+    let backend = net_lattice_backend_darwin::DarwinBackend::new()?;
+    let interface = backend.interfaces()?.into_iter().next().ok_or(
+        net_lattice_core::Error::NotFound,
+    )?;
+    let config = InterfaceConfig::new(
+        interface.id,
+        Some(DesiredAdminState::Up),
+        None,
+    )?;
+    let observed = backend.set_interface_config(config)?;
+    println!("{} is now {:?}", observed.name, observed.admin_state);
+    Ok(())
+}
+```
+
+macOS uses separate ioctls for MTU and flags, so a failed combined patch may
+have applied one requested field. Re-read the interface after errors and use
+the facade transaction executor's explicit compensation only when restoration
+is required.
+
+The native PF_ROUTE watcher maps `RTM_IFINFO` notifications to the existing
+`Event::Interface { kind: ChangeKind::Changed }` signal; the facade does not
+synthesize a duplicate event. The shared privileged test runner intentionally
+submits unchanged observed values and cannot safely create a disposable
+interface, so it does not claim end-to-end delivery for a value-changing
+configuration. Consumers should always re-read observed state after a change
+signal.
+
 ## Privileges and safety
 
 Inspection is normally unprivileged. Mutations can require root or specific
 system entitlements and may interact with macOS network configuration
-services. Privileged tests run separately and must restore changed state.
+services. Interface configuration writes the real system interface and can
+apply MTU and administrative state independently. Privileged tests run
+separately and must restore changed state.
