@@ -27,15 +27,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A combined administrative-state and MTU patch is explicitly reported as
   potentially partially applied; callers retain control of compensation via
   Stage 0.15 `ExecutionOptions`.
+- Monitoring capabilities now describe deliverable native event domains:
+  `ROUTE_MONITORING`, `INTERFACE_MONITORING`, `NEIGHBOR_MONITORING`, and
+  `ADDRESS_MONITORING`; `MONITORING` is their all-domain aggregate. Windows
+  now rejects neighbor and unfiltered all-domain watchers instead of silently
+  returning a stream without neighbor events.
 
 ### Documentation
 
 - Document the interface configuration contract, platform capability gates,
   native event mappings, and the shared-runner limitation for destructive
   end-to-end interface-event testing in English and Russian project docs.
-- Clarify the existing native monitoring matrix: neighbor events are delivered
-  by Linux Netlink and macOS PF_ROUTE, while the Windows IP Helper watcher
-  currently covers routes, interfaces, and unicast addresses only.
+- Document the domain-specific monitoring capability matrix and the required
+  migration from a coarse `MONITORING` check to a selected-domain check.
 
 ## [0.15.2] - 2026-08-01
 

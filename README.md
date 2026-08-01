@@ -121,7 +121,8 @@ operation semantics, while `Lattice::execute_plan` applies a plan through one
 typed snapshots, explicit compensation, and phase-aware reports. `EventFilter`
 composes domain selectors (`routes()`) and object selectors (`route(route_id)`);
 every backend applies the filter before enqueueing an ordinary event. Query
-`Lattice::supports(Capability::MONITORING)` before watching. Unix resolver
+the capability for every domain selected by the filter before watching;
+`Capability::MONITORING` means that all current domains are available. Unix resolver
 managers may later regenerate `/etc/resolv.conf`; callers requiring persistence
 should use the owning manager's configuration interface. Net Lattice's `async`
 feature uses and re-exports the `EventStream` implementation from
@@ -138,23 +139,31 @@ feature uses and re-exports the `EventStream` implementation from
 | Neighbor table inspection | ✅ | ✅ | ✅ |
 | DNS resolver inspection | ✅ | ✅ | ✅ |
 | DNS resolver mutation | ✅ | ✅ | ✅ |
-| Change monitoring | ✅ | ✅ | ✅ |
-| Async change monitoring | ✅ | ✅ | ✅ |
+| Route/interface/address change monitoring | ✅ | ✅ | ✅ |
+| Neighbor change monitoring | ✅ | — | ✅ |
+| All-domain monitoring (`watch()`) | ✅ | — | ✅ |
+| Async route/interface/address monitoring | ✅ | ✅ | ✅ |
+| Async neighbor/all-domain monitoring | ✅ | — | ✅ |
 
 ### Event delivery
 
 Event streams are bounded. If a consumer falls behind, the watcher records and delivers `Event::ResyncRequired { .. }` before a subsequent ordinary event instead of retaining an unbounded backlog. Re-read the affected provider state before relying on subsequent events.
 
-Monitoring is domain-specific: Linux Netlink and macOS PF_ROUTE deliver route,
-interface, interface-address, and neighbor changes. Windows IP Helper delivers
-route, interface, and unicast-address changes; it does not currently register
-a native neighbor-change callback. `Capability::MONITORING` therefore means a
-watcher surface is available, not that every event domain is delivered on every
-platform.
+Monitoring capabilities describe actual native delivery. Linux Netlink and
+macOS PF_ROUTE expose route, interface, interface-address, and neighbor
+delivery, so they advertise aggregate `Capability::MONITORING`. Windows IP
+Helper exposes route, interface, and unicast-address delivery only: use the
+matching `ROUTE_MONITORING`, `INTERFACE_MONITORING`, or
+`ADDRESS_MONITORING` capability with `watch_filtered`. A Windows neighbor or
+all-domain request returns `Error::Unsupported` before native registration;
+it never silently drops a selected event domain.
 
 ```rust
 let route_events = EventFilter::none().route(route_id);
-let watcher = lattice.watch_filtered(route_events)?;
+if lattice.supports(Capability::ROUTE_MONITORING) {
+    let watcher = lattice.watch_filtered(route_events)?;
+    # let _ = watcher;
+}
 ```
 
 ## Examples

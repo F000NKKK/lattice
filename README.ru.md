@@ -104,7 +104,7 @@ Net Lattice призвана закрыть этот пробел, предос�
 - `net-lattice-async`, предоставляющий единый runtime-agnostic тип `EventStream`
 - фасад `net-lattice`, включая `Lattice::add_address()`, `Lattice::remove_address()`, `Lattice::set_dns_config()`, `Lattice::set_interface_config()`, `Lattice::capabilities()`, `Lattice::supports()`, `Lattice::watch()`, `Lattice::watch_filtered()`, `Lattice::execute_plan()` и feature-gated `Lattice::watch_async()`
 
-Это даёт реальное управление маршрутами и IP-адресами интерфейсов, desired-патчи `InterfaceConfig` для administrative state и MTU, просмотр интерфейсов, просмотр и изменение DNS-конфигурации резолвера, чтение таблиц соседей (ARP/NDP), inspectable планы mutation-операций, упорядоченное исполнение транзакций и bounded-мониторинг сетевых изменений на Linux, Windows и macOS. `InterfaceConfig` не переиспользует observed `Interface`: он выбирает один интерфейс и запрашивает одно или оба поддерживаемых свойства. Для каждого свойства проверяйте `Capability::INTERFACE_ADMIN_STATE` и `Capability::INTERFACE_MTU`. Native backend может применять свойства разными вызовами, поэтому ошибка combined patch может означать partial application; перечитайте состояние и при необходимости используйте явный compensator executor'а. Создание адреса принимает `NewInterfaceAddress` и возвращает результирующий наблюдаемый `InterfaceAddress`; замена конфигурации резолвера принимает `NewDnsConfig` и возвращает результирующий наблюдаемый `DnsConfig`. `MutationPlan` — только данные, а `Lattice::execute_plan` исполняет его через единый `ExecutionOptions` с runtime-проверками, cancellation на границах операций, типизированными snapshots, явной compensation и фазовыми отчётами. `EventFilter` сочетает селекторы доменов (`routes()`) и объектов (`route(route_id)`); каждый backend применяет filter до помещения обычного события в очередь. В переносимом коде перед watching проверяйте `Lattice::supports(Capability::MONITORING)`. Feature `async` в Net Lattice использует и реэкспортирует реализацию `EventStream` из `net-lattice-async`; приложению достаточно включить эту feature фасада. Это всё ещё не полноценная библиотека: VLAN, VRF, namespaces, интеграция с firewall, декларативная настройка сети и другие продвинутые возможности ещё впереди; см. [ARCHITECTURE.ru.md](ARCHITECTURE.ru.md) для поэтапной дорожной карты и [CHANGELOG.md](CHANGELOG.md) для того, что реально вышло.
+Это даёт реальное управление маршрутами и IP-адресами интерфейсов, desired-патчи `InterfaceConfig` для administrative state и MTU, просмотр интерфейсов, просмотр и изменение DNS-конфигурации резолвера, чтение таблиц соседей (ARP/NDP), inspectable планы mutation-операций, упорядоченное исполнение транзакций и bounded-мониторинг сетевых изменений на Linux, Windows и macOS. `InterfaceConfig` не переиспользует observed `Interface`: он выбирает один интерфейс и запрашивает одно или оба поддерживаемых свойства. Для каждого свойства проверяйте `Capability::INTERFACE_ADMIN_STATE` и `Capability::INTERFACE_MTU`. Native backend может применять свойства разными вызовами, поэтому ошибка combined patch может означать partial application; перечитайте состояние и при необходимости используйте явный compensator executor'а. Создание адреса принимает `NewInterfaceAddress` и возвращает результирующий наблюдаемый `InterfaceAddress`; замена конфигурации резолвера принимает `NewDnsConfig` и возвращает результирующий наблюдаемый `DnsConfig`. `MutationPlan` — только данные, а `Lattice::execute_plan` исполняет его через единый `ExecutionOptions` с runtime-проверками, cancellation на границах операций, типизированными snapshots, явной compensation и фазовыми отчётами. `EventFilter` сочетает селекторы доменов (`routes()`) и объектов (`route(route_id)`); каждый backend применяет filter до помещения обычного события в очередь. Перед watching проверяйте capability каждого выбранного filter-домена; `Capability::MONITORING` означает, что доступны все текущие домены. Feature `async` в Net Lattice использует и реэкспортирует реализацию `EventStream` из `net-lattice-async`; приложению достаточно включить эту feature фасада. Это всё ещё не полноценная библиотека: VLAN, VRF, namespaces, интеграция с firewall, декларативная настройка сети и другие продвинутые возможности ещё впереди; см. [ARCHITECTURE.ru.md](ARCHITECTURE.ru.md) для поэтапной дорожной карты и [CHANGELOG.md](CHANGELOG.md) для того, что реально вышло.
 
 | Возможность | Linux | Windows | macOS |
 |---|:---:|:---:|:---:|
@@ -117,23 +117,32 @@ Net Lattice призвана закрыть этот пробел, предос�
 | Просмотр таблицы соседей | ✅ | ✅ | ✅ |
 | Просмотр DNS-резолвера | ✅ | ✅ | ✅ |
 | Изменение DNS-резолвера | ✅ | ✅ | ✅ |
-| Мониторинг изменений | ✅ | ✅ | ✅ |
-| Асинхронный мониторинг изменений | ✅ | ✅ | ✅ |
+| Мониторинг изменений маршрутов/интерфейсов/адресов | ✅ | ✅ | ✅ |
+| Мониторинг изменений соседей | ✅ | — | ✅ |
+| Мониторинг всех доменов (`watch()`) | ✅ | — | ✅ |
+| Async-мониторинг маршрутов/интерфейсов/адресов | ✅ | ✅ | ✅ |
+| Async-мониторинг соседей/всех доменов | ✅ | — | ✅ |
 
 ### Доставка событий
 
 Потоки событий bounded. Если consumer не успевает обрабатывать события, watcher запоминает и выдаёт `Event::ResyncRequired { .. }` перед последующим обычным событием, а не сохраняет неограниченный backlog. Прежде чем полагаться на последующие события, перечитайте состояние затронутого provider.
 
-Мониторинг зависит от домена: Netlink в Linux и PF_ROUTE в macOS доставляют
-изменения маршрутов, интерфейсов, адресов интерфейсов и соседей. IP Helper в
-Windows доставляет изменения маршрутов, интерфейсов и unicast-адресов, но пока
-не регистрирует native callback для изменений соседей. Поэтому
-`Capability::MONITORING` означает наличие поверхности watcher, а не доставку
-каждого домена событий на каждой платформе.
+Capabilities мониторинга описывают фактическую native-доставку. Netlink в
+Linux и PF_ROUTE в macOS доставляют изменения маршрутов, интерфейсов, адресов
+интерфейсов и соседей, поэтому публикуют aggregate
+`Capability::MONITORING`. IP Helper в Windows доставляет только маршруты,
+интерфейсы и unicast-адреса: используйте соответствующую capability
+`ROUTE_MONITORING`, `INTERFACE_MONITORING` или `ADDRESS_MONITORING` вместе с
+`watch_filtered`. Запрос neighbors или всех доменов в Windows завершается
+`Error::Unsupported` до native-регистрации — выбранный домен никогда не
+теряется молча.
 
 ```rust
 let route_events = EventFilter::none().route(route_id);
-let watcher = lattice.watch_filtered(route_events)?;
+if lattice.supports(Capability::ROUTE_MONITORING) {
+    let watcher = lattice.watch_filtered(route_events)?;
+    # let _ = watcher;
+}
 ```
 
 ## Примеры
