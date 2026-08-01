@@ -977,6 +977,35 @@ mod tests {
     }
 
     #[test]
+    fn facade_validates_route_and_address_preconditions() {
+        let lattice = lattice(Capability::empty());
+        assert!(matches!(
+            lattice.validate_plan(&MutationPlan::from_operations([
+                Mutation::AddRoute(route())
+            ])),
+            Err(Error::AlreadyExists)
+        ));
+        assert!(matches!(
+            lattice.validate_plan(&MutationPlan::from_operations([Mutation::RemoveRoute(
+                planned_route()
+            )])),
+            Err(Error::NotFound)
+        ));
+        assert!(matches!(
+            lattice.validate_plan(&MutationPlan::from_operations([Mutation::AddAddress(
+                NewInterfaceAddress::new(InterfaceId::new(99), network())
+            )])),
+            Err(Error::NotFound)
+        ));
+        assert!(matches!(
+            lattice.validate_plan(&MutationPlan::from_operations([Mutation::RemoveAddress(
+                InterfaceAddress::new(InterfaceAddressId::new(99), 99, network())
+            )])),
+            Err(Error::NotFound)
+        ));
+    }
+
+    #[test]
     fn facade_captures_native_snapshots_for_each_mutation_domain() {
         let lattice = lattice(Capability::DNS_MUTATION);
         let route = route();
