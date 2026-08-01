@@ -83,17 +83,18 @@ patch version here.
 - 0.15: completed ordered transaction execution, runtime preflight,
   cancellation, typed snapshots, explicit compensation, and phase-aware
   reports.
-- 0.16: implementation complete pending privileged CI: desired `InterfaceConfig`,
-  capability-gated MTU/admin-state mutation, read-after-write, and executor
-  integration on all built-in backends.
-- 0.17: planned neighbor mutation.
+- 0.16: completed and verified by privileged Linux, Windows, and macOS CI:
+  desired `InterfaceConfig`, capability-gated MTU/admin-state mutation,
+  read-after-write, and executor integration on all built-in backends.
+- 0.17: neighbor mutation plus IPv6 DNS parity and isolated destructive
+  topology acceptance; detailed planning is pending in `.ai/0.17/plan.md`.
 - 0.18: planned consistent `CurrentState` snapshots.
 - 0.19: planned `DesiredState` and inspectable diff.
 - 0.20: planned declarative apply through the transaction executor.
 - 0.21: planned pre-1.0 compatibility and hardening audit.
 
-The active Stage 0.16 plan and audit record remain in `.ai/0.16/` in the
-working tree until privileged CI evidence closes its final checkbox.
+The completed Stage 0.16 plan and audit record remain in `.ai/0.16/` as
+working-tree evidence. The active Stage 0.17 scaffold is in `.ai/0.17/`.
 `.ai/`, `.codex/`, this index, and root `AGENTS.md` are intentionally local
 agent context in this checkout and are not release content.
 

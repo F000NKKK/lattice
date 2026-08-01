@@ -34,8 +34,9 @@ informed as the issue is investigated and resolved.
 The latest published release, Stage 0.16 of Net Lattice's
 [architecture](ARCHITECTURE.md)'s
 Incremental Delivery Plan, provides route inspection and mutation, interface
-inspection, DNS resolver inspection and mutation, neighbor inspection, and
-interface-address inspection and mutation on Linux
+inspection, DNS resolver inspection and mutation, neighbor inspection,
+interface-address inspection and mutation, and capability-gated interface
+configuration on Linux
 (`net-lattice-backend-linux`, via Netlink and `/etc/resolv.conf`), Windows
 (`net-lattice-backend-windows`, via the IP Helper API), and macOS
 (`net-lattice-backend-darwin`, via BSD routing sockets, `getifaddrs`, address
@@ -57,4 +58,6 @@ Route, interface-address, and DNS-mutation operations are privileged (see
 unintended network mutation, partial DNS application, privilege confusion, or
 memory-safety issues in route, interface, DNS, neighbor, address, or
 monitoring message/data handling are in scope. Firewall, VLAN, VRF,
-namespace, and tunnel domains do not exist yet.
+namespace, isolated destructive topology orchestration, and tunnel domains do
+not exist yet. IPv6 DNS parity and isolated topology acceptance remain Stage
+0.17 follow-up work.
