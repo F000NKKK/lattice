@@ -8,7 +8,7 @@ This document describes the planned workspace structure for Net Lattice and the
 design principles behind it. It reflects intended direction, not current
 state: see [CHANGELOG.md](CHANGELOG.md) and [README.md](README.md) for what
 actually exists in the repository today. As of this writing, Stage 0.16
-implementation is complete and awaits privileged CI evidence: `net-lattice-core`,
+implementation is complete and verified by privileged CI: `net-lattice-core`,
 `net-lattice-ip`, `net-lattice-model`'s `route`, `interface`, `dns`,
 `neighbor`, `ifaddr`, and `mutation` modules, `net-lattice-platform`'s `RouteProvider`,
 `InterfaceProvider`, `InterfaceMutator`, `DnsProvider`, `DnsMutator`, `NeighborProvider`, and
@@ -671,7 +671,7 @@ are introduced only when there is real implementation work for them:
 | 0.13 ✅ | DNS mutation with an intent/observed-state model: `NewDnsConfig` is applied through supported system mechanisms and the resulting `DnsConfig` is re-read on Linux, Windows, and macOS. |
 | 0.14 ✅ | Mutation operation model: inspectable `Mutation` values and ordered `MutationPlan`s for existing route/address/DNS mutations; explicit preconditions, idempotency, privilege, confirmation, partial-application, and reversibility classifications. Adds side-effect-free `MutationPreflight` analysis plus typed `MutationOutcome`, `MutationPlanReport`, and `RollbackStatus` contracts for executor reporting, while plans themselves retain no execution or rollback side effects. |
 | 0.15 ✅ | Transaction execution baseline: runtime capability and object-precondition preflight via `Lattice::validate_plan`, provider-backed `MutationSnapshot` capture through `snapshot_for_mutation`, ordered submission through `Lattice::execute_plan` configured by `ExecutionOptions`, per-operation outcomes, phase/timing diagnostics, first-failure stopping, operation-boundary cancellation, caller-defined prior-state capture, and an explicitly supplied reverse-order compensator. Ignored native facade route round-trip and compensation scenarios run in each privileged CI job; DNS partial-application integration remains intentionally non-destructive. |
-| 0.16 ⏳ | Interface configuration implementation: separate desired `InterfaceConfig`, independent admin-state/MTU capability gates, read-after-write mutation on Linux/Windows/macOS, typed executor snapshots, and existing native interface-change event mappings. Shared privileged runners verify submission/readback/restoration without deliberately disrupting a live interface; isolated-interface CI is required for destructive end-to-end event proof. Mark complete after privileged CI evidence. |
+| 0.16 ✅ | Interface configuration: separate desired `InterfaceConfig`, independent admin-state/MTU capability gates, read-after-write mutation on Linux/Windows/macOS, typed executor snapshots, existing native interface-change event mappings, and privileged submission/readback/restoration checks. Destructive end-to-end event proof remains isolated-topology follow-up. |
 | 0.17 | Neighbor mutation: intent/observed types and capability-gated static ARP/NDP entry management. This completes the mutation counterpart of the existing neighbor read model. |
 | 0.18 | Snapshot foundation: `CurrentState` assembled consistently from the implemented providers, with snapshot scope, consistency, and partial-read semantics made explicit. |
 | 0.19 | Declarative model and diff: `DesiredState` configuration types remain distinct from observed types; produce an inspectable `Diff` without applying it. |

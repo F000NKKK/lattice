@@ -49,7 +49,9 @@ jobs:
         with:
           tool: cargo-llvm-cov
 
-      - uses: Swatinem/rust-cache@v2
+      # v2.9.1 uses the current Node action runtime; do not suppress runtime
+      # warnings with NODE_OPTIONS.
+      - uses: Swatinem/rust-cache@v2.9.1
         with:
           key: coverage-${{ matrix.os }}
           cache-targets: false

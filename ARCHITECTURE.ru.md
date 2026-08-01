@@ -9,7 +9,7 @@
 текущее состояние: см. [CHANGELOG.md](CHANGELOG.md) и [README.md](README.md)
 для того, что реально существует в репозитории на данный момент. На момент
 написания реализация этапа 0.16 плана поэтапной поставки ниже завершена и
-ожидает privileged CI evidence:
+проверена privileged CI evidence:
 `net-lattice-core`,
 `net-lattice-ip`, модули `route`, `interface`, `dns`, `neighbor`, `ifaddr` и `mutation` в `net-lattice-model`,
 `RouteProvider`, `InterfaceProvider`, `InterfaceMutator`, `DnsProvider`, `DnsMutator`, `NeighborProvider`, `AddressProvider`, `AddressMutator`, `CapabilityProvider`, синхронный `EventProvider`, feature-gated `TokioEventProvider` и object/domain selectors `EventFilter` в `net-lattice-platform`,
@@ -673,7 +673,7 @@ Stages 0.15–0.20 должны строить transactions и declarative apply
 | 0.13 ✅ | Изменение DNS с моделью intent/observed state: `NewDnsConfig` применяется через поддерживаемые системные механизмы, а результирующий `DnsConfig` повторно читается на Linux, Windows и macOS. |
 | 0.14 ✅ | Модель mutation-операций: inspectable значения `Mutation` и упорядоченные `MutationPlan` для существующих изменений routes/addresses/DNS; явные классификации preconditions, idempotency, privileges, confirmation, partial application и reversibility. Добавлен side-effect-free анализ `MutationPreflight`, а также типизированные `MutationOutcome`, `MutationPlanReport` и `RollbackStatus` для отчёта исполнителя; сами планы не имеют side effects исполнения или rollback. |
 | 0.15 ✅ | Базовое исполнение транзакций: runtime capability и object-precondition preflight через `Lattice::validate_plan`, provider-backed capture `MutationSnapshot` через `snapshot_for_mutation`, отправка операций по порядку через `Lattice::execute_plan`, настроенный единым `ExecutionOptions`, результаты операций с фазами и длительностями, остановка после первой ошибки, cancellation на границе операции, capture prior state и явно переданный compensator в обратном порядке. Ignored native facade route round-trip и compensation scenarios запускаются в каждом privileged CI job; DNS partial-application integration намеренно остаётся non-destructive. |
-| 0.16 ⏳ | Реализация конфигурации интерфейсов: отдельный desired `InterfaceConfig`, независимые capability gates для admin state/MTU, read-after-write mutation на Linux/Windows/macOS, typed snapshots executor'а и существующие native mappings событий интерфейса. Shared privileged runners проверяют submission/readback/restoration без намеренного нарушения работающего интерфейса; destructive end-to-end event proof требует isolated-interface CI. Отметить этап завершённым после privileged CI evidence. |
+| 0.16 ✅ | Конфигурация интерфейсов: отдельный desired `InterfaceConfig`, независимые capability gates для admin state/MTU, read-after-write mutation на Linux/Windows/macOS, typed snapshots executor'а, native mappings событий интерфейса и privileged проверки submission/readback/restoration. Destructive end-to-end event proof остаётся follow-up для isolated topology. |
 | 0.17 | Изменение соседей: intent/observed-типы и capability-gated управление статическими ARP/NDP-записями. Это завершает mutation-аналог существующей read-модели соседей. |
 | 0.18 | Основа snapshot: `CurrentState` последовательно собирается из реализованных provider'ов, с явно определёнными scope, consistency и partial-read семантиками snapshot. |
 | 0.19 | Декларативная модель и diff: конфигурационные типы `DesiredState` остаются отдельными от наблюдаемых типов; создаётся inspectable `Diff` без его применения. |
