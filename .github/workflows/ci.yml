@@ -29,11 +29,11 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     env:
-      # Keep coverage artifacts in a dedicated target directory. Privileged
+      # Keep coverage artifacts job-local and outside the checkout. Privileged
       # native tests add profiles to this same location after regular tests
       # have built the instrumented binaries.
-      CARGO_TARGET_DIR: ${{ github.workspace }}/target/coverage
-      LLVM_PROFILE_FILE: ${{ github.workspace }}/target/coverage/net-lattice-%p-%m.profraw
+      CARGO_TARGET_DIR: ${{ runner.temp }}/net-lattice-coverage-target
+      LLVM_PROFILE_FILE: ${{ runner.temp }}/net-lattice-%p-%m.profraw
     steps:
       - uses: actions/checkout@v7
 
@@ -51,6 +51,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: coverage-${{ matrix.os }}
+          cache-targets: false
 
       - name: cargo fmt --check
         run: cargo fmt --check
