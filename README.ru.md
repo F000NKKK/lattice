@@ -225,13 +225,14 @@ let observed = lattice.set_dns_config(requested)?;
 ### Просмотр плана mutation
 
 Stage 0.14 также предоставляет типизированные `MutationOutcome`,
-`MutationPlanReport` и `RollbackStatus` для будущего отчёта исполнителя о
-частичных отказах и границах компенсации. Само исполнение транзакций остаётся
-за Stage 0.15.
+`MutationPlanReport` и `RollbackStatus`, которые использует исполнитель Stage
+0.15 для отчёта о частичных отказах и границах компенсации. Сам
+`MutationPlan` остаётся чистыми данными; исполнение явно выполняется на
+границе подключённого `Lattice`.
 
 В Stage 0.14 планы являются чистыми данными. Они делают существующие
-imperative операции inspectable без их применения; исполнение транзакций —
-работа Stage 0.15.
+imperative операции inspectable без их применения; Stage 0.15 добавляет
+явное исполнение плана и отчёт по каждой операции.
 
 ```rust
 let plan = MutationPlan::from_operations([

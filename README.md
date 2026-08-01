@@ -224,9 +224,10 @@ let observed = lattice.set_dns_config(requested)?;
 
 Plans are pure data in Stage 0.14. They make existing imperative operations
 inspectable without applying them. Stage 0.14 also defines the typed
-`MutationOutcome`, `MutationPlanReport`, and `RollbackStatus` contracts that a
-future executor will use to report partial failure and compensation boundaries;
-transaction execution remains Stage 0.15 work.
+`MutationOutcome`, `MutationPlanReport`, and `RollbackStatus` contracts used by
+the Stage 0.15 executor to report partial failure and compensation boundaries.
+`MutationPlan` itself remains data-only; execution is explicit at the connected
+`Lattice` boundary.
 
 ```rust
 let plan = MutationPlan::from_operations([
@@ -244,6 +245,9 @@ println!(
     "partial-application operations: {:?}",
     preflight.partial_application_indices()
 );
+
+let report = lattice.execute_plan(&plan);
+assert_eq!(report.len(), plan.len());
 ```
 
 `MutationPlan::preflight` is side-effect free. It reports risks derived from
