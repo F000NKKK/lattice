@@ -528,7 +528,7 @@ impl<B: LatticeBackend> Lattice<B> {
     /// }
     /// ```
     pub fn watch(&self) -> Result<EventReceiver<Event>> {
-        self.ensure_monitoring()?;
+        self.ensure_monitoring_for(&EventFilter::ALL)?;
         self.backend.watch()
     }
 
@@ -555,7 +555,7 @@ impl<B: LatticeBackend> Lattice<B> {
     where
         B: TokioEventProvider<Event = Event, EventFilter = EventFilter>,
     {
-        self.ensure_monitoring()?;
+        self.ensure_monitoring_for(&filter)?;
         Ok(net_lattice_async::from_tokio_receiver(
             self.backend.watch_tokio(filter)?,
         ))
@@ -563,12 +563,21 @@ impl<B: LatticeBackend> Lattice<B> {
 
     /// Subscribes to change notifications selected by `filter`.
     pub fn watch_filtered(&self, filter: EventFilter) -> Result<EventReceiver<Event>> {
-        self.ensure_monitoring()?;
+        self.ensure_monitoring_for(&filter)?;
         self.backend.watch_filtered(filter)
     }
 
-    fn ensure_monitoring(&self) -> Result<()> {
-        if self.supports(Capability::MONITORING) {
+    fn ensure_monitoring_for(&self, filter: &EventFilter) -> Result<()> {
+        let capabilities = self.capabilities();
+        let supported = [
+            (EventDomain::Route, Capability::ROUTE_MONITORING),
+            (EventDomain::Interface, Capability::INTERFACE_MONITORING),
+            (EventDomain::Neighbor, Capability::NEIGHBOR_MONITORING),
+            (EventDomain::Address, Capability::ADDRESS_MONITORING),
+        ];
+        if supported.into_iter().all(|(domain, capability)| {
+            !filter.selects_domain(domain) || capabilities.contains(capability)
+        }) {
             Ok(())
         } else {
             Err(Error::Unsupported)
@@ -1724,6 +1733,29 @@ mod tests {
     }
 
     #[test]
+    fn facade_requires_capability_for_each_selected_monitoring_domain() {
+        let route_and_address =
+            lattice(Capability::ROUTE_MONITORING | Capability::ADDRESS_MONITORING);
+        assert!(
+            route_and_address
+                .watch_filtered(EventFilter::none().routes().addresses())
+                .is_ok()
+        );
+        assert!(
+            route_and_address
+                .watch_filtered(EventFilter::none().neighbors())
+                .is_err()
+        );
+        assert!(route_and_address.watch().is_err());
+        assert!(route_and_address.watch_filtered(EventFilter::ALL).is_err());
+        assert!(
+            route_and_address
+                .watch_filtered(EventFilter::none())
+                .is_ok()
+        );
+    }
+
+    #[test]
     fn facade_propagates_backend_watcher_errors() {
         let lattice = Lattice {
             backend: TestBackend {
@@ -1754,6 +1786,20 @@ mod tests {
     fn async_facade_enforces_monitoring_capability() {
         let lattice = lattice(Capability::empty());
         assert!(lattice.watch_async(EventFilter::ALL).is_err());
+    }
+
+    #[cfg(feature = "async")]
+    #[test]
+    fn async_facade_requires_capability_for_each_selected_monitoring_domain() {
+        let lattice = lattice(Capability::ROUTE_MONITORING);
+        assert!(lattice.watch_async(EventFilter::none().routes()).is_ok());
+        assert!(
+            lattice
+                .watch_async(EventFilter::none().neighbors())
+                .is_err()
+        );
+        assert!(lattice.watch_async(EventFilter::ALL).is_err());
+        assert!(lattice.watch_async(EventFilter::none()).is_ok());
     }
 
     #[cfg(feature = "async")]
