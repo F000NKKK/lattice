@@ -678,6 +678,16 @@ mod tests {
         )
     }
 
+    fn ipv6_neighbor() -> NeighborEntry {
+        NeighborEntry::new(
+            NeighborId::new(16),
+            7,
+            IpAddress::from(Ipv6Address::new([0x2001, 0xdb8, 0, 0x16, 0, 0, 0, 1])),
+        )
+        .with_mac(MacAddress::new([0x02, 0x00, 0x00, 0x00, 0x00, 0x16]))
+        .with_state(NeighborState::Reachable)
+    }
+
     impl RouteProvider for TestBackend {
         type Route = Route;
 
@@ -766,11 +776,14 @@ mod tests {
         type NeighborEntry = NeighborEntry;
 
         fn neighbors(&self) -> Result<Vec<Self::NeighborEntry>> {
-            Ok(vec![NeighborEntry::new(
-                NeighborId::new(1),
-                1,
-                IpAddress::from(Ipv4Address::new(192, 0, 2, 1)),
-            )])
+            Ok(vec![
+                NeighborEntry::new(
+                    NeighborId::new(1),
+                    1,
+                    IpAddress::from(Ipv4Address::new(192, 0, 2, 1)),
+                ),
+                ipv6_neighbor(),
+            ])
         }
     }
 
@@ -901,7 +914,19 @@ mod tests {
         lattice.remove_route(route).expect("remove route");
         assert_eq!(lattice.interfaces().expect("interfaces").len(), 1);
         assert_eq!(lattice.dns_config().expect("dns").nameservers.len(), 0);
-        assert_eq!(lattice.neighbors().expect("neighbors").len(), 1);
+        let neighbors = lattice.neighbors().expect("neighbors");
+        assert_eq!(neighbors.len(), 2);
+        assert!(neighbors.contains(&ipv6_neighbor()));
+        let ipv6_neighbor = ipv6_neighbor();
+        let neighbor_filter = EventFilter::none().neighbor(ipv6_neighbor.id);
+        assert!(neighbor_filter.matches(Event::Neighbor {
+            id: ipv6_neighbor.id,
+            kind: ChangeKind::Changed,
+        }));
+        assert!(!neighbor_filter.matches(Event::Neighbor {
+            id: NeighborId::new(17),
+            kind: ChangeKind::Changed,
+        }));
         assert_eq!(lattice.addresses().expect("addresses").len(), 1);
         let observed = lattice.add_address(address).expect("add address");
         lattice.remove_address(observed).expect("remove address");
