@@ -178,9 +178,9 @@ elevated operating-system privilege.
 | Complete read-only state | [`snapshot`](crates/net-lattice/examples/snapshot.rs) | `capabilities`, `interfaces`, `routes`, `addresses`, `dns_config`, `neighbors` |
 | Runtime feature selection | [`capabilities`](crates/net-lattice/examples/capabilities.rs) | `capabilities`, `supports`, every current `Capability` flag |
 | Focused route read | [`list_routes`](crates/net-lattice/examples/list_routes.rs) | `routes` |
-| Bounded synchronous delivery | [`sync_monitor`](crates/net-lattice/examples/sync_monitor.rs) | `watch`, `recv_timeout`, `Event::ResyncRequired` |
+| Bounded synchronous delivery | [`sync_monitor`](crates/net-lattice/examples/sync_monitor.rs) | capability-gated `watch_filtered`, `recv_timeout`, `Event::ResyncRequired` |
 | Domain and object filtering | [`filtered_monitor`](crates/net-lattice/examples/filtered_monitor.rs) | `watch_filtered`, every `EventFilter` domain and object selector |
-| Native async delivery | [`async_monitor`](crates/net-lattice/examples/async_monitor.rs) | `watch_async`, `EventStream` |
+| Native async delivery | [`async_monitor`](crates/net-lattice/examples/async_monitor.rs) | capability-gated `watch_async`, `EventStream` |
 | Address lifecycle | [`address_assignment`](crates/net-lattice/examples/address_assignment.rs) | `NewInterfaceAddress`, `add_address`, `remove_address` |
 | Route lifecycle | [`route_mutation`](crates/net-lattice/examples/route_mutation.rs) | `Route`, `add_route`, `remove_route` |
 | Resolver replacement | [`dns_mutation`](crates/net-lattice/examples/dns_mutation.rs) | `NewDnsConfig`, `set_dns_config`, read-after-write verification |

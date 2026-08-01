@@ -11,8 +11,14 @@ fn main() -> Result<()> {
     println!("all reported capabilities: {capabilities:?}");
     for (name, capability) in [
         ("IPv6", Capability::IPV6),
-        ("monitoring", Capability::MONITORING),
+        ("route monitoring", Capability::ROUTE_MONITORING),
+        ("interface monitoring", Capability::INTERFACE_MONITORING),
+        ("neighbor monitoring", Capability::NEIGHBOR_MONITORING),
+        ("address monitoring", Capability::ADDRESS_MONITORING),
+        ("all-domain monitoring", Capability::MONITORING),
         ("DNS mutation", Capability::DNS_MUTATION),
+        ("interface administrative state", Capability::INTERFACE_ADMIN_STATE),
+        ("interface MTU", Capability::INTERFACE_MTU),
         ("VRF", Capability::VRF),
         ("network namespaces", Capability::NAMESPACES),
     ] {

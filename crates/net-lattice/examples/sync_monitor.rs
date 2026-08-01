@@ -6,11 +6,25 @@
 
 use std::time::Duration;
 
-use net_lattice::{Event, Lattice, Result};
+use net_lattice::{Capability, Error, Event, EventFilter, Lattice, Result};
 
 fn main() -> Result<()> {
     let lattice = Lattice::connect()?;
-    let events = lattice.watch()?;
+    // An all-domain `watch()` requires aggregate `MONITORING`. Select one
+    // domain the connected backend actually advertises so this example also
+    // works on Windows, whose IP Helper watcher has no neighbor callback.
+    let filter = if lattice.supports(Capability::ROUTE_MONITORING) {
+        EventFilter::none().routes()
+    } else if lattice.supports(Capability::INTERFACE_MONITORING) {
+        EventFilter::none().interfaces()
+    } else if lattice.supports(Capability::ADDRESS_MONITORING) {
+        EventFilter::none().addresses()
+    } else if lattice.supports(Capability::NEIGHBOR_MONITORING) {
+        EventFilter::none().neighbors()
+    } else {
+        return Err(Error::Unsupported);
+    };
+    let events = lattice.watch_filtered(filter)?;
 
     loop {
         match events.recv_timeout(Duration::from_secs(30))? {
