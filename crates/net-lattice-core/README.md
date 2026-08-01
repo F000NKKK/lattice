@@ -7,3 +7,13 @@ This crate has no operating-system dependency and is used by the IP, model,
 platform, backend, and facade crates.
 
 The published `net-lattice` facade provides the user-facing API.
+
+## Example
+
+```rust
+use net_lattice_core::{Error, Result};
+
+fn lookup() -> Result<()> {
+    Err(Error::NotFound)
+}
+```
