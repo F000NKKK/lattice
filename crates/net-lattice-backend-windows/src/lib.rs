@@ -2046,7 +2046,9 @@ mod tests {
             .parse::<std::net::Ipv6Addr>()
             .unwrap();
         let sockaddr = ip_to_sockaddr_inet(std::net::IpAddr::V6(expected));
-        let observed = unsafe { sockaddr_inet_to_ip(&sockaddr) };
+        let observed = unsafe {
+            sockaddr_ptr_to_ip((&sockaddr.Ipv6 as *const SOCKADDR_IN6).cast::<SOCKADDR>())
+        };
         assert_eq!(observed, Some(std::net::IpAddr::V6(expected)));
     }
 

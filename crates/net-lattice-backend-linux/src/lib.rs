@@ -1186,13 +1186,14 @@ mod tests {
             vec![
                 IpAddress::from(Ipv4Address::new(1, 1, 1, 1)),
                 std_ip_to_ip_address("2606:4700:4700::1111".parse().unwrap()),
+                std_ip_to_ip_address("2001:4860:4860::8888".parse().unwrap()),
                 IpAddress::from(Ipv4Address::new(8, 8, 8, 8)),
             ],
             vec!["example.test".to_string(), "corp.test".to_string()],
         );
         assert_eq!(
             render_resolv_conf(&config),
-            "nameserver 1.1.1.1\nnameserver 2606:4700:4700::1111\nnameserver 8.8.8.8\nsearch example.test corp.test\n"
+            "nameserver 1.1.1.1\nnameserver 2606:4700:4700::1111\nnameserver 2001:4860:4860::8888\nnameserver 8.8.8.8\nsearch example.test corp.test\n"
         );
     }
 
