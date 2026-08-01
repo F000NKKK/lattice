@@ -10,7 +10,7 @@ documentation.workspace = true
 categories.workspace = true
 keywords.workspace = true
 description = "A modern, cross-platform Rust library for configuring and inspecting operating system networking through a single, strongly typed API."
-readme.workspace = true
+readme = "README.md"
 
 [features]
 async = ["dep:net-lattice-async", "net-lattice-platform/async", "net-lattice-backend-linux/async", "net-lattice-backend-windows/async", "net-lattice-backend-darwin/async"]

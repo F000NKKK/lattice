@@ -10,7 +10,7 @@ documentation.workspace = true
 categories.workspace = true
 keywords.workspace = true
 description = "BSD/macOS backend for Net Lattice: implements net-lattice-platform's provider traits via route sockets."
-readme.workspace = true
+readme = "README.md"
 
 [features]
 async = ["net-lattice-platform/async"]

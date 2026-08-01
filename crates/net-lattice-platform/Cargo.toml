@@ -10,7 +10,7 @@ documentation.workspace = true
 categories.workspace = true
 keywords.workspace = true
 description = "Generic provider traits and Capability contract between the model and platform backends. Depends only on net-lattice-core — never on net-lattice-model."
-readme.workspace = true
+readme = "README.md"
 
 [features]
 async = ["dep:tokio"]

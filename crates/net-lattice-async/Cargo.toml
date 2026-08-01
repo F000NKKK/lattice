@@ -10,7 +10,7 @@ documentation.workspace = true
 categories.workspace = true
 keywords.workspace = true
 description = "Runtime-agnostic futures Stream adapter for Net Lattice event watchers."
-readme.workspace = true
+readme = "README.md"
 
 [dependencies]
 net-lattice-core = { workspace = true }
