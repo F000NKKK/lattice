@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Stage 0.15 transaction-execution baseline: `Lattice::execute_plan` submits
+  ordered mutation plans and returns one `MutationOutcome` per operation.
+- Operation-boundary cancellation and first-failure stopping are exposed via
+  `Lattice::execute_plan_with_cancel`; unapplied operations are reported as
+  `NotAttempted` and rollback is never inferred without prior state.
+
 ## [0.14.1] - 2026-08-01
 
 ### Added

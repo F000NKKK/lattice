@@ -46,8 +46,10 @@ PF_ROUTE. DNS changes do not currently produce watcher events. Stage 0.14 also
 publishes inspectable, data-only mutation plans for the existing route,
 interface-address, and DNS operations, side-effect-free `MutationPreflight`
 analysis, and typed `MutationOutcome`, `MutationPlanReport`, and
-`RollbackStatus` contracts. These APIs do not add a transaction executor,
-elevate privileges, or change the underlying mutation behavior.
+`RollbackStatus` contracts. These APIs do not elevate privileges or change the
+underlying primitive mutation behavior. Stage 0.15 now adds ordered plan
+submission and operation-boundary cancellation at the facade; prior-state
+compensation is not yet promised.
 
 Route, interface-address, and DNS-mutation operations are privileged (see
 [ARCHITECTURE.md](ARCHITECTURE.md)'s Privilege Model). Reports involving
