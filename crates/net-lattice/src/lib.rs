@@ -286,6 +286,7 @@ impl<B: LatticeBackend> Lattice<B> {
                 }
                 Mutation::SetDnsConfig(_) => {}
                 Mutation::SetInterfaceConfig(config) => self.validate_interface_config(config)?,
+                _ => return Err(Error::Unsupported),
             }
         }
         Ok(())
@@ -348,6 +349,7 @@ impl<B: LatticeBackend> Lattice<B> {
                     .into_iter()
                     .find(|interface| interface.id == config.interface_id()),
             )),
+            _ => Err(Error::Unsupported),
         }
     }
 
@@ -433,6 +435,7 @@ impl<B: LatticeBackend> Lattice<B> {
                 Mutation::SetInterfaceConfig(config) => {
                     self.set_interface_config(config.clone()).map(|_| ())
                 }
+                _ => Err(Error::Unsupported),
             };
 
             match result {
@@ -677,6 +680,33 @@ mod tests {
         }
     }
 
+    impl InterfaceMutator for TestBackend {
+        type InterfaceConfig = InterfaceConfig;
+
+        fn set_interface_config(&self, config: Self::InterfaceConfig) -> Result<Self::Interface> {
+            if self.fail_mutations {
+                return Err(Error::InvalidState);
+            }
+
+            let mut interface = self
+                .interfaces()?
+                .into_iter()
+                .find(|interface| interface.id == config.interface_id())
+                .ok_or(Error::NotFound)?;
+            if let Some(admin_state) = config.admin_state() {
+                interface.admin_state = match admin_state {
+                    DesiredAdminState::Up => AdminState::Up,
+                    DesiredAdminState::Down => AdminState::Down,
+                    _ => return Err(Error::Unsupported),
+                };
+            }
+            if let Some(mtu) = config.mtu() {
+                interface.mtu = Some(mtu);
+            }
+            Ok(interface)
+        }
+    }
+
     impl DnsProvider for TestBackend {
         type DnsConfig = DnsConfig;
 
@@ -822,7 +852,12 @@ mod tests {
 
     #[test]
     fn facade_forwards_all_read_and_mutation_operations() {
-        let lattice = lattice(Capability::MONITORING | Capability::DNS_MUTATION);
+        let lattice = lattice(
+            Capability::MONITORING
+                | Capability::DNS_MUTATION
+                | Capability::INTERFACE_ADMIN_STATE
+                | Capability::INTERFACE_MTU,
+        );
         let route = route();
         let address = NewInterfaceAddress::new(InterfaceId::new(1), network());
 
@@ -843,6 +878,71 @@ mod tests {
                 .len(),
             0
         );
+        let configured = lattice
+            .set_interface_config(
+                InterfaceConfig::new(InterfaceId::new(1), Some(DesiredAdminState::Up), Some(1500))
+                    .expect("valid config"),
+            )
+            .expect("configure interface");
+        assert_eq!(configured.admin_state, AdminState::Up);
+        assert_eq!(configured.mtu, Some(1500));
+    }
+
+    #[test]
+    fn facade_validates_and_executes_interface_configuration() {
+        let lattice = lattice(Capability::INTERFACE_ADMIN_STATE | Capability::INTERFACE_MTU);
+        let admin_only =
+            InterfaceConfig::new(InterfaceId::new(1), Some(DesiredAdminState::Down), None)
+                .expect("valid admin config");
+        let mtu_only =
+            InterfaceConfig::new(InterfaceId::new(1), None, Some(9000)).expect("valid MTU config");
+        let combined =
+            InterfaceConfig::new(InterfaceId::new(1), Some(DesiredAdminState::Up), Some(1500))
+                .expect("valid combined config");
+
+        assert_eq!(
+            lattice
+                .set_interface_config(admin_only)
+                .expect("admin-only config")
+                .admin_state,
+            AdminState::Down
+        );
+        assert_eq!(
+            lattice
+                .set_interface_config(mtu_only)
+                .expect("MTU-only config")
+                .mtu,
+            Some(9000)
+        );
+        let plan = MutationPlan::from_operations([Mutation::SetInterfaceConfig(combined)]);
+        lattice.validate_plan(&plan).expect("valid plan");
+        let mut options = ExecutionOptions::default();
+        let report = lattice.execute_plan(&plan, &mut options);
+        assert!(report.is_success());
+        assert!(matches!(report.outcome(0), Some(MutationOutcome::Applied)));
+    }
+
+    #[test]
+    fn facade_rejects_interface_config_missing_capability_or_target() {
+        let admin = InterfaceConfig::new(InterfaceId::new(1), Some(DesiredAdminState::Up), None)
+            .expect("valid admin config");
+        let mtu =
+            InterfaceConfig::new(InterfaceId::new(1), None, Some(1500)).expect("valid MTU config");
+        assert!(matches!(
+            lattice(Capability::empty()).set_interface_config(admin),
+            Err(Error::Unsupported)
+        ));
+        assert!(matches!(
+            lattice(Capability::INTERFACE_ADMIN_STATE).set_interface_config(mtu),
+            Err(Error::Unsupported)
+        ));
+
+        let missing =
+            InterfaceConfig::new(InterfaceId::new(99), None, Some(1500)).expect("valid config");
+        assert!(matches!(
+            lattice(Capability::INTERFACE_MTU).set_interface_config(missing),
+            Err(Error::NotFound)
+        ));
     }
 
     #[test]
@@ -1007,6 +1107,12 @@ mod tests {
         assert!(matches!(
             lattice.snapshot_for_mutation(&Mutation::SetDnsConfig(NewDnsConfig::new())),
             Ok(MutationSnapshot::Dns(_))
+        ));
+        assert!(matches!(
+            lattice.snapshot_for_mutation(&Mutation::SetInterfaceConfig(
+                InterfaceConfig::new(InterfaceId::new(1), None, Some(1500)).expect("valid config")
+            )),
+            Ok(MutationSnapshot::Interface(Some(_)))
         ));
     }
 
