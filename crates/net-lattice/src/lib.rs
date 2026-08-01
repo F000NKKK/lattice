@@ -318,72 +318,11 @@ impl<B: LatticeBackend> Lattice<B> {
     /// partial-application risk, and later operations are `NotAttempted`.
     /// Compensation is not inferred: until a caller supplies a prior-state
     /// snapshot, the report records [`RollbackStatus::NotAttempted`].
-    pub fn execute_plan(&self, plan: &MutationPlan) -> MutationPlanReport {
-        let mut cancellation = |_, _| false;
-        let mut options = executor::ExecutionOptions::new(&mut cancellation);
-        self.execute_plan_internal(plan, &mut options)
-    }
-
-    /// Executes a plan while allowing the caller to stop at an operation
-    /// boundary. Returning `true` marks the current and remaining operations
-    /// as [`MutationOutcome::NotAttempted`] without submitting the current
-    /// operation. The callback is never invoked after an operation fails.
-    pub fn execute_plan_with_cancel<F>(
+    pub fn execute_plan(
         &self,
         plan: &MutationPlan,
-        cancelled: F,
-    ) -> MutationPlanReport
-    where
-        F: FnMut(usize, &Mutation) -> bool,
-    {
-        let mut options = executor::ExecutionOptions::new(&mut cancelled);
-        self.execute_plan_internal(plan, &mut options)
-    }
-
-    /// Executes a plan and invokes `compensate` for each successfully applied
-    /// operation in reverse order after cancellation or failure.
-    ///
-    /// The callback is the explicit prior-state boundary: Net Lattice does not
-    /// invent an inverse operation or capture a snapshot implicitly. Return
-    /// `Ok(())` only after the supplied prior state has been restored. If a
-    /// compensation fails, the report identifies that operation and stops the
-    /// reverse pass.
-    pub fn execute_plan_with_compensation<C, F>(
-        &self,
-        plan: &MutationPlan,
-        cancelled: C,
-        mut compensate: F,
-    ) -> MutationPlanReport
-    where
-        C: FnMut(usize, &Mutation) -> bool,
-        F: FnMut(usize, &Mutation) -> Result<()>,
-    {
-        let mut options =
-            executor::ExecutionOptions::with_compensation(&mut cancelled, &mut compensate);
-        self.execute_plan_internal(plan, &mut options)
-    }
-
-    /// Executes a plan while capturing caller-defined prior state for each
-    /// operation before submission.
-    ///
-    /// `snapshot` is called at the operation boundary, after runtime
-    /// capability validation and before the native mutation. Snapshots for
-    /// successful operations are supplied to `compensate` in reverse order.
-    /// A snapshot or compensation error stops execution and is reported as a
-    /// failed boundary; no platform-specific state type is imposed by the
-    /// facade.
-    pub fn execute_plan_with_snapshot<S, C, P, F>(
-        &self,
-        plan: &MutationPlan,
-        mut cancelled: C,
-        mut snapshot: P,
-        mut compensate: F,
-    ) -> MutationPlanReport
-    where
-        C: FnMut(usize, &Mutation) -> bool,
-        P: FnMut(usize, &Mutation) -> Result<S>,
-        F: FnMut(usize, &Mutation, S) -> Result<()>,
-    {
+        options: &mut ExecutionOptions<'_>,
+    ) -> MutationPlanReport {
         if let Err(error) = self.validate_plan(plan) {
             return executor::unsupported_plan_report(plan, error);
         }
@@ -394,24 +333,32 @@ impl<B: LatticeBackend> Lattice<B> {
         let mut rollback_boundary = false;
 
         for (index, operation) in plan.operations().iter().enumerate() {
-            if stopped || cancelled(index, operation) {
+            if stopped
+                || options
+                    .cancellation
+                    .as_mut()
+                    .is_some_and(|callback| callback(index, operation))
+            {
                 outcomes.push(MutationOutcome::NotAttempted);
                 rollback_boundary |= !applied.is_empty();
                 stopped = true;
                 continue;
             }
 
-            let prior = match snapshot(index, operation) {
-                Ok(prior) => prior,
-                Err(error) => {
-                    outcomes.push(MutationOutcome::Failed {
-                        error,
-                        may_have_applied: false,
-                    });
-                    stopped = true;
-                    rollback_boundary = !applied.is_empty();
-                    continue;
-                }
+            let prior = match options.snapshot.as_mut() {
+                Some(snapshot) => match snapshot(index, operation) {
+                    Ok(prior) => Some(prior),
+                    Err(error) => {
+                        outcomes.push(MutationOutcome::Failed {
+                            error,
+                            may_have_applied: false,
+                        });
+                        stopped = true;
+                        rollback_boundary = !applied.is_empty();
+                        continue;
+                    }
+                },
+                None => None,
             };
 
             let result = match operation {
@@ -444,10 +391,13 @@ impl<B: LatticeBackend> Lattice<B> {
             if applied.is_empty() {
                 RollbackStatus::NotAttempted
             } else {
+                let Some(compensate) = options.compensation.as_mut() else {
+                    return MutationPlanReport::new(outcomes, RollbackStatus::NotAttempted);
+                };
                 let mut status = RollbackStatus::Completed;
                 for (index, prior) in applied.into_iter().rev() {
                     if let Err(error) =
-                        compensate(index, plan.operation(index).expect("index"), prior)
+                        compensate(index, plan.operation(index).expect("index"), prior.as_ref())
                     {
                         status = RollbackStatus::Failed {
                             operation_index: index,
@@ -462,78 +412,6 @@ impl<B: LatticeBackend> Lattice<B> {
             RollbackStatus::NotNeeded
         };
 
-        MutationPlanReport::new(outcomes, rollback)
-    }
-
-    fn execute_plan_internal(
-        &self,
-        plan: &MutationPlan,
-        options: &mut executor::ExecutionOptions<'_>,
-    ) -> MutationPlanReport {
-        if let Err(error) = self.validate_plan(plan) {
-            return executor::unsupported_plan_report(plan, error);
-        }
-
-        let mut outcomes = Vec::with_capacity(plan.len());
-        let mut applied_indices = Vec::new();
-        let mut stopped = false;
-        let mut rollback_boundary = false;
-
-        for (index, operation) in plan.operations().iter().enumerate() {
-            if stopped || (options.cancellation)(index, operation) {
-                outcomes.push(MutationOutcome::NotAttempted);
-                rollback_boundary |= !applied_indices.is_empty();
-                stopped = true;
-                continue;
-            }
-
-            let result = match operation {
-                Mutation::AddRoute(route) => self.add_route(route.clone()),
-                Mutation::RemoveRoute(route) => self.remove_route(route.clone()),
-                Mutation::AddAddress(address) => self.add_address(address.clone()).map(|_| ()),
-                Mutation::RemoveAddress(address) => self.remove_address(address.clone()),
-                Mutation::SetDnsConfig(config) => self.set_dns_config(config.clone()).map(|_| ()),
-                _ => Err(Error::Unsupported),
-            };
-
-            match result {
-                Ok(()) => {
-                    outcomes.push(MutationOutcome::Applied);
-                    applied_indices.push(index);
-                }
-                Err(error) => {
-                    rollback_boundary =
-                        !applied_indices.is_empty() || operation.semantics().may_partially_apply;
-                    outcomes.push(MutationOutcome::Failed {
-                        error,
-                        may_have_applied: operation.semantics().may_partially_apply,
-                    });
-                    stopped = true;
-                }
-            }
-        }
-
-        let rollback = if stopped && rollback_boundary {
-            if applied_indices.is_empty() {
-                RollbackStatus::NotAttempted
-            } else if let Some(compensate) = options.compensation.as_mut() {
-                let mut status = RollbackStatus::Completed;
-                for index in applied_indices.into_iter().rev() {
-                    if let Err(error) = compensate(index, plan.operation(index).expect("index")) {
-                        status = RollbackStatus::Failed {
-                            operation_index: index,
-                            error,
-                        };
-                        break;
-                    }
-                }
-                status
-            } else {
-                RollbackStatus::NotAttempted
-            }
-        } else {
-            RollbackStatus::NotNeeded
-        };
         MutationPlanReport::new(outcomes, rollback)
     }
 
@@ -894,7 +772,8 @@ mod tests {
             Mutation::SetDnsConfig(NewDnsConfig::new()),
         ]);
 
-        let report = lattice.execute_plan(&plan);
+        let mut options = ExecutionOptions::default();
+        let report = lattice.execute_plan(&plan, &mut options);
 
         assert_eq!(report.len(), plan.len());
         assert!(report.is_success());
@@ -912,7 +791,9 @@ mod tests {
             Mutation::RemoveRoute(planned_route()),
         ]);
 
-        let report = lattice.execute_plan_with_cancel(&plan, |index, _| index == 1);
+        let mut cancelled = |index, _| index == 1;
+        let mut options = ExecutionOptions::default().cancellation(&mut cancelled);
+        let report = lattice.execute_plan(&plan, &mut options);
 
         assert_eq!(report.applied_count(), 1);
         assert_eq!(report.not_attempted_count(), 1);
@@ -935,7 +816,8 @@ mod tests {
         };
         let plan = MutationPlan::from_operations([Mutation::SetDnsConfig(NewDnsConfig::new())]);
 
-        let report = lattice.execute_plan(&plan);
+        let mut options = ExecutionOptions::default();
+        let report = lattice.execute_plan(&plan, &mut options);
 
         assert!(matches!(
             report.outcome(0),
@@ -959,7 +841,8 @@ mod tests {
             lattice.validate_plan(&plan),
             Err(Error::Unsupported)
         ));
-        let report = lattice.execute_plan(&plan);
+        let mut options = ExecutionOptions::default();
+        let report = lattice.execute_plan(&plan, &mut options);
         assert!(matches!(
             report.outcome(0),
             Some(MutationOutcome::Failed {
