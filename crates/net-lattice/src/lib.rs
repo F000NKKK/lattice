@@ -1007,14 +1007,15 @@ mod tests {
         ]);
         let mut compensated = Vec::new();
 
-        let report = lattice.execute_plan_with_compensation(
-            &plan,
-            |index, _| index == 1,
-            |index, _| {
-                compensated.push(index);
-                Ok(())
-            },
-        );
+        let mut cancelled = |index, _| index == 1;
+        let mut compensate = |index, _, _| {
+            compensated.push(index);
+            Ok(())
+        };
+        let mut options = ExecutionOptions::default()
+            .cancellation(&mut cancelled)
+            .compensation(&mut compensate);
+        let report = lattice.execute_plan(&plan, &mut options);
 
         assert_eq!(compensated, vec![0]);
         assert!(matches!(report.rollback(), RollbackStatus::Completed));
@@ -1030,21 +1031,23 @@ mod tests {
         let mut captured = Vec::new();
         let mut restored = Vec::new();
 
-        let report = lattice.execute_plan_with_snapshot(
-            &plan,
-            |index, _| index == 1,
-            |index, _| {
-                captured.push(index);
-                Ok(format!("state-{index}"))
-            },
-            |index, _, state| {
-                restored.push((index, state));
-                Ok(())
-            },
-        );
+        let mut cancelled = |index, _| index == 1;
+        let mut snapshot = |index, _| {
+            captured.push(index);
+            Ok(MutationSnapshot::Dns(DnsConfig::default()))
+        };
+        let mut compensate = |index, _, state| {
+            restored.push((index, state.is_some()));
+            Ok(())
+        };
+        let mut options = ExecutionOptions::default()
+            .cancellation(&mut cancelled)
+            .snapshot(&mut snapshot)
+            .compensation(&mut compensate);
+        let report = lattice.execute_plan(&plan, &mut options);
 
         assert_eq!(captured, vec![0]);
-        assert_eq!(restored, vec![(0, "state-0".to_string())]);
+        assert_eq!(restored, vec![(0, true)]);
         assert!(matches!(report.rollback(), RollbackStatus::Completed));
     }
 
@@ -1056,11 +1059,12 @@ mod tests {
             Mutation::RemoveRoute(planned_route()),
         ]);
 
-        let report = lattice.execute_plan_with_compensation(
-            &plan,
-            |index, _| index == 1,
-            |_, _| Err(Error::InvalidState),
-        );
+        let mut cancelled = |index, _| index == 1;
+        let mut compensate = |_, _, _| Err(Error::InvalidState);
+        let mut options = ExecutionOptions::default()
+            .cancellation(&mut cancelled)
+            .compensation(&mut compensate);
+        let report = lattice.execute_plan(&plan, &mut options);
 
         assert!(matches!(
             report.rollback(),
