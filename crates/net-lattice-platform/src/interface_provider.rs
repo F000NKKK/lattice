@@ -8,11 +8,8 @@ use net_lattice_core::Result;
 /// crate (`net-lattice`) is what constrains `Interface` to the concrete model
 /// type.
 ///
-/// Unlike [`RouteProvider`](crate::RouteProvider), this trait is read-only for
-/// now: listing interfaces. Configuring interfaces (setting MTU, bringing them
-/// up/down) is a write operation that will be added once the API design for
-/// `InterfaceConfig` vs `Interface` state/config split is settled — see
-/// ARCHITECTURE.md's State Model section.
+/// This trait is read-only. See [`InterfaceMutator`](crate::InterfaceMutator)
+/// for the complementary administrative-state and MTU configuration contract.
 pub trait InterfaceProvider {
     type Interface;
 

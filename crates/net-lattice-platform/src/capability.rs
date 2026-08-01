@@ -27,6 +27,18 @@ bitflags::bitflags! {
         /// The backend can replace resolver configuration through a supported
         /// operating-system mechanism.
         const DNS_MUTATION = 1 << 4;
+        /// The backend can request an interface's administrative up/down
+        /// state through a supported operating-system mechanism.
+        ///
+        /// This is a feature gate, not proof that the current process has the
+        /// privilege or policy permission to change the interface.
+        const INTERFACE_ADMIN_STATE = 1 << 5;
+        /// The backend can request an interface MTU through a supported
+        /// operating-system mechanism.
+        ///
+        /// This is a feature gate, not proof that the current process has the
+        /// privilege or policy permission to change the interface.
+        const INTERFACE_MTU = 1 << 6;
     }
 }
 
@@ -41,4 +53,18 @@ bitflags::bitflags! {
 /// call into the OS keep returning `Result`.
 pub trait CapabilityProvider {
     fn capabilities(&self) -> Capability;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Capability;
+
+    #[test]
+    fn interface_configuration_capabilities_are_distinct_feature_gates() {
+        assert_ne!(
+            Capability::INTERFACE_ADMIN_STATE.bits(),
+            Capability::INTERFACE_MTU.bits()
+        );
+        assert!(!Capability::INTERFACE_ADMIN_STATE.contains(Capability::INTERFACE_MTU));
+    }
 }
