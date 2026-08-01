@@ -67,6 +67,27 @@ When one patch asks for both MTU and administrative state, a native backend
 may use separate writes. Treat errors as potentially partially applied and use
 an explicit `MutationPlan` compensator if restoration is needed.
 
+## Monitoring capabilities
+
+Select only event domains the connected backend advertises. The aggregate
+`Capability::MONITORING` means all route, interface, neighbor, and address
+domains are deliverable, so it is required by `watch()`. For a filtered watch,
+check the matching domain capability. Windows supports route, interface, and
+address notifications, but rejects neighbor and all-domain subscriptions with
+`Error::Unsupported` rather than returning a stream that omits neighbors.
+
+```rust,no_run
+use net_lattice::{Capability, EventFilter, Lattice, Result};
+
+fn main() -> Result<()> {
+    let lattice = Lattice::connect()?;
+    if lattice.supports(Capability::ROUTE_MONITORING) {
+        let _routes = lattice.watch_filtered(EventFilter::none().routes())?;
+    }
+    Ok(())
+}
+```
+
 ## Platform and privilege notes
 
 Read-only APIs are generally unprivileged. Network mutations require the

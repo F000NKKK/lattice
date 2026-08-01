@@ -514,7 +514,8 @@ impl<B: LatticeBackend> Lattice<B> {
     /// Subscribes to change notifications. See [`EventReceiver`] for how to
     /// consume the returned events. Prefer `recv`/`try_recv`/`recv_timeout`
     /// when errors must be handled explicitly; `Iterator` terminates on any
-    /// receiver error.
+    /// receiver error. This is an all-domain request and therefore requires
+    /// aggregate [`Capability::MONITORING`].
     ///
     /// ```no_run
     /// use net_lattice::{Lattice, Result};
@@ -535,7 +536,9 @@ impl<B: LatticeBackend> Lattice<B> {
     /// Subscribes to async change notifications selected by `filter`.
     ///
     /// This is the Stage 0.11 async watcher API. It has the same filter
-    /// semantics as [`Self::watch_filtered`].
+    /// semantics as [`Self::watch_filtered`]. Each selected domain must have
+    /// its corresponding monitoring capability; an empty filter is valid and
+    /// requests no delivery.
     ///
     /// ```no_run
     /// use futures::StreamExt;
@@ -562,6 +565,15 @@ impl<B: LatticeBackend> Lattice<B> {
     }
 
     /// Subscribes to change notifications selected by `filter`.
+    ///
+    /// Every selected domain must be advertised by the connected backend:
+    /// routes require [`Capability::ROUTE_MONITORING`], interfaces require
+    /// [`Capability::INTERFACE_MONITORING`], neighbors require
+    /// [`Capability::NEIGHBOR_MONITORING`], and interface addresses require
+    /// [`Capability::ADDRESS_MONITORING`]. A request that includes an
+    /// unsupported domain returns [`Error::Unsupported`] before native
+    /// registration. An empty filter requests no domain and is valid without
+    /// a monitoring capability.
     pub fn watch_filtered(&self, filter: EventFilter) -> Result<EventReceiver<Event>> {
         self.ensure_monitoring_for(&filter)?;
         self.backend.watch_filtered(filter)
