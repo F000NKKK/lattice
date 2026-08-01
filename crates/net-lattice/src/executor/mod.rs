@@ -4,38 +4,57 @@
 //! execution policy shared by the facade methods and deliberately has no
 //! dependency on a concrete operating-system backend.
 
-use net_lattice_core::Error;
+use net_lattice_core::{Error, Result};
 use net_lattice_model::{
-    Mutation, MutationOutcome, MutationPlan, MutationPlanReport, RollbackStatus,
+    Mutation, MutationOutcome, MutationPlan, MutationPlanReport, MutationSnapshot, RollbackStatus,
 };
 
-/// Internal execution policy shared by the facade convenience methods.
-///
-/// Snapshot capture remains generic over the caller's state type and is kept
-/// on the dedicated snapshot entry point until the policy object grows a
-/// typed callback contract.
-pub(crate) struct ExecutionOptions<'a> {
-    pub(crate) cancellation: &'a mut dyn FnMut(usize, &Mutation) -> bool,
+/// Options controlling one ordered plan execution.
+pub struct ExecutionOptions<'a> {
+    pub(crate) cancellation: Option<&'a mut dyn FnMut(usize, &Mutation) -> bool>,
+    pub(crate) snapshot: Option<&'a mut dyn FnMut(usize, &Mutation) -> Result<MutationSnapshot>>,
     pub(crate) compensation:
-        Option<&'a mut dyn FnMut(usize, &Mutation) -> net_lattice_core::Result<()>>,
+        Option<&'a mut dyn FnMut(usize, &Mutation, Option<&MutationSnapshot>) -> Result<()>>,
 }
 
 impl<'a> ExecutionOptions<'a> {
-    pub(crate) fn new(cancellation: &'a mut dyn FnMut(usize, &Mutation) -> bool) -> Self {
+    /// Creates options with no cancellation, snapshot, or compensation hooks.
+    pub fn new() -> Self {
         Self {
-            cancellation,
+            cancellation: None,
+            snapshot: None,
             compensation: None,
         }
     }
 
-    pub(crate) fn with_compensation(
-        cancellation: &'a mut dyn FnMut(usize, &Mutation) -> bool,
-        compensation: &'a mut dyn FnMut(usize, &Mutation) -> net_lattice_core::Result<()>,
+    /// Installs an operation-boundary cancellation hook.
+    pub fn cancellation(mut self, callback: &'a mut dyn FnMut(usize, &Mutation) -> bool) -> Self {
+        self.cancellation = Some(callback);
+        self
+    }
+
+    /// Installs a typed prior-state capture hook.
+    pub fn snapshot(
+        mut self,
+        callback: &'a mut dyn FnMut(usize, &Mutation) -> Result<MutationSnapshot>,
     ) -> Self {
-        Self {
-            cancellation,
-            compensation: Some(compensation),
-        }
+        self.snapshot = Some(callback);
+        self
+    }
+
+    /// Installs explicit reverse-order compensation.
+    pub fn compensation(
+        mut self,
+        callback: &'a mut dyn FnMut(usize, &Mutation, Option<&MutationSnapshot>) -> Result<()>,
+    ) -> Self {
+        self.compensation = Some(callback);
+        self
+    }
+}
+
+impl Default for ExecutionOptions<'_> {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
