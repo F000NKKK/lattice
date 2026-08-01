@@ -233,6 +233,8 @@ Stage 0.14 также предоставляет типизированные `M
 передать compensator; исполнитель не выводит обратную операцию автоматически.
 `Lattice::execute_plan_with_snapshot` объединяет callback захвата состояния на
 границе операции с этим явным compensator.
+Вспомогательный метод фасада `snapshot_for_mutation` читает наблюдаемый route,
+interface address или DNS view в типизированный `MutationSnapshot`.
 
 В Stage 0.14 планы являются чистыми данными. Они делают существующие
 imperative операции inspectable без их применения; Stage 0.15 добавляет

@@ -231,6 +231,8 @@ the Stage 0.15 executor to report partial failure and compensation boundaries.
 `Lattice::execute_plan_with_compensation` to supply the compensating operation;
 the executor never infers one. `Lattice::execute_plan_with_snapshot` combines
 the operation-boundary snapshot callback with that explicit compensator.
+The facade's `snapshot_for_mutation` helper reads the matching observed route,
+interface address, or DNS view into a typed `MutationSnapshot`.
 
 ```rust
 let plan = MutationPlan::from_operations([

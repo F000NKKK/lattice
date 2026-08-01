@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   operation.
 - `Lattice::execute_plan_with_snapshot` captures caller-defined prior state at
   operation boundaries and supplies it to reverse-order compensation.
+- Public `MutationSnapshot` values cover observed route, interface-address,
+  and DNS state through provider-backed reads.
 
 ## [0.14.1] - 2026-08-01
 
