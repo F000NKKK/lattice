@@ -300,8 +300,11 @@ pub enum MutationStopReason {
 /// Timing and phase metadata for one plan-local operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MutationOperationReport {
+    /// Last phase reached by this operation.
     pub phase: MutationExecutionPhase,
+    /// Time spent in snapshot and native execution callbacks.
     pub duration: Duration,
+    /// Why execution stopped at this operation, if it stopped abnormally.
     pub stop_reason: Option<MutationStopReason>,
 }
 
@@ -336,10 +339,11 @@ impl MutationPlanReport {
         outcomes: impl IntoIterator<Item = MutationOutcome>,
         rollback: RollbackStatus,
     ) -> Self {
+        let outcomes: Vec<_> = outcomes.into_iter().collect();
         Self {
-            outcomes: outcomes.into_iter().collect(),
+            operation_reports: vec![MutationOperationReport::not_attempted(); outcomes.len()],
+            outcomes,
             rollback,
-            operation_reports: Vec::new(),
         }
     }
 
@@ -384,6 +388,11 @@ impl MutationPlanReport {
     /// Returns phase and timing metadata aligned with [`Self::outcomes`].
     pub fn operation_reports(&self) -> &[MutationOperationReport] {
         &self.operation_reports
+    }
+
+    /// Returns phase and timing metadata for one plan-local operation.
+    pub fn operation_report(&self, index: usize) -> Option<&MutationOperationReport> {
+        self.operation_reports.get(index)
     }
 
     /// Whether every recorded operation was applied successfully.
@@ -648,6 +657,8 @@ mod tests {
         assert_eq!(report.applied_count(), 1);
         assert_eq!(report.not_attempted_count(), 1);
         assert_eq!(report.len(), 3);
+        assert_eq!(report.operation_reports().len(), 3);
+        assert!(report.operation_report(2).is_some());
         assert!(!report.is_empty());
         assert!(report.outcome(3).is_none());
         assert!(matches!(report.rollback(), RollbackStatus::NotAttempted));
