@@ -64,7 +64,9 @@ impl Route {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use net_lattice_ip::{Ipv4Address, Ipv4Network, Ipv4PrefixLength};
+    use net_lattice_ip::{
+        Ipv4Address, Ipv4Network, Ipv4PrefixLength, Ipv6Address, Ipv6Network, Ipv6PrefixLength,
+    };
 
     fn destination() -> Network {
         Network::from(Ipv4Network::new(
@@ -90,5 +92,24 @@ mod tests {
         assert_eq!(route.gateway, Some(gateway));
         assert_eq!(route.metric, Some(100));
         assert_eq!(route.interface_index, Some(2));
+    }
+
+    #[test]
+    fn builder_methods_preserve_ipv6_route_fields() {
+        let destination = Network::from(Ipv6Network::new(
+            Ipv6Address::new([0x2001, 0xdb8, 0, 0x16, 0, 0, 0, 0]),
+            Ipv6PrefixLength::new(64).expect("valid IPv6 prefix"),
+        ));
+        let gateway = IpAddress::from(Ipv6Address::new([0x2001, 0xdb8, 0, 0x16, 0, 0, 0, 1]));
+
+        let route = Route::new(RouteId::new(16), destination)
+            .with_gateway(gateway)
+            .with_metric(42)
+            .with_interface_index(7);
+
+        assert_eq!(route.destination, destination);
+        assert_eq!(route.gateway, Some(gateway));
+        assert_eq!(route.metric, Some(42));
+        assert_eq!(route.interface_index, Some(7));
     }
 }
