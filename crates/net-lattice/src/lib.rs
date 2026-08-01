@@ -946,6 +946,45 @@ mod tests {
     }
 
     #[test]
+    fn facade_reports_partial_interface_configuration_failure() {
+        let lattice = Lattice {
+            backend: TestBackend {
+                capabilities: Capability::INTERFACE_ADMIN_STATE | Capability::INTERFACE_MTU,
+                fail_events: false,
+                fail_mutations: true,
+            },
+        };
+        let config =
+            InterfaceConfig::new(InterfaceId::new(1), Some(DesiredAdminState::Up), Some(1500))
+                .expect("valid combined config");
+        let plan = MutationPlan::from_operations([Mutation::SetInterfaceConfig(config)]);
+        let mut captured = false;
+        let mut snapshot = |_, operation: &Mutation| {
+            captured = matches!(operation, Mutation::SetInterfaceConfig(_));
+            lattice.snapshot_for_mutation(operation)
+        };
+        let mut options = ExecutionOptions::default().snapshot(&mut snapshot);
+        let report = lattice.execute_plan(&plan, &mut options);
+
+        assert!(captured);
+        assert!(matches!(
+            report.outcome(0),
+            Some(MutationOutcome::Failed {
+                may_have_applied: true,
+                ..
+            })
+        ));
+        assert!(matches!(
+            report
+                .operation_report(0)
+                .expect("operation report")
+                .stop_reason,
+            Some(MutationStopReason::ExecutionFailed)
+        ));
+        assert!(matches!(report.rollback(), RollbackStatus::NotAttempted));
+    }
+
+    #[test]
     fn facade_executes_ordered_plan_and_preserves_report_indices() {
         let lattice = lattice(Capability::DNS_MUTATION);
         let plan = MutationPlan::from_operations([
