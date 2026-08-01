@@ -941,7 +941,16 @@ mod tests {
         let mut options = ExecutionOptions::default().snapshot(&mut snapshot);
         let add_report = lattice.execute_plan(&add_plan, &mut options);
 
-        let remove_plan = MutationPlan::from_operations([Mutation::RemoveRoute(route)]);
+        let observed_route = lattice
+            .routes()
+            .expect("failed to read route after adding it")
+            .into_iter()
+            .find(|candidate| {
+                candidate.destination == route.destination
+                    && candidate.interface_index == route.interface_index
+            })
+            .expect("added route was not observed");
+        let remove_plan = MutationPlan::from_operations([Mutation::RemoveRoute(observed_route)]);
         let mut options = ExecutionOptions::default();
         let remove_report = lattice.execute_plan(&remove_plan, &mut options);
         assert!(add_report.is_success(), "route add report: {add_report:?}");
@@ -975,9 +984,17 @@ mod tests {
             Ipv4PrefixLength::new(24).expect("valid prefix"),
         ));
         let route = Route::new(RouteId::new(0), destination).with_interface_index(interface.index);
+        let failed_route = Route::new(
+            RouteId::new(0),
+            Network::from(Ipv4Network::new(
+                Ipv4Address::new(198, 51, 101, 0),
+                Ipv4PrefixLength::new(24).expect("valid prefix"),
+            )),
+        )
+        .with_interface_index(u32::MAX);
         let plan = MutationPlan::from_operations([
             Mutation::AddRoute(route.clone()),
-            Mutation::AddRoute(route.clone()),
+            Mutation::AddRoute(failed_route),
         ]);
 
         let mut snapshot = |_, operation: &Mutation| lattice.snapshot_for_mutation(operation);
