@@ -29,11 +29,12 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     env:
-      # Keep coverage artifacts job-local and outside the checkout. Privileged
-      # native tests add profiles to this same location after regular tests
-      # have built the instrumented binaries.
-      CARGO_TARGET_DIR: ${{ runner.temp }}/net-lattice-coverage-target
-      LLVM_PROFILE_FILE: ${{ runner.temp }}/net-lattice-%p-%m.profraw
+      # Keep coverage artifacts job-local and outside the checkout. `runner`
+      # is not available in a job-level `env`, so use a sibling of the
+      # checkout instead. Privileged native tests add profiles to this same
+      # location after regular tests have built the instrumented binaries.
+      CARGO_TARGET_DIR: ${{ github.workspace }}/../net-lattice-coverage-target
+      LLVM_PROFILE_FILE: ${{ github.workspace }}/../net-lattice-%p-%m.profraw
     steps:
       - uses: actions/checkout@v7
 
