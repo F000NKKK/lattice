@@ -91,7 +91,9 @@ impl InterfaceAddress {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use net_lattice_ip::{Ipv4Address, Ipv4Network, Ipv4PrefixLength};
+    use net_lattice_ip::{
+        Ipv4Address, Ipv4Network, Ipv4PrefixLength, Ipv6Address, Ipv6Network, Ipv6PrefixLength,
+    };
 
     fn sample_network() -> Network {
         Network::from(Ipv4Network::new(
@@ -120,5 +122,20 @@ mod tests {
             .with_broadcast(Ipv4Address::new(192, 168, 1, 255));
         assert_eq!(intent.interface_id, InterfaceId::new(7));
         assert_eq!(intent.broadcast, Some(Ipv4Address::new(192, 168, 1, 255)));
+    }
+
+    #[test]
+    fn ipv6_address_intent_and_observation_keep_a_64_prefix_without_broadcast() {
+        let network = Network::from(Ipv6Network::new(
+            Ipv6Address::new([0x2001, 0xdb8, 0, 0x16, 0, 0, 0, 7]),
+            Ipv6PrefixLength::new(64).expect("valid IPv6 prefix"),
+        ));
+        let intent = NewInterfaceAddress::new(InterfaceId::new(7), network);
+        let observed = InterfaceAddress::new(InterfaceAddressId::new(7), 7, network);
+
+        assert_eq!(intent.address, network);
+        assert!(intent.broadcast.is_none());
+        assert_eq!(observed.address, network);
+        assert!(observed.broadcast.is_none());
     }
 }
