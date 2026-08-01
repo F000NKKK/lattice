@@ -177,6 +177,41 @@ pub struct MutationPlan {
     operations: Vec<Mutation>,
 }
 
+/// Static preflight facts derived from a [`MutationPlan`].
+///
+/// Preflight is deliberately backend-independent: it does not inspect the
+/// operating system, capabilities, privileges, or current state. A plan can
+/// pass this analysis and still fail when an executor submits it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct MutationPreflight {
+    prior_state_indices: Vec<usize>,
+    partial_application_indices: Vec<usize>,
+}
+
+impl MutationPreflight {
+    /// Returns plan-local indices whose compensation needs a prior snapshot.
+    pub fn prior_state_indices(&self) -> &[usize] {
+        &self.prior_state_indices
+    }
+
+    /// Returns plan-local indices whose operation may change state before an
+    /// error is returned.
+    pub fn partial_application_indices(&self) -> &[usize] {
+        &self.partial_application_indices
+    }
+
+    /// Whether any operation requires a prior observed state for compensation.
+    pub fn requires_prior_state(&self) -> bool {
+        !self.prior_state_indices.is_empty()
+    }
+
+    /// Whether any operation carries a partial-application risk.
+    pub fn may_partially_apply(&self) -> bool {
+        !self.partial_application_indices.is_empty()
+    }
+}
+
 /// The result recorded for one operation in an applied mutation plan.
 ///
 /// These values describe an executor's report; constructing a plan or a
@@ -325,6 +360,34 @@ impl MutationPlan {
     /// with the corresponding entry in [`MutationPlanReport::outcomes`].
     pub fn operation(&self, index: usize) -> Option<&Mutation> {
         self.operations.get(index)
+    }
+
+    /// Computes backend-independent execution risks for this plan.
+    ///
+    /// This method has no side effects and does not validate capabilities,
+    /// privileges, or current networking state. Those checks belong to the
+    /// executor at submission time.
+    pub fn preflight(&self) -> MutationPreflight {
+        let mut prior_state_indices = Vec::new();
+        let mut partial_application_indices = Vec::new();
+
+        for (index, operation) in self.operations.iter().enumerate() {
+            let semantics = operation.semantics();
+            if matches!(
+                semantics.reversibility,
+                MutationReversibility::RequiresPriorState
+            ) {
+                prior_state_indices.push(index);
+            }
+            if semantics.may_partially_apply {
+                partial_application_indices.push(index);
+            }
+        }
+
+        MutationPreflight {
+            prior_state_indices,
+            partial_application_indices,
+        }
     }
 
     /// Whether the plan has no operations.
@@ -514,5 +577,19 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn preflight_identifies_snapshot_and_partial_application_risks() {
+        let plan = MutationPlan::from_operations([
+            Mutation::AddRoute(Route::new(crate::route::RouteId::new(1), network())),
+            Mutation::SetDnsConfig(NewDnsConfig::new()),
+        ]);
+        let preflight = plan.preflight();
+
+        assert_eq!(preflight.prior_state_indices(), &[0]);
+        assert_eq!(preflight.partial_application_indices(), &[1]);
+        assert!(preflight.requires_prior_state());
+        assert!(preflight.may_partially_apply());
     }
 }

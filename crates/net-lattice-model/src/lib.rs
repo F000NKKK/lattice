@@ -22,7 +22,7 @@ pub use interface::{AdminState, Interface, InterfaceId, InterfaceKind, Operation
 pub use mac::MacAddress;
 pub use mutation::{
     Mutation, MutationConfirmation, MutationIdempotency, MutationKind, MutationOutcome,
-    MutationPlan, MutationPlanReport, MutationPrecondition, MutationPrivilege,
+    MutationPlan, MutationPlanReport, MutationPrecondition, MutationPreflight, MutationPrivilege,
     MutationReversibility, MutationSemantics, RollbackStatus,
 };
 pub use neighbor::{NeighborEntry, NeighborId, NeighborState};

@@ -44,7 +44,7 @@ pub use net_lattice_model::interface::{
 pub use net_lattice_model::mac::MacAddress;
 pub use net_lattice_model::mutation::{
     Mutation, MutationConfirmation, MutationIdempotency, MutationKind, MutationOutcome,
-    MutationPlan, MutationPlanReport, MutationPrecondition, MutationPrivilege,
+    MutationPlan, MutationPlanReport, MutationPrecondition, MutationPreflight, MutationPrivilege,
     MutationReversibility, MutationSemantics, RollbackStatus,
 };
 pub use net_lattice_model::neighbor::{NeighborEntry, NeighborId, NeighborState};
