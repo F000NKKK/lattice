@@ -1820,6 +1820,16 @@ mod tests {
         assert!(capabilities.contains(Capability::INTERFACE_MTU));
     }
 
+    #[test]
+    fn monitoring_filter_rejects_only_the_unsupported_neighbor_domain() {
+        assert!(supports_event_filter(&EventFilter::none()));
+        assert!(supports_event_filter(&EventFilter::none().routes()));
+        assert!(supports_event_filter(&EventFilter::none().interfaces()));
+        assert!(supports_event_filter(&EventFilter::none().addresses()));
+        assert!(!supports_event_filter(&EventFilter::none().neighbors()));
+        assert!(!supports_event_filter(&EventFilter::ALL));
+    }
+
     /// Re-submits the already-observed administrative state, MTU, and combined
     /// patch for one non-loopback interface with an actual TCP/IP binding.
     /// This exercises each privileged native write/readback shape without

@@ -2222,6 +2222,10 @@ mod tests {
         let backend = DarwinBackend::new().expect("failed to open a route socket");
         let capabilities = backend.capabilities();
         assert!(capabilities.contains(Capability::IPV6));
+        assert!(capabilities.contains(Capability::ROUTE_MONITORING));
+        assert!(capabilities.contains(Capability::INTERFACE_MONITORING));
+        assert!(capabilities.contains(Capability::NEIGHBOR_MONITORING));
+        assert!(capabilities.contains(Capability::ADDRESS_MONITORING));
         assert!(capabilities.contains(Capability::MONITORING));
         assert!(capabilities.contains(Capability::DNS_MUTATION));
         assert!(capabilities.contains(Capability::INTERFACE_ADMIN_STATE));

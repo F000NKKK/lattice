@@ -10,7 +10,8 @@ generic `net-lattice-platform` contracts through native Windows APIs.
   semantics;
 - interface MTU and administrative-state patches, with a fresh observed
   readback after every successful native submission;
-- native `NotifyIpInterfaceChange` notifications and optional async delivery;
+- native route, interface, and unicast-address notifications with optional
+  async delivery;
 - preservation of Windows error codes in the shared error model.
 
 Applications should normally use the `net-lattice` facade, which selects this
@@ -39,6 +40,8 @@ and remains subject to adapter and system policy. Windows applies MTU to its
 applicable IPv4/IPv6 interface rows and administrative state through a
 separate native operation, so a combined patch can be partially applied after
 an error; callers must re-read state and use explicit compensation where
-needed. Interface changes are reported by the native notification stream; the
-facade does not synthesize a duplicate event. Privileged tests run separately
-and must restore changed state.
+needed. IP Helper has no native neighbor-table change callback, so this backend
+advertises route/interface/address monitoring capabilities only and rejects
+neighbor or all-domain watcher requests before registration. The facade does
+not synthesize events. Privileged tests run separately and must restore changed
+state.
