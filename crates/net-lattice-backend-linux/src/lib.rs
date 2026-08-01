@@ -728,11 +728,12 @@ fn resolv_conf_error(err: &std::io::Error) -> Error {
 impl CapabilityProvider for LinuxBackend {
     /// `IPV6` unconditionally: every provider this backend implements
     /// (routes, interfaces, neighbors, addresses) already handles both
-    /// address families. `MONITORING` unconditionally too, now that
-    /// `EventProvider` is implemented below. `VRF`/`NAMESPACES` are left
-    /// unset — Linux genuinely supports both at the kernel level, but Net
-    /// Lattice doesn't implement either yet, and a `Capability` this
-    /// backend can't actually act on would be a lie to the caller.
+    /// address families. Netlink delivers every currently modeled event
+    /// domain, so this backend truthfully advertises the aggregate
+    /// `MONITORING` capability. `VRF`/`NAMESPACES` are left unset — Linux
+    /// genuinely supports both at the kernel level, but Net Lattice doesn't
+    /// implement either yet, and a `Capability` this backend can't actually
+    /// act on would be a lie to the caller.
     fn capabilities(&self) -> Capability {
         Capability::IPV6
             | Capability::MONITORING

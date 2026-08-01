@@ -90,8 +90,6 @@ mod tests {
             | Capability::INTERFACE_MONITORING
             | Capability::ADDRESS_MONITORING;
         assert!(!partial.contains(Capability::MONITORING));
-        assert!(
-            (partial | Capability::NEIGHBOR_MONITORING).contains(Capability::MONITORING)
-        );
+        assert!((partial | Capability::NEIGHBOR_MONITORING).contains(Capability::MONITORING));
     }
 }

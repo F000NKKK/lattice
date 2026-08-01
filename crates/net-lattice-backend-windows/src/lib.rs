@@ -14,7 +14,7 @@ use std::net::IpAddr;
 
 use net_lattice_core::{Error, Id, PlatformErrorCode, Result};
 use net_lattice_model::dns::{DnsConfig, NewDnsConfig};
-use net_lattice_model::event::{ChangeKind, Event, EventFilter};
+use net_lattice_model::event::{ChangeKind, Event, EventDomain, EventFilter};
 use net_lattice_model::ifaddr::{InterfaceAddress, InterfaceAddressId, NewInterfaceAddress};
 use net_lattice_model::interface::{
     AdminState, DesiredAdminState, Interface, InterfaceConfig, InterfaceKind, OperationalState,
@@ -80,6 +80,14 @@ impl WindowsBackend {
             tokio::runtime::Runtime::new().map_err(|err| Error::Platform(io_error_code(&err)))?;
         Ok(Self { runtime })
     }
+}
+
+/// IP Helper provides notifications for routes, IP interfaces, and unicast
+/// addresses, but has no native neighbor-table change registration. Reject a
+/// selected neighbor domain before allocating callback state or registering
+/// any native subscription.
+fn supports_event_filter(filter: &EventFilter) -> bool {
+    !filter.selects_domain(EventDomain::Neighbor)
 }
 
 fn io_error_code(err: &std::io::Error) -> PlatformErrorCode {
@@ -1106,12 +1114,16 @@ unsafe extern "system" fn tokio_address_change_callback(
 impl CapabilityProvider for WindowsBackend {
     /// `IPV6` unconditionally, same rationale as the other backends: every
     /// provider this backend implements already handles both address
-    /// families. `MONITORING` is available through IP Helper notification
-    /// registrations. `VRF`/`NAMESPACES` remain unset because Net Lattice
-    /// does not implement either domain yet.
+    /// families. IP Helper natively delivers route, interface, and unicast
+    /// address notifications, but not neighbor-table notifications; therefore
+    /// this backend intentionally does not advertise aggregate `MONITORING`.
+    /// `VRF`/`NAMESPACES` remain unset because Net Lattice does not implement
+    /// either domain yet.
     fn capabilities(&self) -> Capability {
         Capability::IPV6
-            | Capability::MONITORING
+            | Capability::ROUTE_MONITORING
+            | Capability::INTERFACE_MONITORING
+            | Capability::ADDRESS_MONITORING
             | Capability::DNS_MUTATION
             | Capability::INTERFACE_ADMIN_STATE
             | Capability::INTERFACE_MTU
@@ -1126,6 +1138,9 @@ impl EventProvider for WindowsBackend {
         self.watch_filtered(EventFilter::ALL)
     }
     fn watch_filtered(&self, filter: Self::EventFilter) -> Result<EventReceiver<Self::Event>> {
+        if !supports_event_filter(&filter) {
+            return Err(Error::Unsupported);
+        }
         let (sender, receiver) = EventReceiver::bounded();
         let state = Box::into_raw(Box::new(WindowsWatchState { sender, filter }));
         let mut route = HANDLE::default();
@@ -1199,6 +1214,9 @@ impl TokioEventProvider for WindowsBackend {
     type EventFilter = EventFilter;
 
     fn watch_tokio(&self, filter: Self::EventFilter) -> Result<TokioEventReceiver<Self::Event>> {
+        if !supports_event_filter(&filter) {
+            return Err(Error::Unsupported);
+        }
         let (sender, receiver) = TokioEventReceiver::bounded();
         let state = Box::into_raw(Box::new(WindowsTokioWatchState { sender, filter }));
         let mut route = HANDLE::default();
@@ -1792,7 +1810,11 @@ mod tests {
         let backend = WindowsBackend::new().expect("failed to create Windows backend");
         let capabilities = backend.capabilities();
         assert!(capabilities.contains(Capability::IPV6));
-        assert!(capabilities.contains(Capability::MONITORING));
+        assert!(capabilities.contains(Capability::ROUTE_MONITORING));
+        assert!(capabilities.contains(Capability::INTERFACE_MONITORING));
+        assert!(capabilities.contains(Capability::ADDRESS_MONITORING));
+        assert!(!capabilities.contains(Capability::NEIGHBOR_MONITORING));
+        assert!(!capabilities.contains(Capability::MONITORING));
         assert!(capabilities.contains(Capability::DNS_MUTATION));
         assert!(capabilities.contains(Capability::INTERFACE_ADMIN_STATE));
         assert!(capabilities.contains(Capability::INTERFACE_MTU));
@@ -2000,18 +2022,25 @@ mod tests {
         assert_eq!(config_list(&config.nameservers), "1.1.1.1,8.8.8.8");
     }
 
-    /// Registers and immediately drops the three native notification handles
-    /// without changing Windows networking state. The ignored test below
-    /// verifies a real route notification end-to-end.
+    /// Registers and immediately drops the supported native notification
+    /// handles without changing Windows networking state. Neighbor and
+    /// all-domain requests are rejected before any callback allocation. The
+    /// ignored test below verifies a real route notification end-to-end.
     #[test]
     fn watch_registers_ip_helper_notifications() {
         use std::time::Duration;
 
         let backend = WindowsBackend::new().expect("failed to create Windows backend");
-        assert!(backend.capabilities().contains(Capability::MONITORING));
+        assert!(!backend.capabilities().contains(Capability::MONITORING));
+        assert!(backend.watch().is_err());
+        assert!(
+            backend
+                .watch_filtered(EventFilter::none().neighbors())
+                .is_err()
+        );
         drop(
             backend
-                .watch()
+                .watch_filtered(EventFilter::none().routes())
                 .expect("failed to register IP Helper notifications"),
         );
         let filtered = backend
@@ -2027,8 +2056,14 @@ mod tests {
     #[test]
     fn watch_tokio_registers_ip_helper_notifications() {
         let backend = WindowsBackend::new().expect("failed to create Windows backend");
+        assert!(backend.watch_tokio(EventFilter::ALL).is_err());
+        assert!(
+            backend
+                .watch_tokio(EventFilter::none().neighbors())
+                .is_err()
+        );
         let watcher = backend
-            .watch_tokio(EventFilter::none())
+            .watch_tokio(EventFilter::none().addresses())
             .expect("failed to register IP Helper notifications");
         drop(watcher);
     }
@@ -2098,9 +2133,13 @@ mod tests {
         use std::time::Duration;
 
         let backend = WindowsBackend::new().expect("failed to create Windows backend");
-        assert!(backend.capabilities().contains(Capability::MONITORING));
+        assert!(
+            backend
+                .capabilities()
+                .contains(Capability::ROUTE_MONITORING)
+        );
         let watcher = backend
-            .watch()
+            .watch_filtered(EventFilter::none().routes())
             .expect("failed to register IP Helper notifications");
         #[cfg(feature = "async")]
         let mut async_watcher = backend

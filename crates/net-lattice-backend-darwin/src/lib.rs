@@ -1749,10 +1749,10 @@ unsafe fn route_socket_message_to_event(message: *const u8, len: usize) -> Optio
 impl CapabilityProvider for DarwinBackend {
     /// `IPV6` unconditionally, same rationale as the Linux backend: every
     /// provider this backend implements already handles both address
-    /// families. `MONITORING` is available through a dedicated PF_ROUTE
-    /// reader. `VRF`/`NAMESPACES` are left unset: BSD/macOS has no direct
-    /// equivalent and Net Lattice does not implement either domain.
-    /// equivalent to begin with.
+    /// families. PF_ROUTE delivers every currently modeled event domain, so
+    /// this backend truthfully advertises aggregate `MONITORING` through its
+    /// dedicated reader. `VRF`/`NAMESPACES` are left unset: BSD/macOS has no
+    /// direct equivalent and Net Lattice does not implement either domain.
     fn capabilities(&self) -> Capability {
         Capability::IPV6
             | Capability::MONITORING
