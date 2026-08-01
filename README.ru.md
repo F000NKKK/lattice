@@ -242,7 +242,18 @@ let plan = MutationPlan::from_operations([
 for operation in plan.operations() {
     println!("{operation:?}: {:?}", operation.semantics());
 }
+
+let preflight = plan.preflight();
+println!("операции со snapshot: {:?}", preflight.prior_state_indices());
+println!(
+    "операции с риском partial application: {:?}",
+    preflight.partial_application_indices()
+);
 ```
+
+`MutationPlan::preflight` не имеет side effects. Он сообщает риски,
+выведенные из metadata операций; проверка capabilities, privileges и текущего
+состояния остаётся обязанностью executor.
 
 ## Дорожная карта
 

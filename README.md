@@ -237,7 +237,18 @@ let plan = MutationPlan::from_operations([
 for operation in plan.operations() {
     println!("{operation:?}: {:?}", operation.semantics());
 }
+
+let preflight = plan.preflight();
+println!("snapshot operations: {:?}", preflight.prior_state_indices());
+println!(
+    "partial-application operations: {:?}",
+    preflight.partial_application_indices()
+);
 ```
+
+`MutationPlan::preflight` is side-effect free. It reports risks derived from
+the operation metadata; capability, privilege, and current-state checks remain
+executor responsibilities.
 
 ## Roadmap
 
