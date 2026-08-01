@@ -16,30 +16,35 @@ use net_lattice_core::{Error, Id, PlatformErrorCode, Result};
 use net_lattice_model::dns::{DnsConfig, NewDnsConfig};
 use net_lattice_model::event::{ChangeKind, Event, EventFilter};
 use net_lattice_model::ifaddr::{InterfaceAddress, InterfaceAddressId, NewInterfaceAddress};
-use net_lattice_model::interface::{AdminState, Interface, InterfaceKind, OperationalState};
+use net_lattice_model::interface::{
+    AdminState, DesiredAdminState, Interface, InterfaceConfig, InterfaceKind, OperationalState,
+};
 use net_lattice_model::mac::MacAddress;
 use net_lattice_model::neighbor::{NeighborEntry, NeighborId, NeighborState};
 use net_lattice_model::route::{Route, RouteId};
 use net_lattice_model::{IpAddress, Network};
 use net_lattice_platform::{
     AddressMutator, AddressProvider, Capability, CapabilityProvider, DnsMutator, DnsProvider,
-    EventProvider, EventReceiver, EventSender, InterfaceProvider, NeighborProvider, RouteProvider,
+    EventProvider, EventReceiver, EventSender, InterfaceMutator, InterfaceProvider,
+    NeighborProvider, RouteProvider,
 };
 #[cfg(feature = "async")]
 use net_lattice_platform::{TokioEventProvider, TokioEventReceiver, TokioEventSender};
-use windows::Win32::Foundation::HANDLE;
+use windows::Win32::Foundation::{ERROR_NOT_FOUND, HANDLE};
 use windows::Win32::NetworkManagement::IpHelper::{
     CancelMibChangeNotify2, CreateIpForwardEntry2, CreateUnicastIpAddressEntry,
     DNS_INTERFACE_SETTINGS, DNS_INTERFACE_SETTINGS_VERSION1, DNS_SETTING_NAMESERVER,
     DNS_SETTING_SEARCHLIST, DNS_SETTINGS, DNS_SETTINGS_VERSION1, DeleteIpForwardEntry2,
     DeleteUnicastIpAddressEntry, FreeMibTable, GAA_FLAG_SKIP_ANYCAST, GAA_FLAG_SKIP_FRIENDLY_NAME,
-    GAA_FLAG_SKIP_MULTICAST, GAA_FLAG_SKIP_UNICAST, GetAdaptersAddresses, GetIfTable2,
-    GetIpForwardTable2, GetIpNetTable2, GetUnicastIpAddressTable, IP_ADAPTER_ADDRESSES_LH,
-    InitializeIpForwardEntry, InitializeUnicastIpAddressEntry, MIB_IF_ROW2, MIB_IF_TABLE2,
-    MIB_IPFORWARD_ROW2, MIB_IPFORWARD_TABLE2, MIB_IPNET_ROW2, MIB_IPNET_TABLE2,
-    MIB_NOTIFICATION_TYPE, MIB_UNICASTIPADDRESS_ROW, MIB_UNICASTIPADDRESS_TABLE, MibAddInstance,
-    MibDeleteInstance, NotifyIpInterfaceChange, NotifyRouteChange2, NotifyUnicastIpAddressChange,
-    SetDnsSettings, SetInterfaceDnsSettings,
+    GAA_FLAG_SKIP_MULTICAST, GAA_FLAG_SKIP_UNICAST, GetAdaptersAddresses, GetIfEntry, GetIfEntry2,
+    GetIfTable2, GetIpForwardTable2, GetIpInterfaceEntry, GetIpNetTable2, GetUnicastIpAddressTable,
+    IP_ADAPTER_ADDRESSES_LH, InitializeIpForwardEntry, InitializeUnicastIpAddressEntry,
+    MIB_IF_ADMIN_STATUS_DOWN, MIB_IF_ADMIN_STATUS_UP, MIB_IF_ROW2, MIB_IF_TABLE2, MIB_IFROW,
+    MIB_IPFORWARD_ROW2, MIB_IPFORWARD_TABLE2, MIB_IPINTERFACE_ROW, MIB_IPNET_ROW2,
+    MIB_IPNET_TABLE2, MIB_NOTIFICATION_TYPE, MIB_UNICASTIPADDRESS_ROW, MIB_UNICASTIPADDRESS_TABLE,
+    MibAddInstance, MibDeleteInstance, NotifyIpInterfaceChange, NotifyRouteChange2,
+    NotifyUnicastIpAddressChange, SetDnsSettings, SetIfEntry, SetInterfaceDnsSettings,
+    SetIpInterfaceEntry,
 };
 use windows::Win32::NetworkManagement::Ndis::{
     IfOperStatusDormant, IfOperStatusDown, IfOperStatusLowerLayerDown, IfOperStatusUp,
@@ -462,6 +467,133 @@ impl InterfaceProvider for WindowsBackend {
             }
             Ok(interfaces)
         })
+    }
+}
+
+/// Reads one interface by its stable Windows interface index.
+///
+/// `InterfaceId` is derived from this index by [`row_to_interface`], so the
+/// backend never accepts a user-supplied adapter name for a native update.
+fn get_interface(index: u32) -> Result<Interface> {
+    let mut row = MIB_IF_ROW2 {
+        InterfaceIndex: index,
+        ..Default::default()
+    };
+    let status = unsafe { GetIfEntry2(&mut row) };
+    if status.0 != 0 {
+        return Err(Error::Platform(PlatformErrorCode::Windows(status.0)));
+    }
+    Ok(row_to_interface(&row))
+}
+
+fn desired_admin_status(state: DesiredAdminState) -> Result<u32> {
+    match state {
+        DesiredAdminState::Up => Ok(MIB_IF_ADMIN_STATUS_UP),
+        DesiredAdminState::Down => Ok(MIB_IF_ADMIN_STATUS_DOWN),
+        _ => Err(Error::InvalidState),
+    }
+}
+
+fn set_admin_state(index: u32, state: DesiredAdminState) -> Result<()> {
+    // SetIfEntry is the IP Helper API which supports changing the legacy
+    // administrative-status field. Read the complete row first so fields not
+    // owned by this operation are preserved.
+    let mut row = MIB_IFROW {
+        dwIndex: index,
+        ..Default::default()
+    };
+    let status = unsafe { GetIfEntry(&mut row) };
+    if status != 0 {
+        return Err(Error::Platform(PlatformErrorCode::Windows(status)));
+    }
+
+    row.dwAdminStatus = desired_admin_status(state)?;
+    let status = unsafe { SetIfEntry(&row) };
+    if status != 0 {
+        return Err(Error::Platform(PlatformErrorCode::Windows(status)));
+    }
+    Ok(())
+}
+
+fn set_family_mtu(index: u32, family: ADDRESS_FAMILY, mtu: u32) -> Result<bool> {
+    let mut row = MIB_IPINTERFACE_ROW {
+        Family: family,
+        InterfaceIndex: index,
+        ..Default::default()
+    };
+    let status = unsafe { GetIpInterfaceEntry(&mut row) };
+    if status == ERROR_NOT_FOUND {
+        // IPv4 or IPv6 can be absent for an adapter. An interface-scoped MTU
+        // request updates every family row that actually exists.
+        return Ok(false);
+    }
+    if status.0 != 0 {
+        return Err(Error::Platform(PlatformErrorCode::Windows(status.0)));
+    }
+
+    row.NlMtu = mtu;
+    let status = unsafe { SetIpInterfaceEntry(&mut row) };
+    if status.0 != 0 {
+        return Err(Error::Platform(PlatformErrorCode::Windows(status.0)));
+    }
+    Ok(true)
+}
+
+const IP_INTERFACE_FAMILIES: [ADDRESS_FAMILY; 2] = [AF_INET, AF_INET6];
+
+/// Submits an interface-scoped MTU request to each address family that the
+/// platform reports as applicable.
+///
+/// Keeping the sequencing separate from the FFI call makes the all-families,
+/// no-family, and second-write failure boundaries deterministic to test. A
+/// failed second submission deliberately returns immediately: the first
+/// family may already have accepted the new MTU.
+fn submit_interface_mtu<F>(mut submit: F) -> Result<()>
+where
+    F: FnMut(ADDRESS_FAMILY) -> Result<bool>,
+{
+    let mut applied = false;
+    for family in IP_INTERFACE_FAMILIES {
+        applied |= submit(family)?;
+    }
+    if applied {
+        Ok(())
+    } else {
+        Err(Error::Platform(PlatformErrorCode::Windows(
+            ERROR_NOT_FOUND.0,
+        )))
+    }
+}
+
+fn set_interface_mtu(index: u32, mtu: u32) -> Result<()> {
+    submit_interface_mtu(|family| set_family_mtu(index, family, mtu))
+}
+
+impl InterfaceMutator for WindowsBackend {
+    type InterfaceConfig = InterfaceConfig;
+
+    /// Applies each requested field through the Windows IP Helper API and
+    /// returns a fresh `GetIfEntry2` observation. Administrative state and
+    /// MTU use independent native operations; an error after either write can
+    /// therefore leave a combined patch partially applied.
+    fn set_interface_config(&self, config: Self::InterfaceConfig) -> Result<Self::Interface> {
+        let index = u32::try_from(config.interface_id().value()).map_err(|_| Error::NotFound)?;
+
+        // Establish target existence before submitting any write. This keeps
+        // the platform error mapping precise and protects the MTU family
+        // helpers from operating on an arbitrary stale index.
+        get_interface(index)?;
+
+        if let Some(admin_state) = config.admin_state() {
+            set_admin_state(index, admin_state)?;
+        }
+        if let Some(mtu) = config.mtu() {
+            set_interface_mtu(index, mtu)?;
+        }
+
+        // Native acknowledgement is insufficient for the Stage 0.16
+        // ReadAfterWrite contract.
+        get_interface(index)
     }
 }
 
@@ -918,7 +1050,11 @@ impl CapabilityProvider for WindowsBackend {
     /// registrations. `VRF`/`NAMESPACES` remain unset because Net Lattice
     /// does not implement either domain yet.
     fn capabilities(&self) -> Capability {
-        Capability::IPV6 | Capability::MONITORING | Capability::DNS_MUTATION
+        Capability::IPV6
+            | Capability::MONITORING
+            | Capability::DNS_MUTATION
+            | Capability::INTERFACE_ADMIN_STATE
+            | Capability::INTERFACE_MTU
     }
 }
 
@@ -1165,6 +1301,86 @@ impl DnsMutator for WindowsBackend {
 mod tests {
     use super::*;
     use net_lattice_ip::{Ipv4Address, Ipv4Network, Ipv4PrefixLength};
+    use windows::Win32::NetworkManagement::IpHelper::MibParameterNotification;
+
+    #[test]
+    fn interface_configuration_uses_legacy_admin_status_values() {
+        assert_eq!(
+            desired_admin_status(DesiredAdminState::Up).expect("up is supported"),
+            MIB_IF_ADMIN_STATUS_UP
+        );
+        assert_eq!(
+            desired_admin_status(DesiredAdminState::Down).expect("down is supported"),
+            MIB_IF_ADMIN_STATUS_DOWN
+        );
+    }
+
+    #[test]
+    fn interface_mtu_submission_covers_every_applicable_ip_family() {
+        let mut families = Vec::new();
+        submit_interface_mtu(|family| {
+            families.push(family);
+            Ok(true)
+        })
+        .expect("both IP families were submitted");
+
+        assert_eq!(families, vec![AF_INET, AF_INET6]);
+    }
+
+    #[test]
+    fn interface_mtu_submission_reports_when_no_ip_family_exists() {
+        let error = submit_interface_mtu(|_| Ok(false)).expect_err("no family was applicable");
+        assert!(matches!(
+            error,
+            Error::Platform(PlatformErrorCode::Windows(code)) if code == ERROR_NOT_FOUND.0
+        ));
+    }
+
+    #[test]
+    fn interface_mtu_submission_stops_after_a_partially_applied_second_family_failure() {
+        let mut families = Vec::new();
+        let error = submit_interface_mtu(|family| {
+            families.push(family);
+            if family == AF_INET6 {
+                Err(Error::InvalidState)
+            } else {
+                Ok(true)
+            }
+        })
+        .expect_err("the second native submission failed");
+
+        assert_eq!(families, vec![AF_INET, AF_INET6]);
+        assert!(matches!(error, Error::InvalidState));
+    }
+
+    #[test]
+    fn interface_change_fixture_uses_native_changed_event_and_filter() {
+        let (sender, receiver) = EventReceiver::bounded();
+        let state = WindowsWatchState {
+            sender,
+            filter: EventFilter::none().interface(Id::new(7)),
+        };
+        let row = MIB_IPINTERFACE_ROW {
+            InterfaceIndex: 7,
+            ..Default::default()
+        };
+
+        unsafe {
+            interface_change_callback(
+                (&raw const state).cast(),
+                &raw const row,
+                MibParameterNotification,
+            );
+        }
+
+        assert_eq!(
+            receiver.try_recv().expect("fixture callback succeeded"),
+            Some(Event::Interface {
+                id: Id::new(7),
+                kind: ChangeKind::Changed,
+            })
+        );
+    }
 
     #[cfg(feature = "async")]
     fn tokio_route_event(watcher: &mut TokioEventReceiver<Event>, id: RouteId) -> bool {
@@ -1323,6 +1539,63 @@ mod tests {
         assert!(capabilities.contains(Capability::IPV6));
         assert!(capabilities.contains(Capability::MONITORING));
         assert!(capabilities.contains(Capability::DNS_MUTATION));
+        assert!(capabilities.contains(Capability::INTERFACE_ADMIN_STATE));
+        assert!(capabilities.contains(Capability::INTERFACE_MTU));
+    }
+
+    /// Submits the already-observed values for one suitable non-loopback
+    /// interface. This exercises the privileged native write/readback path
+    /// without deliberately changing host networking state; the drop guard
+    /// attempts restoration even if an assertion panics after submission.
+    #[test]
+    #[ignore = "requires Administrator; run from elevated cmd/PowerShell: cargo test -p net-lattice-backend-windows interface_configuration_round_trips_observed_values -- --ignored"]
+    fn interface_configuration_round_trips_observed_values() {
+        struct RestoreInterfaceConfig<'a> {
+            backend: &'a WindowsBackend,
+            config: InterfaceConfig,
+        }
+
+        impl Drop for RestoreInterfaceConfig<'_> {
+            fn drop(&mut self) {
+                let _ = self.backend.set_interface_config(self.config.clone());
+            }
+        }
+
+        let backend = WindowsBackend::new().expect("failed to create Windows backend");
+        let Some(original) = backend
+            .interfaces()
+            .expect("failed to list Windows interfaces")
+            .into_iter()
+            .find(|interface| {
+                !matches!(interface.kind, InterfaceKind::Loopback)
+                    && matches!(interface.admin_state, AdminState::Up | AdminState::Down)
+                    && interface.mtu.is_some()
+            })
+        else {
+            // Shared runners can expose only loopback or adapter classes that
+            // cannot safely exercise this contract. The deterministic tests
+            // above still cover sequencing and event mapping in that case.
+            return;
+        };
+
+        let desired_admin_state = match original.admin_state {
+            AdminState::Up => DesiredAdminState::Up,
+            AdminState::Down => DesiredAdminState::Down,
+            _ => unreachable!("filter excluded unknown administrative state"),
+        };
+        let config = InterfaceConfig::new(original.id, Some(desired_admin_state), original.mtu)
+            .expect("observed values form a valid configuration patch");
+        let _restore = RestoreInterfaceConfig {
+            backend: &backend,
+            config: config.clone(),
+        };
+
+        let observed = backend
+            .set_interface_config(config)
+            .expect("setting observed interface values failed - are you running as Administrator?");
+        assert_eq!(observed.id, original.id);
+        assert_eq!(observed.admin_state, original.admin_state);
+        assert_eq!(observed.mtu, original.mtu);
     }
 
     /// Exercises a real round trip through `GetUnicastIpAddressTable`, no
