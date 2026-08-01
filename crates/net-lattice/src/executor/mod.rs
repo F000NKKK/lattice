@@ -9,12 +9,15 @@ use net_lattice_model::{
     Mutation, MutationOutcome, MutationPlan, MutationPlanReport, MutationSnapshot, RollbackStatus,
 };
 
+type Cancellation<'a> = &'a mut dyn FnMut(usize, Mutation) -> bool;
+type Snapshot<'a> = &'a mut dyn FnMut(usize, Mutation) -> Result<MutationSnapshot>;
+type Compensation<'a> = &'a mut dyn FnMut(usize, Mutation, Option<MutationSnapshot>) -> Result<()>;
+
 /// Options controlling one ordered plan execution.
 pub struct ExecutionOptions<'a> {
-    pub(crate) cancellation: Option<&'a mut dyn FnMut(usize, Mutation) -> bool>,
-    pub(crate) snapshot: Option<&'a mut dyn FnMut(usize, Mutation) -> Result<MutationSnapshot>>,
-    pub(crate) compensation:
-        Option<&'a mut dyn FnMut(usize, Mutation, Option<MutationSnapshot>) -> Result<()>>,
+    pub(crate) cancellation: Option<Cancellation<'a>>,
+    pub(crate) snapshot: Option<Snapshot<'a>>,
+    pub(crate) compensation: Option<Compensation<'a>>,
 }
 
 impl<'a> ExecutionOptions<'a> {
