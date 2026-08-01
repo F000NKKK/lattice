@@ -318,7 +318,9 @@ impl<B: LatticeBackend> Lattice<B> {
     /// Compensation is not inferred: until a caller supplies a prior-state
     /// snapshot, the report records [`RollbackStatus::NotAttempted`].
     pub fn execute_plan(&self, plan: &MutationPlan) -> MutationPlanReport {
-        self.execute_plan_with_cancel(plan, |_, _| false)
+        let mut cancellation = |_, _| false;
+        let mut options = executor::ExecutionOptions::new(&mut cancellation);
+        self.execute_plan_internal(plan, &mut options)
     }
 
     /// Executes a plan while allowing the caller to stop at an operation
@@ -333,11 +335,8 @@ impl<B: LatticeBackend> Lattice<B> {
     where
         F: FnMut(usize, &Mutation) -> bool,
     {
-        self.execute_plan_internal(
-            plan,
-            cancelled,
-            None::<&mut fn(usize, &Mutation) -> Result<()>>,
-        )
+        let mut options = executor::ExecutionOptions::new(&mut cancelled);
+        self.execute_plan_internal(plan, &mut options)
     }
 
     /// Executes a plan and invokes `compensate` for each successfully applied
@@ -358,7 +357,9 @@ impl<B: LatticeBackend> Lattice<B> {
         C: FnMut(usize, &Mutation) -> bool,
         F: FnMut(usize, &Mutation) -> Result<()>,
     {
-        self.execute_plan_internal(plan, cancelled, Some(&mut compensate))
+        let mut options =
+            executor::ExecutionOptions::with_compensation(&mut cancelled, &mut compensate);
+        self.execute_plan_internal(plan, &mut options)
     }
 
     /// Executes a plan while capturing caller-defined prior state for each
@@ -463,16 +464,11 @@ impl<B: LatticeBackend> Lattice<B> {
         MutationPlanReport::new(outcomes, rollback)
     }
 
-    fn execute_plan_internal<C, F>(
+    fn execute_plan_internal(
         &self,
         plan: &MutationPlan,
-        mut cancelled: C,
-        mut compensate: Option<&mut F>,
-    ) -> MutationPlanReport
-    where
-        C: FnMut(usize, &Mutation) -> bool,
-        F: FnMut(usize, &Mutation) -> Result<()>,
-    {
+        options: &mut executor::ExecutionOptions<'_>,
+    ) -> MutationPlanReport {
         if let Err(error) = self.validate_plan(plan) {
             return executor::unsupported_plan_report(plan, error);
         }
@@ -483,7 +479,7 @@ impl<B: LatticeBackend> Lattice<B> {
         let mut rollback_boundary = false;
 
         for (index, operation) in plan.operations().iter().enumerate() {
-            if stopped || cancelled(index, operation) {
+            if stopped || (options.cancellation)(index, operation) {
                 outcomes.push(MutationOutcome::NotAttempted);
                 rollback_boundary |= !applied_indices.is_empty();
                 stopped = true;
@@ -519,7 +515,7 @@ impl<B: LatticeBackend> Lattice<B> {
         let rollback = if stopped && rollback_boundary {
             if applied_indices.is_empty() {
                 RollbackStatus::NotAttempted
-            } else if let Some(compensate) = compensate.as_mut() {
+            } else if let Some(compensate) = options.compensation.as_mut() {
                 let mut status = RollbackStatus::Completed;
                 for index in applied_indices.into_iter().rev() {
                     if let Err(error) = compensate(index, plan.operation(index).expect("index")) {
