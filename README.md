@@ -17,7 +17,7 @@
 
 **Net Lattice** is a modern, cross-platform Rust library for configuring and inspecting operating system networking through a single, strongly typed API.
 
-> **Status:** Net Lattice provides cross-platform network inspection, route, address, and DNS mutation, inspectable mutation plans, plus synchronous change monitoring with an optional async interface through native operating-system APIs on Linux, Windows, and macOS. Stage 0.14 of the architecture plan has shipped; see Current Status below.
+> **Status:** Net Lattice provides cross-platform network inspection, route, address, and DNS mutation, inspectable mutation plans, and ordered transaction execution with cancellation, snapshots, compensation, and phase-aware reports. Stage 0.15 of the architecture plan has shipped; see Current Status below.
 
 ## Overview
 
@@ -71,15 +71,15 @@ Planned:
 
 ## Current Status
 
-Stage 0.14 of the [architecture](ARCHITECTURE.md)'s Incremental Delivery Plan has landed:
+Stage 0.15 of the [architecture](ARCHITECTURE.md)'s Incremental Delivery Plan has landed:
 
 - `net-lattice-core`, `net-lattice-ip`
 - `net-lattice-model`'s `route`, `mac`, `interface`, `dns`, `neighbor`, `ifaddr`, `event`, and `mutation` modules; `NewInterfaceAddress` and `NewDnsConfig` express mutation intent separately from observed state
 - `net-lattice-platform`'s `RouteProvider`, `InterfaceProvider`, `DnsProvider`, `DnsMutator`, `NeighborProvider`, `AddressProvider`, `AddressMutator`, `CapabilityProvider`, synchronous `EventProvider`/bounded `EventReceiver`, and optional async monitoring support
 - `net-lattice-async`, which exposes the single runtime-agnostic `EventStream` type
-- the `net-lattice` facade, including `Lattice::add_address()`, `Lattice::remove_address()`, `Lattice::set_dns_config()`, `Lattice::capabilities()`, `Lattice::supports()`, `Lattice::watch()`, `Lattice::watch_filtered()`, and feature-gated `Lattice::watch_async()`
+- the `net-lattice` facade, including `Lattice::add_address()`, `Lattice::remove_address()`, `Lattice::set_dns_config()`, `Lattice::capabilities()`, `Lattice::supports()`, `Lattice::watch()`, `Lattice::watch_filtered()`, `Lattice::execute_plan()`, and feature-gated `Lattice::watch_async()`
 
-This gives real route and interface-address management, interface listing, DNS resolver inspection and mutation, neighbor (ARP/NDP) table reads, inspectable mutation plans, and bounded network-change monitoring on Linux, Windows, and macOS. Address creation accepts `NewInterfaceAddress` and returns the resulting observed `InterfaceAddress`; resolver replacement accepts `NewDnsConfig` and returns the resulting observed `DnsConfig`. `MutationPlan` is data only: it exposes the preconditions, idempotency, privilege, confirmation, reversibility, and partial-application risk of each route/address/DNS operation, but does not execute or roll anything back. `EventFilter` composes domain selectors (`routes()`) and object selectors (`route(route_id)`); every backend applies the filter before enqueueing an ordinary event. Query `Lattice::supports(Capability::MONITORING)` before watching and `Lattice::supports(Capability::DNS_MUTATION)` before replacing resolver configuration in portable code. Unix resolver managers may later regenerate `/etc/resolv.conf`; callers requiring persistence should use the owning manager's configuration interface. Net Lattice's `async` feature uses and re-exports the `EventStream` implementation from `net-lattice-async`; applications need only enable that facade feature. `Lattice::watch_async(filter)` remains the Stage 0.11 async API and has the same filter semantics as `Lattice::watch_filtered(filter)`. Tokio is used internally where the native implementation requires it, while applications interact only with the runtime-independent `futures::Stream` interface. Platform backends use Netlink on Linux, the IP Helper API on Windows, and BSD routing sockets, `getifaddrs`, and address ioctls on macOS. This is still not a complete library: VLANs, VRFs, namespaces, firewall integration, transaction execution, declarative networking, and other advanced capabilities are still ahead; see [ARCHITECTURE.md](ARCHITECTURE.md)'s Incremental Delivery Plan for the staged roadmap and [CHANGELOG.md](CHANGELOG.md) for what has actually shipped.
+This gives real route and interface-address management, interface listing, DNS resolver inspection and mutation, neighbor (ARP/NDP) table reads, inspectable mutation plans, ordered transaction execution, and bounded network-change monitoring on Linux, Windows, and macOS. Address creation accepts `NewInterfaceAddress` and returns the resulting observed `InterfaceAddress`; resolver replacement accepts `NewDnsConfig` and returns the resulting observed `DnsConfig`. `MutationPlan` is data only: it exposes operation semantics, while `Lattice::execute_plan` applies a plan through one `ExecutionOptions` value with runtime validation, cancellation boundaries, typed snapshots, explicit compensation, and phase-aware reports. `EventFilter` composes domain selectors (`routes()`) and object selectors (`route(route_id)`); every backend applies the filter before enqueueing an ordinary event. Query `Lattice::supports(Capability::MONITORING)` before watching and `Lattice::supports(Capability::DNS_MUTATION)` before replacing resolver configuration in portable code. Unix resolver managers may later regenerate `/etc/resolv.conf`; callers requiring persistence should use the owning manager's configuration interface. Net Lattice's `async` feature uses and re-exports the `EventStream` implementation from `net-lattice-async`; applications need only enable that facade feature. `Lattice::watch_async(filter)` remains the Stage 0.11 async API and has the same filter semantics as `Lattice::watch_filtered(filter)`. Tokio is used internally where the native implementation requires it, while applications interact only with the runtime-independent `futures::Stream` interface. Platform backends use Netlink on Linux, the IP Helper API on Windows, and BSD routing sockets, `getifaddrs`, and address ioctls on macOS. This is still not a complete library: VLANs, VRFs, namespaces, firewall integration, declarative networking, and other advanced capabilities are still ahead; see [ARCHITECTURE.md](ARCHITECTURE.md)'s Incremental Delivery Plan for the staged roadmap and [CHANGELOG.md](CHANGELOG.md) for what has actually shipped.
 
 | Capability | Linux | Windows | macOS |
 |---|:---:|:---:|:---:|
@@ -152,7 +152,7 @@ fn main() -> Result<()> {
 
 ### Async monitoring
 
-Enable the optional async facade with `net-lattice = { version = "0.14", features = ["async"] }`. It returns the same `futures::Stream` on each supported platform:
+Enable the optional async facade with `net-lattice = { version = "0.15", features = ["async"] }`. It returns the same `futures::Stream` on each supported platform:
 
 ```rust
 use futures::StreamExt;

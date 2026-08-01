@@ -3,13 +3,13 @@
 ## Supported Versions
 
 Net Lattice follows a rolling support policy. Security fixes are provided only
-for the latest stable release series. With the release of 0.14.0, support for
-the 0.1.x-0.13.x series has ended — upgrade to 0.14.x to receive fixes.
+for the latest stable release series. With the release of 0.15.0, support for
+the 0.1.x-0.14.x series has ended — upgrade to 0.15.x to receive fixes.
 
 | Version | Supported |
 | ------- | --------- |
-| 0.14.x | ✅ |
-| 0.1.x - 0.14.0 | ❌ |
+| 0.15.x | ✅ |
+| 0.1.x - 0.14.x | ❌ |
 
 ## Reporting a Vulnerability
 
@@ -31,7 +31,7 @@ informed as the issue is investigated and resolved.
 
 ## Scope
 
-Net Lattice has landed Stage 0.14 of its [architecture](ARCHITECTURE.md)'s
+Net Lattice has completed Stage 0.15 of its [architecture](ARCHITECTURE.md)'s
 Incremental Delivery Plan: route inspection and mutation, interface
 inspection, DNS resolver inspection and mutation, neighbor inspection, and
 interface-address inspection and mutation on Linux
@@ -42,14 +42,14 @@ ioctls, and `/etc/resolv.conf`). Monitoring is bounded with explicit overflow
 resynchronization: Linux observes routes, links, neighbors, and addresses via
 Netlink multicast; Windows observes routes, interfaces, and unicast addresses
 via IP Helper; macOS observes routes, interfaces, neighbors, and addresses via
-PF_ROUTE. DNS changes do not currently produce watcher events. Stage 0.14 also
-publishes inspectable, data-only mutation plans for the existing route,
+PF_ROUTE. DNS changes do not currently produce watcher events. The Stage 0.14
+model also publishes inspectable, data-only mutation plans for the existing route,
 interface-address, and DNS operations, side-effect-free `MutationPreflight`
 analysis, and typed `MutationOutcome`, `MutationPlanReport`, and
-`RollbackStatus` contracts. These APIs do not elevate privileges or change the
-underlying primitive mutation behavior. Stage 0.15 now adds ordered plan
-submission and operation-boundary cancellation at the facade; prior-state
-snapshot capture and automatic compensation are not yet promised.
+`RollbackStatus` contracts. Stage 0.15 adds ordered plan submission, runtime
+preflight, operation-boundary cancellation, typed prior-state snapshots,
+phase/timing reports, and explicit reverse-order compensation. The executor
+never infers inverse operations or elevates privileges on the caller's behalf.
 
 Route, interface-address, and DNS-mutation operations are privileged (see
 [ARCHITECTURE.md](ARCHITECTURE.md)'s Privilege Model). Reports involving

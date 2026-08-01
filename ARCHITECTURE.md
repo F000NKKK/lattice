@@ -7,7 +7,7 @@
 This document describes the planned workspace structure for Net Lattice and the
 design principles behind it. It reflects intended direction, not current
 state: see [CHANGELOG.md](CHANGELOG.md) and [README.md](README.md) for what
-actually exists in the repository today. As of this writing, Stage 0.14 of
+actually exists in the repository today. As of this writing, Stage 0.15 of
 the Incremental Delivery Plan below has landed: `net-lattice-core`,
 `net-lattice-ip`, `net-lattice-model`'s `route`, `interface`, `dns`,
 `neighbor`, `ifaddr`, and `mutation` modules, `net-lattice-platform`'s `RouteProvider`,
@@ -15,7 +15,9 @@ the Incremental Delivery Plan below has landed: `net-lattice-core`,
 `AddressProvider`, `AddressMutator`, `CapabilityProvider`, synchronous `EventProvider`,
 feature-gated `TokioEventProvider`, and object/domain `EventFilter` selectors,
 route/interface-address/DNS/neighbor support, native route/address/DNS
-mutation, inspectable mutation plans, and native event monitoring in
+mutation, inspectable mutation plans, the ordered transaction executor with
+runtime preflight, cancellation boundaries, typed snapshots, explicit
+compensation, and phase-aware reports, and native event monitoring in
 `net-lattice-backend-linux`, `net-lattice-backend-windows`, and
 `net-lattice-backend-darwin`, the `net-lattice-async` event stream crate, and
 the feature-gated async facade — everything past that stage is still a target,
