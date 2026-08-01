@@ -49,7 +49,7 @@ analysis, and typed `MutationOutcome`, `MutationPlanReport`, and
 `RollbackStatus` contracts. These APIs do not elevate privileges or change the
 underlying primitive mutation behavior. Stage 0.15 now adds ordered plan
 submission and operation-boundary cancellation at the facade; prior-state
-compensation is not yet promised.
+snapshot capture and automatic compensation are not yet promised.
 
 Route, interface-address, and DNS-mutation operations are privileged (see
 [ARCHITECTURE.md](ARCHITECTURE.md)'s Privilege Model). Reports involving

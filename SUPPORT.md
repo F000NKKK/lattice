@@ -17,8 +17,9 @@ object/domain-filterable monitoring, optional native async event delivery, and
 inspectable data-only mutation plans, side-effect-free `MutationPreflight`
 analysis, and typed execution-report and compensation-boundary contracts for
 the existing route, address, and DNS operations on Linux, Windows, and macOS.
-The Stage 0.15 executor now provides ordered submission and operation-boundary
-cancellation; prior-state compensation remains future-stage work. Usage
-support is limited to the published surface for now —
+The Stage 0.15 executor now provides ordered submission, operation-boundary
+cancellation, and an explicit compensator callback; automatic prior-state
+snapshot capture remains future-stage work. Usage support is limited to the
+published surface for now —
 see [README.md](README.md)'s Current Status — but questions about usage,
 direction, and design are all welcome.
