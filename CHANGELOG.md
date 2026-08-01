@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   operation boundaries and supplies it to reverse-order compensation.
 - Public `MutationSnapshot` values cover observed route, interface-address,
   and DNS state through provider-backed reads.
+- Runtime plan validation now checks DNS capability, interface/address/route
+  preconditions, and ordered add/remove effects before native submission.
 
 ### Tests
 
