@@ -1611,7 +1611,11 @@ fn resolv_conf_error(err: &io::Error) -> Error {
 /// the address/netmask as `RTAX_IFA`/`RTAX_NETMASK` sockaddrs.
 unsafe fn message_to_interface_address_id(hdr: &libc::ifa_msghdr) -> Option<InterfaceAddressId> {
     let mut address = None;
-    let mut netmask_bytes = None;
+    // `RTA_NETMASK` has a lower bit than `RTA_IFA`, so the routing socket's
+    // bit-order walk can encounter the mask before the address. Keep the raw
+    // sockaddr until the family is known instead of assuming the IPv4 header
+    // length for an IPv6 mask.
+    let mut netmask = None;
     let mut ptr = unsafe { (hdr as *const libc::ifa_msghdr).add(1).cast::<u8>() };
     let mut remaining = hdr.ifam_msglen as usize - mem::size_of::<libc::ifa_msghdr>();
     let mut bit: libc::c_int = 1;
@@ -1628,16 +1632,7 @@ unsafe fn message_to_interface_address_id(hdr: &libc::ifa_msghdr) -> Option<Inte
         if bit == RTA_IFA {
             address = unsafe { sockaddr_to_ip(ptr.cast()) };
         } else if bit == RTA_NETMASK {
-            let header = match address {
-                Some(IpAddr::V6(_)) => 8,
-                _ => 4,
-            };
-            let bytes = sa_len.saturating_sub(header);
-            netmask_bytes = Some(if bytes == 0 {
-                Vec::new()
-            } else {
-                unsafe { std::slice::from_raw_parts(ptr.add(header), bytes) }.to_vec()
-            });
+            netmask = Some((ptr, sa_len));
         }
         ptr = unsafe { ptr.add(aligned_len) };
         remaining -= aligned_len;
@@ -1645,9 +1640,21 @@ unsafe fn message_to_interface_address_id(hdr: &libc::ifa_msghdr) -> Option<Inte
     }
 
     let address = address?;
-    let prefix_len = netmask_bytes
-        .as_deref()
-        .map(mask_bytes_to_prefix_len)
+    let prefix_len = netmask
+        .map(|(ptr, sa_len)| {
+            let header = match address {
+                IpAddr::V4(_) => 4,
+                IpAddr::V6(_) => 8,
+            };
+            let bytes = sa_len.saturating_sub(header);
+            if bytes == 0 {
+                0
+            } else {
+                mask_bytes_to_prefix_len(unsafe {
+                    std::slice::from_raw_parts(ptr.add(header), bytes)
+                })
+            }
+        })
         .unwrap_or_else(|| match address {
             IpAddr::V4(_) => 32,
             IpAddr::V6(_) => 128,
@@ -2063,6 +2070,11 @@ mod tests {
         let header = unsafe { &*add_bytes.cast::<libc::ifa_msghdr>() };
         let id = unsafe { message_to_interface_address_id(header) }
             .expect("IPv6 address message has an identity");
+        let expected_network = Network::from(net_lattice_ip::Ipv6Network::new(
+            net_lattice_ip::Ipv6Address::new([0x2001, 0xdb8, 0, 0x16, 0, 0, 0, 7]),
+            net_lattice_ip::Ipv6PrefixLength::new(64).expect("valid IPv6 prefix"),
+        ));
+        assert_eq!(id, synthesize_interface_address_id(7, &expected_network));
         assert!(matches!(
             unsafe { route_socket_message_to_event(add_bytes, add_len) },
             Some(Event::Address { id: observed, kind: ChangeKind::Changed }) if observed == id

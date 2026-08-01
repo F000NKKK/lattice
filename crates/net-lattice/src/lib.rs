@@ -656,6 +656,16 @@ mod tests {
             .with_interface_index(7)
     }
 
+    fn ipv6_address() -> NewInterfaceAddress {
+        NewInterfaceAddress::new(
+            InterfaceId::new(1),
+            Network::from(Ipv6Network::new(
+                Ipv6Address::new([0x2001, 0xdb8, 0, 0x16, 0, 0, 0, 7]),
+                Ipv6PrefixLength::new(64).expect("valid IPv6 prefix"),
+            )),
+        )
+    }
+
     impl RouteProvider for TestBackend {
         type Route = Route;
 
@@ -1502,6 +1512,53 @@ mod tests {
                 0,
                 Mutation::AddRoute(route),
                 Some(MutationSnapshot::Route(None))
+            )]
+        );
+    }
+
+    #[test]
+    fn facade_executes_and_compensates_an_ipv6_address_plan() {
+        let lattice = lattice(Capability::empty());
+        let address = ipv6_address();
+        let observed = InterfaceAddress::new(InterfaceAddressId::new(16), 1, address.address);
+        let plan = MutationPlan::from_operations([
+            Mutation::AddAddress(address.clone()),
+            Mutation::RemoveAddress(observed),
+        ]);
+        lattice
+            .validate_plan(&plan)
+            .expect("IPv6 address plan is valid before execution");
+
+        let mut snapshots = Vec::new();
+        let mut compensated = Vec::new();
+        let mut cancellation = |index, _: &Mutation| index == 1;
+        let mut snapshot = |index, operation: &Mutation| {
+            snapshots.push((index, operation.clone()));
+            lattice.snapshot_for_mutation(operation)
+        };
+        let mut compensate = |index, operation: &Mutation, prior: Option<&MutationSnapshot>| {
+            compensated.push((index, operation.clone(), prior.cloned()));
+            Ok(())
+        };
+        let mut options = ExecutionOptions::default()
+            .cancellation(&mut cancellation)
+            .snapshot(&mut snapshot)
+            .compensation(&mut compensate);
+        let report = lattice.execute_plan(&plan, &mut options);
+
+        assert!(matches!(report.outcome(0), Some(MutationOutcome::Applied)));
+        assert!(matches!(
+            report.outcome(1),
+            Some(MutationOutcome::NotAttempted)
+        ));
+        assert!(matches!(report.rollback(), RollbackStatus::Completed));
+        assert_eq!(snapshots, vec![(0, Mutation::AddAddress(address.clone()))]);
+        assert_eq!(
+            compensated,
+            vec![(
+                0,
+                Mutation::AddAddress(address),
+                Some(MutationSnapshot::InterfaceAddress(None))
             )]
         );
     }
