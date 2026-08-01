@@ -203,6 +203,7 @@ impl<B: LatticeBackend> Lattice<B> {
         for (index, operation) in plan.operations().iter().enumerate() {
             if stopped || cancelled(index, operation) {
                 outcomes.push(MutationOutcome::NotAttempted);
+                rollback_boundary |= applied;
                 stopped = true;
                 continue;
             }
