@@ -255,8 +255,9 @@ println!(
 ```
 
 `MutationPlan::preflight` не имеет side effects. Он сообщает риски,
-выведенные из metadata операций; проверка capabilities, privileges и текущего
-состояния остаётся обязанностью executor.
+выведенные из metadata операций; `lattice.validate_plan(&plan)` выполняет
+runtime-проверку capabilities до отправки операций. Проверка privileges и
+текущего состояния остаётся обязанностью executor.
 
 ## Дорожная карта
 

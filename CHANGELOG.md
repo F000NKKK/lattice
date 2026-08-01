@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Lattice::execute_plan_with_compensation` accepts an explicit reverse-order
   compensator and reports `Completed` or `Failed` rollback status without
   inventing inverse operations or snapshots.
+- `Lattice::validate_plan` performs side-effect-free runtime capability
+  preflight; execution rejects unsupported DNS mutation before submitting any
+  operation.
 
 ## [0.14.1] - 2026-08-01
 

@@ -253,7 +253,8 @@ assert_eq!(report.len(), plan.len());
 ```
 
 `MutationPlan::preflight` is side-effect free. It reports risks derived from
-the operation metadata; capability, privilege, and current-state checks remain
+the operation metadata; call `lattice.validate_plan(&plan)` for the runtime
+capability portion before execution. Privilege and current-state checks remain
 executor responsibilities.
 
 ## Roadmap
