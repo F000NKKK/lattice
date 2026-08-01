@@ -643,6 +643,19 @@ mod tests {
         route().with_metric(7)
     }
 
+    fn ipv6_route() -> Route {
+        let destination = Network::from(Ipv6Network::new(
+            Ipv6Address::new([0x2001, 0xdb8, 0, 0x16, 0, 0, 0, 0]),
+            Ipv6PrefixLength::new(64).expect("valid IPv6 prefix"),
+        ));
+        Route::new(RouteId::new(16), destination)
+            .with_gateway(IpAddress::from(Ipv6Address::new([
+                0x2001, 0xdb8, 0, 0x16, 0, 0, 0, 1,
+            ])))
+            .with_metric(42)
+            .with_interface_index(7)
+    }
+
     impl RouteProvider for TestBackend {
         type Route = Route;
 
@@ -1155,27 +1168,28 @@ mod tests {
         ));
     }
 
-    /// Restores the observed MTU through the same public facade a consumer
-    /// uses. The privileged acceptance test arms this before its first native
-    /// submission so a panic cannot leave an attempted configuration behind.
+    /// Restores the observed interface configuration through the same public
+    /// facade a consumer uses. The privileged acceptance test arms this before
+    /// its first native submission so a panic cannot leave an attempted
+    /// configuration behind.
     #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
-    struct InterfaceMtuRestore<'a, B: LatticeBackend> {
+    struct InterfaceConfigRestore<'a, B: LatticeBackend> {
         lattice: &'a Lattice<B>,
         config: InterfaceConfig,
     }
 
     #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
-    impl<B: LatticeBackend> Drop for InterfaceMtuRestore<'_, B> {
+    impl<B: LatticeBackend> Drop for InterfaceConfigRestore<'_, B> {
         fn drop(&mut self) {
             let _ = self.lattice.set_interface_config(self.config.clone());
         }
     }
 
     /// Exercises interface configuration through the complete public facade:
-    /// capability check, direct read-after-write submission, transaction-plan
-    /// dispatch with a public snapshot callback, and restoration. It submits
-    /// only the interface's observed MTU, so it does not deliberately alter
-    /// shared-runner networking state.
+    /// capability checks, direct admin-only/MTU-only/combined read-after-write
+    /// submissions, transaction-plan dispatch with a public snapshot callback,
+    /// and restoration. It re-submits only observed values, so it does not
+    /// deliberately alter shared-runner networking state.
     #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
     #[test]
     #[ignore = "requires native networking privilege; run with the platform privileged test job"]
@@ -1184,6 +1198,10 @@ mod tests {
         assert!(
             lattice.supports(Capability::INTERFACE_MTU),
             "native backend does not advertise interface MTU configuration"
+        );
+        assert!(
+            lattice.supports(Capability::INTERFACE_ADMIN_STATE),
+            "native backend does not advertise interface administrative-state configuration"
         );
         let interfaces = lattice
             .interfaces()
@@ -1199,7 +1217,8 @@ mod tests {
             .iter()
             .find(|interface| {
                 !matches!(interface.kind, InterfaceKind::Loopback)
-                    && interface.mtu.is_some()
+                    && matches!(interface.mtu, Some(mtu) if mtu != 0)
+                    && matches!(interface.admin_state, AdminState::Up | AdminState::Down)
                     && addresses
                         .iter()
                         .any(|address| address.interface_index == interface.index)
@@ -1216,30 +1235,60 @@ mod tests {
         let original = interfaces
             .iter()
             .find(|interface| {
-                !matches!(interface.kind, InterfaceKind::Loopback) && interface.mtu.is_some()
+                !matches!(interface.kind, InterfaceKind::Loopback)
+                    && matches!(interface.mtu, Some(mtu) if mtu != 0)
+                    && matches!(interface.admin_state, AdminState::Up | AdminState::Down)
             })
             .cloned()
             .unwrap_or_else(|| {
                 panic!(
-                    "no non-loopback MTU-bearing interface was available: interfaces={interfaces:?}"
+                    "no non-loopback interface with an MTU and known administrative state was available: \
+                     interfaces={interfaces:?}"
                 )
             });
 
-        let config = InterfaceConfig::new(original.id, None, original.mtu)
+        let desired_admin_state = match original.admin_state {
+            AdminState::Up => DesiredAdminState::Up,
+            AdminState::Down => DesiredAdminState::Down,
+            _ => unreachable!("candidate filtering requires a known administrative state"),
+        };
+        let admin_only = InterfaceConfig::new(original.id, Some(desired_admin_state), None)
+            .expect("an observed administrative state forms a valid patch");
+        let mtu_only = InterfaceConfig::new(original.id, None, original.mtu)
             .expect("an observed nonzero MTU forms a valid patch");
+        let combined = InterfaceConfig::new(original.id, Some(desired_admin_state), original.mtu)
+            .expect("observed interface settings form a valid patch");
+
+        let assert_observed = |observed: &Interface, context: &str| {
+            assert_eq!(observed.id, original.id, "{context} changed the target");
+            assert_eq!(
+                observed.admin_state, original.admin_state,
+                "{context} changed the administrative state"
+            );
+            assert_eq!(observed.mtu, original.mtu, "{context} changed the MTU");
+        };
 
         {
-            let _restore = InterfaceMtuRestore {
+            let _restore = InterfaceConfigRestore {
                 lattice: &lattice,
-                config: config.clone(),
+                config: combined.clone(),
             };
-            let direct = lattice
-                .set_interface_config(config.clone())
-                .expect("direct MTU-only facade configuration failed");
-            assert_eq!(direct.id, original.id);
-            assert_eq!(direct.mtu, original.mtu);
+            let admin_observed = lattice
+                .set_interface_config(admin_only)
+                .expect("direct admin-only facade configuration failed");
+            assert_observed(&admin_observed, "admin-only facade configuration");
 
-            let plan = MutationPlan::from_operations([Mutation::SetInterfaceConfig(config)]);
+            let mtu_observed = lattice
+                .set_interface_config(mtu_only)
+                .expect("direct MTU-only facade configuration failed");
+            assert_observed(&mtu_observed, "MTU-only facade configuration");
+
+            let combined_observed = lattice
+                .set_interface_config(combined.clone())
+                .expect("direct combined facade configuration failed");
+            assert_observed(&combined_observed, "combined facade configuration");
+
+            let plan = MutationPlan::from_operations([Mutation::SetInterfaceConfig(combined)]);
             let mut captured_snapshot = false;
             let mut snapshot = |_, operation: &Mutation| {
                 let result = lattice.snapshot_for_mutation(operation);
@@ -1266,7 +1315,7 @@ mod tests {
                 .into_iter()
                 .find(|interface| interface.id == original.id)
                 .expect("configured interface disappeared during plan execution");
-            assert_eq!(observed.mtu, original.mtu);
+            assert_observed(&observed, "plan execution");
         }
 
         let restored = lattice
@@ -1275,7 +1324,7 @@ mod tests {
             .into_iter()
             .find(|interface| interface.id == original.id)
             .expect("configured interface disappeared during restoration");
-        assert_eq!(restored.mtu, original.mtu);
+        assert_observed(&restored, "restoration");
     }
 
     /// Exercises the complete facade transaction path against the native
@@ -1408,6 +1457,52 @@ mod tests {
         assert_eq!(
             report.operation_report(0).expect("operation report").phase,
             MutationExecutionPhase::Compensation
+        );
+    }
+
+    #[test]
+    fn facade_executes_and_compensates_an_ipv6_route_plan() {
+        let lattice = lattice(Capability::empty());
+        let route = ipv6_route();
+        let plan = MutationPlan::from_operations([
+            Mutation::AddRoute(route.clone()),
+            Mutation::RemoveRoute(route.clone()),
+        ]);
+        lattice
+            .validate_plan(&plan)
+            .expect("IPv6 route plan is valid before execution");
+
+        let mut snapshots = Vec::new();
+        let mut compensated = Vec::new();
+        let mut cancellation = |index, _: &Mutation| index == 1;
+        let mut snapshot = |index, operation: &Mutation| {
+            snapshots.push((index, operation.clone()));
+            lattice.snapshot_for_mutation(operation)
+        };
+        let mut compensate = |index, operation: &Mutation, prior: Option<&MutationSnapshot>| {
+            compensated.push((index, operation.clone(), prior.cloned()));
+            Ok(())
+        };
+        let mut options = ExecutionOptions::default()
+            .cancellation(&mut cancellation)
+            .snapshot(&mut snapshot)
+            .compensation(&mut compensate);
+        let report = lattice.execute_plan(&plan, &mut options);
+
+        assert!(matches!(report.outcome(0), Some(MutationOutcome::Applied)));
+        assert!(matches!(
+            report.outcome(1),
+            Some(MutationOutcome::NotAttempted)
+        ));
+        assert!(matches!(report.rollback(), RollbackStatus::Completed));
+        assert_eq!(snapshots, vec![(0, Mutation::AddRoute(route.clone()))]);
+        assert_eq!(
+            compensated,
+            vec![(
+                0,
+                Mutation::AddRoute(route),
+                Some(MutationSnapshot::Route(None))
+            )]
         );
     }
 
