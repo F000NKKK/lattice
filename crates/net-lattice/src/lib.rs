@@ -937,19 +937,13 @@ mod tests {
         let route = Route::new(RouteId::new(0), destination).with_interface_index(interface.index);
 
         let add_plan = MutationPlan::from_operations([Mutation::AddRoute(route.clone())]);
-        let add_report = lattice.execute_plan_with_snapshot(
-            &add_plan,
-            |_, _| false,
-            |index, operation| {
-                lattice
-                    .snapshot_for_mutation(operation)
-                    .map(|snapshot| (index, snapshot))
-            },
-            |_, _, _| Ok(()),
-        );
+        let mut snapshot = |_, operation| lattice.snapshot_for_mutation(operation);
+        let mut options = ExecutionOptions::default().snapshot(&mut snapshot);
+        let add_report = lattice.execute_plan(&add_plan, &mut options);
 
         let remove_plan = MutationPlan::from_operations([Mutation::RemoveRoute(route)]);
-        let remove_report = lattice.execute_plan(&remove_plan);
+        let mut options = ExecutionOptions::default();
+        let remove_report = lattice.execute_plan(&remove_plan, &mut options);
         assert!(add_report.is_success(), "route add report: {add_report:?}");
         assert!(
             remove_report.is_success(),
@@ -986,15 +980,15 @@ mod tests {
             Mutation::AddRoute(route.clone()),
         ]);
 
-        let report = lattice.execute_plan_with_snapshot(
-            &plan,
-            |_, _| false,
-            |_, operation| lattice.snapshot_for_mutation(operation),
-            |_, operation, _| match operation {
-                Mutation::AddRoute(route) => lattice.remove_route(route.clone()),
-                _ => Ok(()),
-            },
-        );
+        let mut snapshot = |_, operation| lattice.snapshot_for_mutation(operation);
+        let mut compensate = |_, operation, _| match operation {
+            Mutation::AddRoute(route) => lattice.remove_route(route.clone()),
+            _ => Ok(()),
+        };
+        let mut options = ExecutionOptions::default()
+            .snapshot(&mut snapshot)
+            .compensation(&mut compensate);
+        let report = lattice.execute_plan(&plan, &mut options);
 
         assert!(matches!(report.outcome(0), Some(MutationOutcome::Applied)));
         assert!(matches!(
