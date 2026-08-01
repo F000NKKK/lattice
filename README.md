@@ -259,6 +259,11 @@ the operation metadata; call `lattice.validate_plan(&plan)` for the runtime
 capability portion before execution. Privilege and current-state checks remain
 executor responsibilities.
 
+`MutationPlanReport::outcomes` remains the stable per-operation result surface;
+`operation_reports` adds phase, elapsed duration, and stop-reason diagnostics.
+Validation, snapshot capture, native execution, cancellation, and compensation
+are reported as distinct phases.
+
 ## Roadmap
 
 1. **Bootstrap** *(completed)* — repository infrastructure, licensing, community health files, and tooling configuration.

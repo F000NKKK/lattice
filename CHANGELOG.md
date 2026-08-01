@@ -23,6 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and DNS state through provider-backed reads.
 - Runtime plan validation now checks DNS capability, interface/address/route
   preconditions, and ordered add/remove effects before native submission.
+- `MutationPlanReport::operation_reports` now exposes phase, duration, and
+  stop-reason metadata without changing the existing `MutationOutcome` values.
+- Validation, snapshot, execution, cancellation, and compensation boundaries
+  are represented by `MutationExecutionPhase` and `MutationStopReason`.
 
 ### Tests
 

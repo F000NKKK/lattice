@@ -262,6 +262,11 @@ let report = lattice.execute_plan(&plan, &mut options);
 runtime-проверку capabilities до отправки операций. Проверка privileges и
 текущего состояния остаётся обязанностью executor.
 
+`MutationPlanReport::outcomes` остаётся стабильной поверхностью результатов;
+`operation_reports` добавляет фазу, длительность и причину остановки. Валидация,
+захват snapshot, native execution, cancellation и compensation представлены
+раздельными фазами.
+
 ## Дорожная карта
 
 1. **Bootstrap** *(завершён)* — инфраструктура репозитория, лицензирование, файлы для сообщества и настройка инструментов.
