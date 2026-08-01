@@ -17,7 +17,12 @@
 
 **Net Lattice** — это современная кроссплатформенная библиотека для Rust, предназначенная для настройки и анализа сетевой конфигурации операционной системы через единый строго типизированный API.
 
-> **Статус:** Net Lattice предоставляет кроссплатформенный просмотр сети, изменение маршрутов, адресов и DNS, inspectable планы mutation-операций и упорядоченное исполнение транзакций с cancellation, snapshots, compensation и фазовыми отчётами через нативные API Linux, Windows и macOS. Stage 0.15 плана архитектуры завершён; см. «Текущий статус» ниже.
+> **Статус:** Net Lattice предоставляет кроссплатформенный просмотр сети,
+> изменение маршрутов, адресов, DNS, administrative state и MTU интерфейсов,
+> inspectable планы mutation-операций и упорядоченное исполнение транзакций с
+> cancellation, snapshots, compensation и фазовыми отчётами через нативные API
+> Linux, Windows и macOS. Stage 0.16 плана архитектуры завершён; см. «Текущий
+> статус» ниже.
 
 ## Обзор
 
@@ -64,6 +69,7 @@ Net Lattice призвана закрыть этот пробел, предос�
 - Просмотр и изменение адресов интерфейсов
 - Просмотр и изменение маршрутов
 - Просмотр интерфейсов
+- Настройка administrative state и MTU интерфейсов
 - Просмотр и изменение конфигурации DNS-резолвера
 - Inspectable планы mutation-операций для маршрутов, адресов и DNS
 - Упорядоченное исполнение mutation-планов с cancellation, snapshots, явной
@@ -89,21 +95,22 @@ Net Lattice призвана закрыть этот пробел, предос�
 
 ## Текущий статус
 
-Реализован этап 0.15 плана поэтапной поставки из [архитектуры](ARCHITECTURE.ru.md):
+Реализован этап 0.16 плана поэтапной поставки из [архитектуры](ARCHITECTURE.ru.md):
 
 - `net-lattice-core`, `net-lattice-ip`
 - модули `route`, `mac`, `interface`, `dns`, `neighbor`, `ifaddr`, `event` и `mutation` в `net-lattice-model`; `NewInterfaceAddress` и `NewDnsConfig` выражают намерение изменения отдельно от наблюдаемого состояния
-- `RouteProvider`, `InterfaceProvider`, `DnsProvider`, `DnsMutator`, `NeighborProvider`, `AddressProvider`, `AddressMutator`, `CapabilityProvider`, синхронные `EventProvider`/bounded `EventReceiver` и опциональная async-поддержка мониторинга в `net-lattice-platform`
+- `RouteProvider`, `InterfaceProvider`, `InterfaceMutator`, `DnsProvider`, `DnsMutator`, `NeighborProvider`, `AddressProvider`, `AddressMutator`, `CapabilityProvider`, синхронные `EventProvider`/bounded `EventReceiver` и опциональная async-поддержка мониторинга в `net-lattice-platform`
 - `net-lattice-async`, предоставляющий единый runtime-agnostic тип `EventStream`
-- фасад `net-lattice`, включая `Lattice::add_address()`, `Lattice::remove_address()`, `Lattice::set_dns_config()`, `Lattice::capabilities()`, `Lattice::supports()`, `Lattice::watch()`, `Lattice::watch_filtered()`, `Lattice::execute_plan()` и feature-gated `Lattice::watch_async()`
+- фасад `net-lattice`, включая `Lattice::add_address()`, `Lattice::remove_address()`, `Lattice::set_dns_config()`, `Lattice::set_interface_config()`, `Lattice::capabilities()`, `Lattice::supports()`, `Lattice::watch()`, `Lattice::watch_filtered()`, `Lattice::execute_plan()` и feature-gated `Lattice::watch_async()`
 
-Это даёт реальное управление маршрутами и IP-адресами интерфейсов, просмотр интерфейсов, просмотр и изменение DNS-конфигурации резолвера, чтение таблиц соседей (ARP/NDP), inspectable планы mutation-операций, упорядоченное исполнение транзакций и bounded-мониторинг сетевых изменений на Linux, Windows и macOS. Создание адреса принимает `NewInterfaceAddress` и возвращает результирующий наблюдаемый `InterfaceAddress`; замена конфигурации резолвера принимает `NewDnsConfig` и возвращает результирующий наблюдаемый `DnsConfig`. `MutationPlan` — только данные, а `Lattice::execute_plan` исполняет его через единый `ExecutionOptions` с runtime-проверками, cancellation на границах операций, типизированными snapshots, явной compensation и фазовыми отчётами. `EventFilter` сочетает селекторы доменов (`routes()`) и объектов (`route(route_id)`); каждый backend применяет filter до помещения обычного события в очередь. В переносимом коде перед watching проверяйте `Lattice::supports(Capability::MONITORING)`, а перед заменой DNS-конфигурации — `Lattice::supports(Capability::DNS_MUTATION)`. Unix-менеджеры резолвера могут позднее перегенерировать `/etc/resolv.conf`; при необходимости постоянного состояния используйте конфигурационный интерфейс владеющего менеджера. Feature `async` в Net Lattice использует и реэкспортирует реализацию `EventStream` из `net-lattice-async`; приложению достаточно включить эту feature фасада. `Lattice::watch_async(filter)` остаётся async API Stage 0.11 и имеет ту же семантику filter, что и `Lattice::watch_filtered(filter)`. Tokio используется внутри там, где этого требует нативная реализация, а приложения взаимодействуют только с runtime-independent интерфейсом `futures::Stream`. Платформенные backend'ы используют Netlink в Linux, IP Helper API в Windows и BSD routing sockets, `getifaddrs` и address ioctl в macOS. Это всё ещё не полноценная библиотека: VLAN, VRF, namespaces, интеграция с firewall, декларативная настройка сети и другие продвинутые возможности ещё впереди; см. [ARCHITECTURE.ru.md](ARCHITECTURE.ru.md) для поэтапной дорожной карты и [CHANGELOG.md](CHANGELOG.md) для того, что реально вышло.
+Это даёт реальное управление маршрутами и IP-адресами интерфейсов, desired-патчи `InterfaceConfig` для administrative state и MTU, просмотр интерфейсов, просмотр и изменение DNS-конфигурации резолвера, чтение таблиц соседей (ARP/NDP), inspectable планы mutation-операций, упорядоченное исполнение транзакций и bounded-мониторинг сетевых изменений на Linux, Windows и macOS. `InterfaceConfig` не переиспользует observed `Interface`: он выбирает один интерфейс и запрашивает одно или оба поддерживаемых свойства. Для каждого свойства проверяйте `Capability::INTERFACE_ADMIN_STATE` и `Capability::INTERFACE_MTU`. Native backend может применять свойства разными вызовами, поэтому ошибка combined patch может означать partial application; перечитайте состояние и при необходимости используйте явный compensator executor'а. Создание адреса принимает `NewInterfaceAddress` и возвращает результирующий наблюдаемый `InterfaceAddress`; замена конфигурации резолвера принимает `NewDnsConfig` и возвращает результирующий наблюдаемый `DnsConfig`. `MutationPlan` — только данные, а `Lattice::execute_plan` исполняет его через единый `ExecutionOptions` с runtime-проверками, cancellation на границах операций, типизированными snapshots, явной compensation и фазовыми отчётами. `EventFilter` сочетает селекторы доменов (`routes()`) и объектов (`route(route_id)`); каждый backend применяет filter до помещения обычного события в очередь. В переносимом коде перед watching проверяйте `Lattice::supports(Capability::MONITORING)`. Feature `async` в Net Lattice использует и реэкспортирует реализацию `EventStream` из `net-lattice-async`; приложению достаточно включить эту feature фасада. Это всё ещё не полноценная библиотека: VLAN, VRF, namespaces, интеграция с firewall, декларативная настройка сети и другие продвинутые возможности ещё впереди; см. [ARCHITECTURE.ru.md](ARCHITECTURE.ru.md) для поэтапной дорожной карты и [CHANGELOG.md](CHANGELOG.md) для того, что реально вышло.
 
 | Возможность | Linux | Windows | macOS |
 |---|:---:|:---:|:---:|
 | Просмотр маршрутов | ✅ | ✅ | ✅ |
 | Изменение маршрутов | ✅ | ✅ | ✅ |
 | Просмотр интерфейсов | ✅ | ✅ | ✅ |
+| Настройка administrative state/MTU интерфейсов | ✅ | ✅ | ✅ |
 | Просмотр адресов интерфейсов | ✅ | ✅ | ✅ |
 | Изменение адресов интерфейсов | ✅ | ✅ | ✅ |
 | Просмотр таблицы соседей | ✅ | ✅ | ✅ |
@@ -140,6 +147,7 @@ let watcher = lattice.watch_filtered(route_events)?;
 | Жизненный цикл адреса | [`address_assignment`](crates/net-lattice/examples/address_assignment.rs) | `NewInterfaceAddress`, `add_address`, `remove_address` |
 | Жизненный цикл маршрута | [`route_mutation`](crates/net-lattice/examples/route_mutation.rs) | `Route`, `add_route`, `remove_route` |
 | Замена конфигурации резолвера | [`dns_mutation`](crates/net-lattice/examples/dns_mutation.rs) | `NewDnsConfig`, `set_dns_config`, read-after-write verification |
+| Настройка интерфейса | [`interface_configuration`](crates/net-lattice/examples/interface_configuration.rs) | `InterfaceConfig`, `DesiredAdminState`, capability checks, `set_interface_config` |
 | Просмотр mutation | [`mutation_plan`](crates/net-lattice/examples/mutation_plan.rs) | все варианты `Mutation`, `Mutation::semantics`, `MutationPlan` |
 
 Запуск: `cargo run -p net-lattice --example <name>`. Для `async_monitor`
@@ -163,7 +171,7 @@ let watcher = lattice.watch_filtered(route_events)?;
 9. **Stage 0.13: Изменение DNS** *(завершён)* — замена конфигурации резолвера через поддерживаемые системные механизмы, закрытая capability, на Linux, Windows и macOS.
 10. **Stage 0.14: Модель mutation-операций** *(завершён)* — inspectable значения `Mutation` и планы `MutationPlan` только из данных для существующих изменений routes, addresses и DNS; явно определены preconditions, idempotency, privileges, confirmation, partial application и reversibility.
 11. **Stage 0.15: Исполнение транзакций** *(завершён)* — упорядоченные планы, результаты каждой операции, диагностика фаз и длительностей, границы cancellation и ошибок, а также compensation только для документированно reversible операций.
-12. **Stage 0.16: Конфигурация интерфейсов** — отдельная desired-конфигурация интерфейса, capability-gated изменение admin state и MTU и platform-parity tests.
+12. **Stage 0.16: Конфигурация интерфейсов** *(завершён)* — отдельная desired-конфигурация интерфейса, capability-gated изменение admin state и MTU, read-after-write результаты и platform-parity tests.
 13. **Stage 0.17: Изменение соседей** — intent/observed-типы и capability-gated управление статическими ARP/NDP-записями.
 14. **Stage 0.18: Snapshots** — последовательно собранный `CurrentState` с явно определёнными scope, consistency и partial-read семантиками.
 15. **Stage 0.19: Декларативный diff** — отдельные конфигурационные типы `DesiredState` и inspectable `Diff` без mutation.

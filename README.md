@@ -17,7 +17,11 @@
 
 **Net Lattice** is a modern, cross-platform Rust library for configuring and inspecting operating system networking through a single, strongly typed API.
 
-> **Status:** Net Lattice provides cross-platform network inspection, route, address, and DNS mutation, inspectable mutation plans, and ordered transaction execution with cancellation, snapshots, compensation, and phase-aware reports. Stage 0.15 of the architecture plan has shipped; see Current Status below.
+> **Status:** Net Lattice provides cross-platform network inspection, route,
+> address, DNS, administrative-state, and MTU mutation, inspectable mutation
+> plans, and ordered transaction execution with cancellation, snapshots,
+> compensation, and phase-aware reports. Stage 0.16 of the architecture plan
+> has shipped; see Current Status below.
 
 ## Overview
 
@@ -64,6 +68,7 @@ Implemented:
 - Interface-address inspection and mutation
 - Route inspection and mutation
 - Interface inspection
+- Interface administrative-state and MTU configuration
 - DNS resolver inspection and mutation
 - Inspectable mutation plans for routes, addresses, and DNS
 - Ordered mutation-plan execution with cancellation, snapshots, explicit
@@ -89,21 +94,44 @@ Planned:
 
 ## Current Status
 
-Stage 0.15 of the [architecture](ARCHITECTURE.md)'s Incremental Delivery Plan has landed:
+Stage 0.16 of the [architecture](ARCHITECTURE.md)'s Incremental Delivery Plan has landed:
 
 - `net-lattice-core`, `net-lattice-ip`
 - `net-lattice-model`'s `route`, `mac`, `interface`, `dns`, `neighbor`, `ifaddr`, `event`, and `mutation` modules; `NewInterfaceAddress` and `NewDnsConfig` express mutation intent separately from observed state
-- `net-lattice-platform`'s `RouteProvider`, `InterfaceProvider`, `DnsProvider`, `DnsMutator`, `NeighborProvider`, `AddressProvider`, `AddressMutator`, `CapabilityProvider`, synchronous `EventProvider`/bounded `EventReceiver`, and optional async monitoring support
+- `net-lattice-platform`'s `RouteProvider`, `InterfaceProvider`, `InterfaceMutator`, `DnsProvider`, `DnsMutator`, `NeighborProvider`, `AddressProvider`, `AddressMutator`, `CapabilityProvider`, synchronous `EventProvider`/bounded `EventReceiver`, and optional async monitoring support
 - `net-lattice-async`, which exposes the single runtime-agnostic `EventStream` type
-- the `net-lattice` facade, including `Lattice::add_address()`, `Lattice::remove_address()`, `Lattice::set_dns_config()`, `Lattice::capabilities()`, `Lattice::supports()`, `Lattice::watch()`, `Lattice::watch_filtered()`, `Lattice::execute_plan()`, and feature-gated `Lattice::watch_async()`
+- the `net-lattice` facade, including `Lattice::add_address()`, `Lattice::remove_address()`, `Lattice::set_dns_config()`, `Lattice::set_interface_config()`, `Lattice::capabilities()`, `Lattice::supports()`, `Lattice::watch()`, `Lattice::watch_filtered()`, `Lattice::execute_plan()`, and feature-gated `Lattice::watch_async()`
 
-This gives real route and interface-address management, interface listing, DNS resolver inspection and mutation, neighbor (ARP/NDP) table reads, inspectable mutation plans, ordered transaction execution, and bounded network-change monitoring on Linux, Windows, and macOS. Address creation accepts `NewInterfaceAddress` and returns the resulting observed `InterfaceAddress`; resolver replacement accepts `NewDnsConfig` and returns the resulting observed `DnsConfig`. `MutationPlan` is data only: it exposes operation semantics, while `Lattice::execute_plan` applies a plan through one `ExecutionOptions` value with runtime validation, cancellation boundaries, typed snapshots, explicit compensation, and phase-aware reports. `EventFilter` composes domain selectors (`routes()`) and object selectors (`route(route_id)`); every backend applies the filter before enqueueing an ordinary event. Query `Lattice::supports(Capability::MONITORING)` before watching and `Lattice::supports(Capability::DNS_MUTATION)` before replacing resolver configuration in portable code. Unix resolver managers may later regenerate `/etc/resolv.conf`; callers requiring persistence should use the owning manager's configuration interface. Net Lattice's `async` feature uses and re-exports the `EventStream` implementation from `net-lattice-async`; applications need only enable that facade feature. `Lattice::watch_async(filter)` remains the Stage 0.11 async API and has the same filter semantics as `Lattice::watch_filtered(filter)`. Tokio is used internally where the native implementation requires it, while applications interact only with the runtime-independent `futures::Stream` interface. Platform backends use Netlink on Linux, the IP Helper API on Windows, and BSD routing sockets, `getifaddrs`, and address ioctls on macOS. This is still not a complete library: VLANs, VRFs, namespaces, firewall integration, declarative networking, and other advanced capabilities are still ahead; see [ARCHITECTURE.md](ARCHITECTURE.md)'s Incremental Delivery Plan for the staged roadmap and [CHANGELOG.md](CHANGELOG.md) for what has actually shipped.
+This gives real route and interface-address management, desired `InterfaceConfig`
+patches for administrative state and MTU, interface listing, DNS resolver
+inspection and mutation, neighbor (ARP/NDP) table reads, inspectable mutation
+plans, ordered transaction execution, and bounded network-change monitoring on
+Linux, Windows, and macOS. `InterfaceConfig` never reuses observed `Interface`:
+it selects one interface and requests one or both supported settings. Check
+`Capability::INTERFACE_ADMIN_STATE` and `Capability::INTERFACE_MTU` for each
+requested field. Native backends may submit those fields separately, so a
+failed combined patch may have partially applied; re-read state and use an
+explicit executor compensator when attempted restoration matters. Address
+creation accepts `NewInterfaceAddress` and returns the resulting observed
+`InterfaceAddress`; resolver replacement accepts `NewDnsConfig` and returns
+the resulting observed `DnsConfig`. `MutationPlan` is data only: it exposes
+operation semantics, while `Lattice::execute_plan` applies a plan through one
+`ExecutionOptions` value with runtime validation, cancellation boundaries,
+typed snapshots, explicit compensation, and phase-aware reports. `EventFilter`
+composes domain selectors (`routes()`) and object selectors (`route(route_id)`);
+every backend applies the filter before enqueueing an ordinary event. Query
+`Lattice::supports(Capability::MONITORING)` before watching. Unix resolver
+managers may later regenerate `/etc/resolv.conf`; callers requiring persistence
+should use the owning manager's configuration interface. Net Lattice's `async`
+feature uses and re-exports the `EventStream` implementation from
+`net-lattice-async`; applications need only enable that facade feature.
 
 | Capability | Linux | Windows | macOS |
 |---|:---:|:---:|:---:|
 | Route inspection | ✅ | ✅ | ✅ |
 | Route mutation | ✅ | ✅ | ✅ |
 | Interface inspection | ✅ | ✅ | ✅ |
+| Interface admin-state/MTU configuration | ✅ | ✅ | ✅ |
 | Interface-address inspection | ✅ | ✅ | ✅ |
 | Interface-address mutation | ✅ | ✅ | ✅ |
 | Neighbor table inspection | ✅ | ✅ | ✅ |
@@ -139,6 +167,7 @@ elevated operating-system privilege.
 | Address lifecycle | [`address_assignment`](crates/net-lattice/examples/address_assignment.rs) | `NewInterfaceAddress`, `add_address`, `remove_address` |
 | Route lifecycle | [`route_mutation`](crates/net-lattice/examples/route_mutation.rs) | `Route`, `add_route`, `remove_route` |
 | Resolver replacement | [`dns_mutation`](crates/net-lattice/examples/dns_mutation.rs) | `NewDnsConfig`, `set_dns_config`, read-after-write verification |
+| Interface configuration | [`interface_configuration`](crates/net-lattice/examples/interface_configuration.rs) | `InterfaceConfig`, `DesiredAdminState`, capability checks, `set_interface_config` |
 | Mutation inspection | [`mutation_plan`](crates/net-lattice/examples/mutation_plan.rs) | every `Mutation` variant, `Mutation::semantics`, `MutationPlan` |
 
 Run an example with `cargo run -p net-lattice --example <name>`. Add
@@ -162,7 +191,7 @@ duplicating those contracts here.
 9. **Stage 0.13: DNS mutation** *(completed)* — capability-gated resolver replacement through supported system mechanisms on Linux, Windows, and macOS.
 10. **Stage 0.14: Mutation operation model** *(completed)* — inspectable `Mutation` values and data-only `MutationPlan`s for existing route, address, and DNS mutations; preconditions, idempotency, privilege, confirmation, partial-application, and reversibility are explicit.
 11. **Stage 0.15: Transaction execution** *(completed)* — ordered plans, per-operation outcomes, phase/timing diagnostics, cancellation and failure boundaries, plus compensation only for documented reversible operations.
-12. **Stage 0.16: Interface configuration** — separate desired interface configuration, capability-gated admin-state and MTU mutation, and platform-parity tests.
+12. **Stage 0.16: Interface configuration** *(completed)* — separate desired interface configuration, capability-gated admin-state and MTU mutation, read-after-write results, and platform-parity tests.
 13. **Stage 0.17: Neighbor mutation** — intent/observed types and capability-gated static ARP/NDP management.
 14. **Stage 0.18: Snapshots** — consistently assembled `CurrentState` with explicit scope, consistency, and partial-read semantics.
 15. **Stage 0.19: Declarative diff** — separate `DesiredState` configuration types and an inspectable `Diff`, without mutation.

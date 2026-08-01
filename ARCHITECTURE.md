@@ -7,9 +7,8 @@
 This document describes the planned workspace structure for Net Lattice and the
 design principles behind it. It reflects intended direction, not current
 state: see [CHANGELOG.md](CHANGELOG.md) and [README.md](README.md) for what
-actually exists in the repository today. As of this writing, Stage 0.15 of
-the Incremental Delivery Plan below has landed, and Stage 0.16 has its model
-and generic platform contract: `net-lattice-core`,
+actually exists in the repository today. As of this writing, Stage 0.16 of
+the Incremental Delivery Plan below has landed: `net-lattice-core`,
 `net-lattice-ip`, `net-lattice-model`'s `route`, `interface`, `dns`,
 `neighbor`, `ifaddr`, and `mutation` modules, `net-lattice-platform`'s `RouteProvider`,
 `InterfaceProvider`, `InterfaceMutator`, `DnsProvider`, `DnsMutator`, `NeighborProvider`, and
@@ -19,8 +18,9 @@ route/interface-address/DNS/neighbor support, native route/address/DNS
 mutation, inspectable mutation plans, the ordered transaction executor with
 runtime preflight, cancellation boundaries, typed snapshots, explicit
 compensation, and phase-aware reports. `InterfaceConfig` and
-`DesiredAdminState` now describe interface intent separately from observed
-`Interface`; native interface configuration remains a Stage 0.16 target.
+`DesiredAdminState` describe interface intent separately from observed
+`Interface`; `InterfaceMutator` applies capability-gated administrative-state
+and MTU patches with read-after-write observation on all built-in backends.
 Native event monitoring is implemented in
 `net-lattice-backend-linux`, `net-lattice-backend-windows`, and
 `net-lattice-backend-darwin`, the `net-lattice-async` event stream crate, and
@@ -561,7 +561,7 @@ operation metadata before a transaction API can make stronger promises.
 | Routes | `RouteProvider` adds and removes through native acknowledgements. `Route` is currently both the observed record and mutation input; deletion matching is platform-specific. | Introduce a distinct route intent and an operation precondition/match rule. Define duplicate, absent, and ambiguous-match outcomes. |
 | Interface addresses | `AddressMutator::add_address` returns a re-read `InterfaceAddress`; removal accepts that observed record. IDs are synthesized from interface and network rather than kernel-issued stable identities. | Record identity scope, collision assumptions, and removal preconditions in the operation model. |
 | DNS | `DnsMutator` replaces the portable resolver view and re-reads `DnsConfig`. Unix rewrites the active resolver file and drops directives outside the portable model; Windows changes global search settings and each enumerated adapter through separate calls. | Surface scope, manager ownership, persistence, and partial-application results in the operation report. Do not promise atomic DNS replacement or automatic rollback. |
-| Interface configuration | Read-only today. | Add a separate desired configuration for admin state and MTU; do not reuse observed `Interface`. |
+| Interface configuration | `InterfaceConfig` is a partial desired patch; `InterfaceMutator` updates administrative state and/or MTU and returns an observed readback. Combined native writes may partially apply. | Retain explicit compensation and eventual native event delivery; broader declarative interface state belongs to later stages. |
 | Neighbors | Read-only today. | Add distinct static-neighbor intent and lifecycle semantics before exposing mutation. |
 
 Every future mutation operation must state: its target identity and matching
@@ -667,7 +667,7 @@ are introduced only when there is real implementation work for them:
 | 0.13 ✅ | DNS mutation with an intent/observed-state model: `NewDnsConfig` is applied through supported system mechanisms and the resulting `DnsConfig` is re-read on Linux, Windows, and macOS. |
 | 0.14 ✅ | Mutation operation model: inspectable `Mutation` values and ordered `MutationPlan`s for existing route/address/DNS mutations; explicit preconditions, idempotency, privilege, confirmation, partial-application, and reversibility classifications. Adds side-effect-free `MutationPreflight` analysis plus typed `MutationOutcome`, `MutationPlanReport`, and `RollbackStatus` contracts for executor reporting, while plans themselves retain no execution or rollback side effects. |
 | 0.15 ✅ | Transaction execution baseline: runtime capability and object-precondition preflight via `Lattice::validate_plan`, provider-backed `MutationSnapshot` capture through `snapshot_for_mutation`, ordered submission through `Lattice::execute_plan` configured by `ExecutionOptions`, per-operation outcomes, phase/timing diagnostics, first-failure stopping, operation-boundary cancellation, caller-defined prior-state capture, and an explicitly supplied reverse-order compensator. Ignored native facade route round-trip and compensation scenarios run in each privileged CI job; DNS partial-application integration remains intentionally non-destructive. |
-| 0.16 | Interface configuration: separate desired interface configuration from observed `Interface`; capability-gated admin-state and MTU mutation with platform parity and event semantics. |
+| 0.16 ✅ | Interface configuration: separate desired `InterfaceConfig`, independent admin-state/MTU capability gates, read-after-write mutation on Linux/Windows/macOS, typed executor snapshots, and existing native interface-change event mappings. Shared privileged runners verify submission/readback/restoration without deliberately disrupting a live interface; isolated-interface CI is required for destructive end-to-end event proof. |
 | 0.17 | Neighbor mutation: intent/observed types and capability-gated static ARP/NDP entry management. This completes the mutation counterpart of the existing neighbor read model. |
 | 0.18 | Snapshot foundation: `CurrentState` assembled consistently from the implemented providers, with snapshot scope, consistency, and partial-read semantics made explicit. |
 | 0.19 | Declarative model and diff: `DesiredState` configuration types remain distinct from observed types; produce an inspectable `Diff` without applying it. |
