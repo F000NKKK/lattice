@@ -209,7 +209,7 @@ duplicating those contracts here.
 10. **Stage 0.14: Mutation operation model** *(completed)* — inspectable `Mutation` values and data-only `MutationPlan`s for existing route, address, and DNS mutations; preconditions, idempotency, privilege, confirmation, partial-application, and reversibility are explicit.
 11. **Stage 0.15: Transaction execution** *(completed)* — ordered plans, per-operation outcomes, phase/timing diagnostics, cancellation and failure boundaries, plus compensation only for documented reversible operations.
 12. **Stage 0.16: Interface configuration** *(completed)* — separate desired interface configuration, capability-gated admin-state and MTU mutation, read-after-write results, and platform-parity tests.
-13. **Stage 0.17: Neighbor mutation, IPv6 DNS parity, and isolated topology acceptance** — intent/observed static ARP/NDP management plus safe cross-platform destructive-operation testing. Detailed planning is pending in `.ai/0.17/plan.md`.
+13. **Stage 0.17: Neighbor mutation, IPv6 DNS parity, and isolated topology acceptance** — intent/observed static ARP/NDP management plus safe cross-platform destructive-operation testing. Detailed planning will follow before implementation.
 14. **Stage 0.18: Snapshots** — consistently assembled `CurrentState` with explicit scope, consistency, and partial-read semantics.
 15. **Stage 0.19: Declarative diff** — separate `DesiredState` configuration types and an inspectable `Diff`, without mutation.
 16. **Stage 0.20: Declarative apply** — compile a `Diff` into an `ApplyPlan` and execute it through the transaction engine.

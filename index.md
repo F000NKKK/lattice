@@ -19,7 +19,6 @@ net-lattice/
 │   ├── net-lattice-async/       Runtime-independent futures::Stream adapter
 │   └── net-lattice/             Public facade, validation, and transaction executor
 ├── .github/workflows/           Cross-platform CI and privileged coverage jobs
-├── .ai/<task-name>/             Ignored task plan, audit log, and ADRs
 ├── .codex/                      Reusable Codex rules, roles, and templates
 ├── scripts/                     Repository helper scripts
 ├── ARCHITECTURE.md              English architecture and roadmap
@@ -87,16 +86,17 @@ patch version here.
   desired `InterfaceConfig`, capability-gated MTU/admin-state mutation,
   read-after-write, and executor integration on all built-in backends.
 - 0.17: neighbor mutation plus IPv6 DNS parity and isolated destructive
-  topology acceptance; detailed planning is pending in `.ai/0.17/plan.md`.
+  topology acceptance; detailed planning will precede implementation.
 - 0.18: planned consistent `CurrentState` snapshots.
 - 0.19: planned `DesiredState` and inspectable diff.
 - 0.20: planned declarative apply through the transaction executor.
 - 0.21: planned pre-1.0 compatibility and hardening audit.
 
-The completed Stage 0.16 plan and audit record remain in `.ai/0.16/` as
-working-tree evidence. The active Stage 0.17 scaffold is in `.ai/0.17/`.
-`.ai/`, `.codex/`, this index, and root `AGENTS.md` are intentionally local
-agent context in this checkout and are not release content.
+The completed Stage 0.16 plan and audit records are maintained as internal
+working-tree evidence. The next-stage planning workspace is likewise kept
+outside the published crate documentation.
+`.codex/`, this index, and root `AGENTS.md` are intentionally local agent
+context in this checkout and are not release content.
 
 ## Stage 0.16 delivered contract
 

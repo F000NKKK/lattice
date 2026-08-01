@@ -189,7 +189,7 @@ if lattice.supports(Capability::ROUTE_MONITORING) {
 10. **Stage 0.14: Модель mutation-операций** *(завершён)* — inspectable значения `Mutation` и планы `MutationPlan` только из данных для существующих изменений routes, addresses и DNS; явно определены preconditions, idempotency, privileges, confirmation, partial application и reversibility.
 11. **Stage 0.15: Исполнение транзакций** *(завершён)* — упорядоченные планы, результаты каждой операции, диагностика фаз и длительностей, границы cancellation и ошибок, а также compensation только для документированно reversible операций.
 12. **Stage 0.16: Конфигурация интерфейсов** *(завершён)* — отдельная desired-конфигурация интерфейса, capability-gated изменение admin state и MTU, read-after-write результаты и platform-parity tests.
-13. **Stage 0.17: Изменение соседей, паритет IPv6 для DNS и изолированная topology-приёмка** — intent/observed управление статическими ARP/NDP и безопасное кроссплатформенное тестирование деструктивных операций. Детальный план будет в `.ai/0.17/plan.md`.
+13. **Stage 0.17: Изменение соседей, паритет IPv6 для DNS и изолированная topology-приёмка** — intent/observed управление статическими ARP/NDP и безопасное кроссплатформенное тестирование деструктивных операций. Детальный план будет подготовлен до начала реализации.
 14. **Stage 0.18: Snapshots** — последовательно собранный `CurrentState` с явно определёнными scope, consistency и partial-read семантиками.
 15. **Stage 0.19: Декларативный diff** — отдельные конфигурационные типы `DesiredState` и inspectable `Diff` без mutation.
 16. **Stage 0.20: Декларативное применение** — компиляция `Diff` в `ApplyPlan` и его исполнение через transaction engine.
