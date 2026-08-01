@@ -30,6 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add an ignored native facade transaction round-trip and run it in the
   privileged Linux, Windows, and macOS CI coverage jobs alongside backend
   integration tests.
+- Add an ignored native compensation scenario that verifies first-failure
+  stopping and reverse-order route cleanup through the facade.
 
 ## [0.14.1] - 2026-08-01
 

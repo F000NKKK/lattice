@@ -966,6 +966,53 @@ mod tests {
         );
     }
 
+    /// Exercises native first-failure stopping and reverse-order compensation
+    /// without leaving the test route behind.
+    #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+    #[test]
+    #[ignore = "requires native networking privilege; run with the platform privileged test job"]
+    fn native_facade_compensates_after_second_route_operation_fails() {
+        let lattice = Lattice::connect().expect("failed to connect native backend");
+        let interface = lattice
+            .interfaces()
+            .expect("failed to list interfaces")
+            .into_iter()
+            .find(|interface| matches!(interface.kind, InterfaceKind::Loopback))
+            .or_else(|| {
+                lattice
+                    .interfaces()
+                    .ok()
+                    .and_then(|mut interfaces| interfaces.pop())
+            })
+            .expect("native backend reported no interfaces");
+        let destination = Network::from(Ipv4Network::new(
+            Ipv4Address::new(198, 51, 100, 0),
+            Ipv4PrefixLength::new(24).expect("valid prefix"),
+        ));
+        let route = Route::new(RouteId::new(0), destination).with_interface_index(interface.index);
+        let plan = MutationPlan::from_operations([
+            Mutation::AddRoute(route.clone()),
+            Mutation::AddRoute(route.clone()),
+        ]);
+
+        let report = lattice.execute_plan_with_snapshot(
+            &plan,
+            |_, _| false,
+            |_, operation| lattice.snapshot_for_mutation(operation),
+            |_, operation, _| match operation {
+                Mutation::AddRoute(route) => lattice.remove_route(route.clone()),
+                _ => Ok(()),
+            },
+        );
+
+        assert!(matches!(report.outcome(0), Some(MutationOutcome::Applied)));
+        assert!(matches!(
+            report.outcome(1),
+            Some(MutationOutcome::Failed { .. })
+        ));
+        assert!(matches!(report.rollback(), RollbackStatus::Completed));
+    }
+
     #[test]
     fn facade_runs_supplied_compensation_in_reverse_order() {
         let lattice = lattice(Capability::empty());
