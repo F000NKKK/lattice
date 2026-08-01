@@ -22,8 +22,8 @@ workspace's concrete domain model. Application code normally uses
 ```rust
 use net_lattice_platform::{Capability, CapabilityProvider};
 
-fn supports_monitoring<P: CapabilityProvider>(provider: &P) -> bool {
-    provider.capabilities().contains(Capability::MONITORING)
+fn supports_route_monitoring<P: CapabilityProvider>(provider: &P) -> bool {
+    provider.capabilities().contains(Capability::ROUTE_MONITORING)
 }
 ```
 
@@ -35,3 +35,9 @@ validation and submission. In particular,
 `Capability::INTERFACE_ADMIN_STATE` and `Capability::INTERFACE_MTU` gate a
 backend's interface-configuration surface independently; a caller requesting
 both settings must require both flags.
+
+Monitoring is also domain-specific: `ROUTE_MONITORING`,
+`INTERFACE_MONITORING`, `NEIGHBOR_MONITORING`, and `ADDRESS_MONITORING` each
+mean that the backend has a native delivery path for that domain.
+`MONITORING` is their all-domain aggregate, not merely proof that some watcher
+can be constructed.

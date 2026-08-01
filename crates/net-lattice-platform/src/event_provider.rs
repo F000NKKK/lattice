@@ -238,6 +238,11 @@ impl<E> Iterator for EventReceiver<E> {
 /// [`EventReceiver`] fed by it. The watcher runs for as long as the
 /// returned `EventReceiver` (and whatever the backend keeps alive to feed
 /// it) is alive.
+///
+/// A backend must reject a filter that selects a domain it cannot deliver;
+/// returning a watcher that silently omits selected events violates the
+/// monitoring capability contract. The facade maps its concrete event-domain
+/// filter to the matching runtime capability before calling this trait.
 pub trait EventProvider {
     type Event;
     type EventFilter;
