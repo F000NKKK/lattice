@@ -279,10 +279,15 @@ pub enum RollbackStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum MutationExecutionPhase {
+    /// The plan or operation is being checked before submission.
     Validation,
+    /// Prior state is being captured for an operation.
     Snapshot,
+    /// The mutation is being submitted to the platform backend.
     Execution,
+    /// An explicitly supplied compensator is being run.
     Compensation,
+    /// Execution stopped at an operation boundary because cancellation was requested.
     Cancellation,
 }
 
@@ -290,10 +295,15 @@ pub enum MutationExecutionPhase {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum MutationStopReason {
+    /// Plan or operation preconditions were rejected.
     ValidationFailed,
+    /// Prior-state capture failed before submission.
     SnapshotFailed,
+    /// The platform backend rejected or could not complete the operation.
     ExecutionFailed,
+    /// The caller requested cancellation before this operation was submitted.
     Cancelled,
+    /// An explicitly supplied compensator failed.
     CompensationFailed,
 }
 
@@ -309,6 +319,7 @@ pub struct MutationOperationReport {
 }
 
 impl MutationOperationReport {
+    /// Returns metadata for an operation that was not submitted.
     pub const fn not_attempted() -> Self {
         Self {
             phase: MutationExecutionPhase::Validation,

@@ -430,10 +430,12 @@ impl<B: LatticeBackend> Lattice<B> {
                 };
                 let mut status = RollbackStatus::Completed;
                 for (index, prior) in applied.into_iter().rev() {
-                    if let Err(error) =
-                        compensate(index, plan.operation(index).expect("index"), prior.as_ref())
-                    {
-                        operation_reports[index].phase = MutationExecutionPhase::Compensation;
+                    let started = Instant::now();
+                    let result =
+                        compensate(index, plan.operation(index).expect("index"), prior.as_ref());
+                    operation_reports[index].phase = MutationExecutionPhase::Compensation;
+                    operation_reports[index].duration += started.elapsed();
+                    if let Err(error) = result {
                         operation_reports[index].stop_reason =
                             Some(MutationStopReason::CompensationFailed);
                         status = RollbackStatus::Failed {
@@ -1093,6 +1095,10 @@ mod tests {
 
         assert_eq!(compensated, vec![0]);
         assert!(matches!(report.rollback(), RollbackStatus::Completed));
+        assert_eq!(
+            report.operation_report(0).expect("operation report").phase,
+            MutationExecutionPhase::Compensation
+        );
     }
 
     #[test]
@@ -1123,6 +1129,10 @@ mod tests {
         assert_eq!(captured, vec![0]);
         assert_eq!(restored, vec![(0, true)]);
         assert!(matches!(report.rollback(), RollbackStatus::Completed));
+        assert_eq!(
+            report.operation_report(0).expect("operation report").phase,
+            MutationExecutionPhase::Compensation
+        );
     }
 
     #[test]
