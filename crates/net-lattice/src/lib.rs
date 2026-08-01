@@ -239,6 +239,108 @@ impl<B: LatticeBackend> Lattice<B> {
         self.execute_plan_internal(plan, cancelled, Some(&mut compensate))
     }
 
+    /// Executes a plan while capturing caller-defined prior state for each
+    /// operation before submission.
+    ///
+    /// `snapshot` is called at the operation boundary, after runtime
+    /// capability validation and before the native mutation. Snapshots for
+    /// successful operations are supplied to `compensate` in reverse order.
+    /// A snapshot or compensation error stops execution and is reported as a
+    /// failed boundary; no platform-specific state type is imposed by the
+    /// facade.
+    pub fn execute_plan_with_snapshot<S, C, P, F>(
+        &self,
+        plan: &MutationPlan,
+        mut cancelled: C,
+        mut snapshot: P,
+        mut compensate: F,
+    ) -> MutationPlanReport
+    where
+        C: FnMut(usize, &Mutation) -> bool,
+        P: FnMut(usize, &Mutation) -> Result<S>,
+        F: FnMut(usize, &Mutation, S) -> Result<()>,
+    {
+        if let Err(error) = self.validate_plan(plan) {
+            return Self::unsupported_plan_report(plan, error);
+        }
+
+        let mut outcomes = Vec::with_capacity(plan.len());
+        let mut applied = Vec::new();
+        let mut stopped = false;
+        let mut rollback_boundary = false;
+
+        for (index, operation) in plan.operations().iter().enumerate() {
+            if stopped || cancelled(index, operation) {
+                outcomes.push(MutationOutcome::NotAttempted);
+                rollback_boundary |= !applied.is_empty();
+                stopped = true;
+                continue;
+            }
+
+            let prior = match snapshot(index, operation) {
+                Ok(prior) => prior,
+                Err(error) => {
+                    outcomes.push(MutationOutcome::Failed {
+                        error,
+                        may_have_applied: false,
+                    });
+                    stopped = true;
+                    rollback_boundary = !applied.is_empty();
+                    continue;
+                }
+            };
+
+            let result = match operation {
+                Mutation::AddRoute(route) => self.add_route(route.clone()),
+                Mutation::RemoveRoute(route) => self.remove_route(route.clone()),
+                Mutation::AddAddress(address) => self.add_address(address.clone()).map(|_| ()),
+                Mutation::RemoveAddress(address) => self.remove_address(address.clone()),
+                Mutation::SetDnsConfig(config) => self.set_dns_config(config.clone()).map(|_| ()),
+                _ => Err(Error::Unsupported),
+            };
+
+            match result {
+                Ok(()) => {
+                    outcomes.push(MutationOutcome::Applied);
+                    applied.push((index, prior));
+                }
+                Err(error) => {
+                    rollback_boundary =
+                        !applied.is_empty() || operation.semantics().may_partially_apply;
+                    outcomes.push(MutationOutcome::Failed {
+                        error,
+                        may_have_applied: operation.semantics().may_partially_apply,
+                    });
+                    stopped = true;
+                }
+            }
+        }
+
+        let rollback = if stopped && rollback_boundary {
+            if applied.is_empty() {
+                RollbackStatus::NotAttempted
+            } else {
+                let mut status = RollbackStatus::Completed;
+                for (index, prior) in applied.into_iter().rev() {
+                    if let Err(error) =
+                        compensate(index, plan.operation(index).expect("index"), prior)
+                    {
+                        status = RollbackStatus::Failed {
+                            operation_index: index,
+                            error,
+                        };
+                        break;
+                    }
+                }
+                status
+            }
+        } else {
+            RollbackStatus::NotNeeded
+        };
+
+        MutationPlanReport::new(outcomes, rollback)
+    }
+
     fn execute_plan_internal<C, F>(
         &self,
         plan: &MutationPlan,
@@ -250,15 +352,7 @@ impl<B: LatticeBackend> Lattice<B> {
         F: FnMut(usize, &Mutation) -> Result<()>,
     {
         if let Err(error) = self.validate_plan(plan) {
-            let mut outcomes = Vec::with_capacity(plan.len());
-            if !plan.is_empty() {
-                outcomes.push(MutationOutcome::Failed {
-                    error,
-                    may_have_applied: false,
-                });
-                outcomes.extend((0..plan.len() - 1).map(|_| MutationOutcome::NotAttempted));
-            }
-            return MutationPlanReport::new(outcomes, RollbackStatus::NotNeeded);
+            return Self::unsupported_plan_report(plan, error);
         }
 
         let mut outcomes = Vec::with_capacity(plan.len());
@@ -322,6 +416,18 @@ impl<B: LatticeBackend> Lattice<B> {
             RollbackStatus::NotNeeded
         };
         MutationPlanReport::new(outcomes, rollback)
+    }
+
+    fn unsupported_plan_report(plan: &MutationPlan, error: Error) -> MutationPlanReport {
+        let mut outcomes = Vec::with_capacity(plan.len());
+        if !plan.is_empty() {
+            outcomes.push(MutationOutcome::Failed {
+                error,
+                may_have_applied: false,
+            });
+            outcomes.extend((0..plan.len() - 1).map(|_| MutationOutcome::NotAttempted));
+        }
+        MutationPlanReport::new(outcomes, RollbackStatus::NotNeeded)
     }
 
     /// The full set of runtime-dependent [`Capability`] flags the connected
@@ -775,6 +881,34 @@ mod tests {
         );
 
         assert_eq!(compensated, vec![0]);
+        assert!(matches!(report.rollback(), RollbackStatus::Completed));
+    }
+
+    #[test]
+    fn facade_captures_prior_state_before_each_applied_operation() {
+        let lattice = lattice(Capability::empty());
+        let plan = MutationPlan::from_operations([
+            Mutation::AddRoute(route()),
+            Mutation::RemoveRoute(route()),
+        ]);
+        let mut captured = Vec::new();
+        let mut restored = Vec::new();
+
+        let report = lattice.execute_plan_with_snapshot(
+            &plan,
+            |index, _| index == 1,
+            |index, _| {
+                captured.push(index);
+                Ok(format!("state-{index}"))
+            },
+            |index, _, state| {
+                restored.push((index, state));
+                Ok(())
+            },
+        );
+
+        assert_eq!(captured, vec![0]);
+        assert_eq!(restored, vec![(0, "state-0".to_string())]);
         assert!(matches!(report.rollback(), RollbackStatus::Completed));
     }
 
