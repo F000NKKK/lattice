@@ -74,7 +74,7 @@ an internal facade component until repeated reuse justifies a new crate.
 
 ## Current release and roadmap
 
-Published stage baseline: the `net-lattice 0.16` release line. Read the current
+Published stage baseline: the `net-lattice 0.15` release line. Read the current
 workspace version from `crates/net-lattice/Cargo.toml`; do not duplicate a
 patch version here.
 
@@ -83,7 +83,7 @@ patch version here.
 - 0.15: completed ordered transaction execution, runtime preflight,
   cancellation, typed snapshots, explicit compensation, and phase-aware
   reports.
-- 0.16: completed interface configuration: desired `InterfaceConfig`,
+- 0.16: implementation complete pending privileged CI: desired `InterfaceConfig`,
   capability-gated MTU/admin-state mutation, read-after-write, and executor
   integration on all built-in backends.
 - 0.17: planned neighbor mutation.
@@ -92,8 +92,8 @@ patch version here.
 - 0.20: planned declarative apply through the transaction executor.
 - 0.21: planned pre-1.0 compatibility and hardening audit.
 
-The completed Stage 0.16 plan and audit record remain in `.ai/0.16/` in the
-working tree; the next implementation task must create its own task workspace.
+The active Stage 0.16 plan and audit record remain in `.ai/0.16/` in the
+working tree until privileged CI evidence closes its final checkbox.
 `.ai/`, `.codex/`, this index, and root `AGENTS.md` are intentionally local
 agent context in this checkout and are not release content.
 

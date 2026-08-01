@@ -7,10 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-No unreleased changes.
-
-## [0.16.0] - 2026-08-01
-
 ### Added
 
 - Stage 0.16 interface configuration: `InterfaceConfig` partial desired
