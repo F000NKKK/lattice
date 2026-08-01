@@ -539,7 +539,10 @@ fn interface_config_to_link_change(config: &InterfaceConfig) -> Result<LinkMessa
         message.header.flags = match admin_state {
             DesiredAdminState::Up => LinkFlags::Up,
             DesiredAdminState::Down => LinkFlags::empty(),
-            _ => unreachable!("DesiredAdminState has no unsupported Linux intent"),
+            // `DesiredAdminState` is non-exhaustive. A newer model intent
+            // must not turn a backend request into a process panic before
+            // this backend has learned its native representation.
+            _ => return Err(Error::Unsupported),
         };
     }
 
