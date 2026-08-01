@@ -10,12 +10,14 @@ bitflags::bitflags! {
     ///
     /// Capabilities describe the backend's view when queried; callers should
     /// still handle operation errors because permissions or system
-    /// configuration may change later. Use them as a portable feature gate,
-    /// for example:
+    /// configuration may change later. Use the capability for the event
+    /// domain a watcher selects; [`Capability::MONITORING`] is the aggregate
+    /// that means every currently modeled event domain is deliverable.
+    /// For example:
     ///
     /// ```ignore
-    /// if lattice.supports(Capability::MONITORING) {
-    ///     let watcher = lattice.watch()?;
+    /// if lattice.supports(Capability::ROUTE_MONITORING) {
+    ///     let watcher = lattice.watch_filtered(EventFilter::none().routes())?;
     /// }
     /// ```
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -23,7 +25,8 @@ bitflags::bitflags! {
         const IPV6 = 1 << 0;
         const VRF = 1 << 1;
         const NAMESPACES = 1 << 2;
-        const MONITORING = 1 << 3;
+        /// The backend delivers native route-change notifications.
+        const ROUTE_MONITORING = 1 << 3;
         /// The backend can replace resolver configuration through a supported
         /// operating-system mechanism.
         const DNS_MUTATION = 1 << 4;
@@ -39,6 +42,19 @@ bitflags::bitflags! {
         /// This is a feature gate, not proof that the current process has the
         /// privilege or policy permission to change the interface.
         const INTERFACE_MTU = 1 << 6;
+        /// The backend delivers native interface-change notifications.
+        const INTERFACE_MONITORING = 1 << 7;
+        /// The backend delivers native neighbor-table change notifications.
+        const NEIGHBOR_MONITORING = 1 << 8;
+        /// The backend delivers native interface-address change notifications.
+        const ADDRESS_MONITORING = 1 << 9;
+        /// Every currently modeled event domain is deliverable by the
+        /// backend. This is the capability required by an all-domain
+        /// [`EventProvider::watch`](crate::EventProvider::watch) request.
+        const MONITORING = Self::ROUTE_MONITORING.bits()
+            | Self::INTERFACE_MONITORING.bits()
+            | Self::NEIGHBOR_MONITORING.bits()
+            | Self::ADDRESS_MONITORING.bits();
     }
 }
 
@@ -66,5 +82,16 @@ mod tests {
             Capability::INTERFACE_MTU.bits()
         );
         assert!(!Capability::INTERFACE_ADMIN_STATE.contains(Capability::INTERFACE_MTU));
+    }
+
+    #[test]
+    fn monitoring_aggregate_requires_every_event_domain() {
+        let partial = Capability::ROUTE_MONITORING
+            | Capability::INTERFACE_MONITORING
+            | Capability::ADDRESS_MONITORING;
+        assert!(!partial.contains(Capability::MONITORING));
+        assert!(
+            (partial | Capability::NEIGHBOR_MONITORING).contains(Capability::MONITORING)
+        );
     }
 }

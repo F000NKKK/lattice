@@ -111,6 +111,22 @@ impl EventFilter {
         !self.routes && !self.interfaces && !self.neighbors && !self.addresses
     }
 
+    /// Whether this filter selects `domain`, regardless of any object
+    /// selector within that domain.
+    ///
+    /// A watcher uses this to reject a requested domain when the connected
+    /// backend has no native delivery path for it. [`EventDomain::All`]
+    /// selects every domain only when all four domain selectors are present.
+    pub const fn selects_domain(&self, domain: EventDomain) -> bool {
+        match domain {
+            EventDomain::Route => self.routes,
+            EventDomain::Interface => self.interfaces,
+            EventDomain::Neighbor => self.neighbors,
+            EventDomain::Address => self.addresses,
+            EventDomain::All => self.routes && self.interfaces && self.neighbors && self.addresses,
+        }
+    }
+
     /// Whether this filter delivers `event`. Object selectors are applied
     /// before a backend enqueues an ordinary event. A resynchronization event
     /// has no object ID, so it is selected by its affected domain.
@@ -368,5 +384,14 @@ mod tests {
                     domain: EventDomain::Neighbor,
                 })
         );
+    }
+
+    #[test]
+    fn domain_selection_distinguishes_partial_and_all_filters() {
+        let route = EventFilter::none().route(RouteId::new(1));
+        assert!(route.selects_domain(EventDomain::Route));
+        assert!(!route.selects_domain(EventDomain::Neighbor));
+        assert!(!route.selects_domain(EventDomain::All));
+        assert!(EventFilter::ALL.selects_domain(EventDomain::All));
     }
 }
