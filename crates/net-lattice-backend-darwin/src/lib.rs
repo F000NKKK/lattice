@@ -2473,11 +2473,18 @@ mod tests {
 
     #[test]
     fn parse_resolv_conf_reads_nameservers_and_search_domains() {
-        let contents = "# comment\nnameserver 1.1.1.1\nsearch example.com corp.example.com\n";
+        let contents = "# comment\nnameserver 1.1.1.1\nnameserver 2606:4700:4700::1111\nsearch example.com corp.example.com\n";
         let config = parse_resolv_conf(contents);
         assert_eq!(
             config.nameservers,
-            vec![IpAddress::from(Ipv4Address::new(1, 1, 1, 1))]
+            vec![
+                IpAddress::from(Ipv4Address::new(1, 1, 1, 1)),
+                IpAddress::from(
+                    "2606:4700:4700::1111"
+                        .parse::<std::net::Ipv6Addr>()
+                        .unwrap()
+                ),
+            ]
         );
         assert_eq!(
             config.search_domains,
@@ -2490,13 +2497,18 @@ mod tests {
         let config = NewDnsConfig::with(
             vec![
                 IpAddress::from(Ipv4Address::new(1, 1, 1, 1)),
+                IpAddress::from(
+                    "2606:4700:4700::1111"
+                        .parse::<std::net::Ipv6Addr>()
+                        .unwrap(),
+                ),
                 IpAddress::from(Ipv4Address::new(8, 8, 8, 8)),
             ],
             vec!["example.test".to_string(), "corp.test".to_string()],
         );
         assert_eq!(
             render_resolv_conf(&config),
-            "nameserver 1.1.1.1\nnameserver 8.8.8.8\nsearch example.test corp.test\n"
+            "nameserver 1.1.1.1\nnameserver 2606:4700:4700::1111\nnameserver 8.8.8.8\nsearch example.test corp.test\n"
         );
     }
 

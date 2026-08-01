@@ -2025,11 +2025,29 @@ mod tests {
         let config = NewDnsConfig::with(
             vec![
                 IpAddress::from(Ipv4Address::new(1, 1, 1, 1)),
+                IpAddress::from(
+                    "2606:4700:4700::1111"
+                        .parse::<std::net::Ipv6Addr>()
+                        .unwrap(),
+                ),
                 IpAddress::from(Ipv4Address::new(8, 8, 8, 8)),
             ],
             Vec::new(),
         );
-        assert_eq!(config_list(&config.nameservers), "1.1.1.1,8.8.8.8");
+        assert_eq!(
+            config_list(&config.nameservers),
+            "1.1.1.1,2606:4700:4700::1111,8.8.8.8"
+        );
+    }
+
+    #[test]
+    fn dns_ipv6_sockaddr_mapping_preserves_family_and_value() {
+        let expected = "2606:4700:4700::1111"
+            .parse::<std::net::Ipv6Addr>()
+            .unwrap();
+        let sockaddr = ip_to_sockaddr_inet(std::net::IpAddr::V6(expected));
+        let observed = unsafe { sockaddr_inet_to_ip(&sockaddr) };
+        assert_eq!(observed, Some(std::net::IpAddr::V6(expected)));
     }
 
     /// Registers and immediately drops the supported native notification
