@@ -1753,13 +1753,15 @@ mod tests {
                 .watch_filtered(EventFilter::none().routes().addresses())
                 .is_ok()
         );
-        assert!(
-            route_and_address
-                .watch_filtered(EventFilter::none().neighbors())
-                .is_err()
-        );
-        assert!(route_and_address.watch().is_err());
-        assert!(route_and_address.watch_filtered(EventFilter::ALL).is_err());
+        assert!(matches!(
+            route_and_address.watch_filtered(EventFilter::none().neighbors()),
+            Err(Error::Unsupported)
+        ));
+        assert!(matches!(route_and_address.watch(), Err(Error::Unsupported)));
+        assert!(matches!(
+            route_and_address.watch_filtered(EventFilter::ALL),
+            Err(Error::Unsupported)
+        ));
         assert!(
             route_and_address
                 .watch_filtered(EventFilter::none())
@@ -1805,12 +1807,14 @@ mod tests {
     fn async_facade_requires_capability_for_each_selected_monitoring_domain() {
         let lattice = lattice(Capability::ROUTE_MONITORING);
         assert!(lattice.watch_async(EventFilter::none().routes()).is_ok());
-        assert!(
-            lattice
-                .watch_async(EventFilter::none().neighbors())
-                .is_err()
-        );
-        assert!(lattice.watch_async(EventFilter::ALL).is_err());
+        assert!(matches!(
+            lattice.watch_async(EventFilter::none().neighbors()),
+            Err(Error::Unsupported)
+        ));
+        assert!(matches!(
+            lattice.watch_async(EventFilter::ALL),
+            Err(Error::Unsupported)
+        ));
         assert!(lattice.watch_async(EventFilter::none()).is_ok());
     }
 

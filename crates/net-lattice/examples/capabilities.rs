@@ -17,7 +17,10 @@ fn main() -> Result<()> {
         ("address monitoring", Capability::ADDRESS_MONITORING),
         ("all-domain monitoring", Capability::MONITORING),
         ("DNS mutation", Capability::DNS_MUTATION),
-        ("interface administrative state", Capability::INTERFACE_ADMIN_STATE),
+        (
+            "interface administrative state",
+            Capability::INTERFACE_ADMIN_STATE,
+        ),
         ("interface MTU", Capability::INTERFACE_MTU),
         ("VRF", Capability::VRF),
         ("network namespaces", Capability::NAMESPACES),

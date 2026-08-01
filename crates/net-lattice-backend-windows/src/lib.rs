@@ -2042,12 +2042,11 @@ mod tests {
 
         let backend = WindowsBackend::new().expect("failed to create Windows backend");
         assert!(!backend.capabilities().contains(Capability::MONITORING));
-        assert!(backend.watch().is_err());
-        assert!(
-            backend
-                .watch_filtered(EventFilter::none().neighbors())
-                .is_err()
-        );
+        assert!(matches!(backend.watch(), Err(Error::Unsupported)));
+        assert!(matches!(
+            backend.watch_filtered(EventFilter::none().neighbors()),
+            Err(Error::Unsupported)
+        ));
         drop(
             backend
                 .watch_filtered(EventFilter::none().routes())
@@ -2066,12 +2065,14 @@ mod tests {
     #[test]
     fn watch_tokio_registers_ip_helper_notifications() {
         let backend = WindowsBackend::new().expect("failed to create Windows backend");
-        assert!(backend.watch_tokio(EventFilter::ALL).is_err());
-        assert!(
-            backend
-                .watch_tokio(EventFilter::none().neighbors())
-                .is_err()
-        );
+        assert!(matches!(
+            backend.watch_tokio(EventFilter::ALL),
+            Err(Error::Unsupported)
+        ));
+        assert!(matches!(
+            backend.watch_tokio(EventFilter::none().neighbors()),
+            Err(Error::Unsupported)
+        ));
         let watcher = backend
             .watch_tokio(EventFilter::none().addresses())
             .expect("failed to register IP Helper notifications");
