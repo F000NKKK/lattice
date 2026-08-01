@@ -41,7 +41,8 @@ pub use net_lattice_model::dns::{DnsConfig, NewDnsConfig};
 pub use net_lattice_model::event::{ChangeKind, Event, EventDomain, EventFilter};
 pub use net_lattice_model::ifaddr::{InterfaceAddress, InterfaceAddressId, NewInterfaceAddress};
 pub use net_lattice_model::interface::{
-    AdminState, Interface, InterfaceId, InterfaceKind, OperationalState,
+    AdminState, DesiredAdminState, Interface, InterfaceConfig, InterfaceId, InterfaceKind,
+    OperationalState,
 };
 pub use net_lattice_model::mac::MacAddress;
 pub use net_lattice_model::mutation::{
@@ -57,7 +58,8 @@ pub use net_lattice_model::{IpAddress, Network};
 pub use net_lattice_platform::TokioEventProvider;
 pub use net_lattice_platform::{
     AddressMutator, AddressProvider, Capability, CapabilityProvider, DnsMutator, DnsProvider,
-    EventProvider, EventReceiver, InterfaceProvider, NeighborProvider, RouteProvider,
+    EventProvider, EventReceiver, InterfaceMutator, InterfaceProvider, NeighborProvider,
+    RouteProvider,
 };
 
 #[cfg(test)]
@@ -74,8 +76,8 @@ pub mod backend {
     pub use crate::LatticeBackend;
     pub use net_lattice_platform::{
         AddressMutator, AddressProvider, CapabilityProvider, DnsMutator, DnsProvider,
-        EventProvider, EventReceiver, EventSender, InterfaceProvider, NeighborProvider,
-        RouteProvider,
+        EventProvider, EventReceiver, EventSender, InterfaceMutator, InterfaceProvider,
+        NeighborProvider, RouteProvider,
     };
     #[cfg(feature = "async")]
     pub use net_lattice_platform::{TokioEventProvider, TokioEventReceiver, TokioEventSender};
@@ -97,6 +99,7 @@ pub mod backend {
 pub trait LatticeBackend:
     RouteProvider<Route = Route>
     + InterfaceProvider<Interface = Interface>
+    + InterfaceMutator<Interface = Interface, InterfaceConfig = InterfaceConfig>
     + DnsMutator<NewDnsConfig = NewDnsConfig, DnsConfig = DnsConfig>
     + NeighborProvider<NeighborEntry = NeighborEntry>
     + AddressProvider<InterfaceAddress = InterfaceAddress>
@@ -109,6 +112,7 @@ pub trait LatticeBackend:
 impl<B> LatticeBackend for B where
     B: RouteProvider<Route = Route>
         + InterfaceProvider<Interface = Interface>
+        + InterfaceMutator<Interface = Interface, InterfaceConfig = InterfaceConfig>
         + DnsMutator<NewDnsConfig = NewDnsConfig, DnsConfig = DnsConfig>
         + NeighborProvider<NeighborEntry = NeighborEntry>
         + AddressProvider<InterfaceAddress = InterfaceAddress>
@@ -143,6 +147,21 @@ impl<B: LatticeBackend> Lattice<B> {
 
     pub fn interfaces(&self) -> Result<Vec<Interface>> {
         self.backend.interfaces()
+    }
+
+    /// Applies a partial desired configuration to one interface.
+    ///
+    /// Requested administrative state and MTU are checked against the
+    /// connected backend's runtime capabilities and the target interface is
+    /// confirmed to exist before native submission. Success returns a fresh
+    /// observed interface from the backend's read-after-write operation.
+    /// Capabilities are feature gates rather than privilege guarantees, and a
+    /// combined native update can still partially apply on error; use a
+    /// [`MutationPlan`] with explicit [`ExecutionOptions`] compensation when
+    /// an attempted restoration is required.
+    pub fn set_interface_config(&self, config: InterfaceConfig) -> Result<Interface> {
+        self.validate_interface_config(&config)?;
+        self.backend.set_interface_config(config)
     }
 
     pub fn dns_config(&self) -> Result<DnsConfig> {
@@ -266,7 +285,7 @@ impl<B: LatticeBackend> Lattice<B> {
                     removed_addresses.push(key);
                 }
                 Mutation::SetDnsConfig(_) => {}
-                _ => return Err(Error::Unsupported),
+                Mutation::SetInterfaceConfig(config) => self.validate_interface_config(config)?,
             }
         }
         Ok(())
@@ -277,6 +296,23 @@ impl<B: LatticeBackend> Lattice<B> {
             && left.gateway == right.gateway
             && left.metric == right.metric
             && left.interface_index == right.interface_index
+    }
+
+    fn validate_interface_config(&self, config: &InterfaceConfig) -> Result<()> {
+        if config.admin_state().is_some() && !self.supports(Capability::INTERFACE_ADMIN_STATE) {
+            return Err(Error::Unsupported);
+        }
+        if config.mtu().is_some() && !self.supports(Capability::INTERFACE_MTU) {
+            return Err(Error::Unsupported);
+        }
+        if self
+            .interfaces()?
+            .iter()
+            .all(|interface| interface.id != config.interface_id())
+        {
+            return Err(Error::NotFound);
+        }
+        Ok(())
     }
 
     /// Captures the currently observed state relevant to one mutation.
@@ -307,7 +343,11 @@ impl<B: LatticeBackend> Lattice<B> {
                 Ok(MutationSnapshot::InterfaceAddress(Some(address.clone())))
             }
             Mutation::SetDnsConfig(_) => Ok(MutationSnapshot::Dns(self.dns_config()?)),
-            _ => Err(Error::Unsupported),
+            Mutation::SetInterfaceConfig(config) => Ok(MutationSnapshot::Interface(
+                self.interfaces()?
+                    .into_iter()
+                    .find(|interface| interface.id == config.interface_id()),
+            )),
         }
     }
 
@@ -390,7 +430,9 @@ impl<B: LatticeBackend> Lattice<B> {
                 Mutation::AddAddress(address) => self.add_address(address.clone()).map(|_| ()),
                 Mutation::RemoveAddress(address) => self.remove_address(address.clone()),
                 Mutation::SetDnsConfig(config) => self.set_dns_config(config.clone()).map(|_| ()),
-                _ => Err(Error::Unsupported),
+                Mutation::SetInterfaceConfig(config) => {
+                    self.set_interface_config(config.clone()).map(|_| ())
+                }
             };
 
             match result {
