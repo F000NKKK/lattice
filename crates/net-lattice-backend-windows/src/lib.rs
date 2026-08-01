@@ -531,12 +531,27 @@ fn set_family_mtu(index: u32, family: ADDRESS_FAMILY, mtu: u32) -> Result<bool> 
         return Err(Error::Platform(PlatformErrorCode::Windows(status.0)));
     }
 
-    row.NlMtu = mtu;
+    prepare_ip_interface_row_for_mtu_update(&mut row, mtu);
     let status = unsafe { SetIpInterfaceEntry(&mut row) };
     if status.0 != 0 {
         return Err(Error::Platform(PlatformErrorCode::Windows(status.0)));
     }
     Ok(true)
+}
+
+/// Prepares one observed IP-interface row for an MTU-only update.
+///
+/// `GetIpInterfaceEntry` is the required source of all fields that this
+/// backend does not own. Windows additionally requires IPv4
+/// `SitePrefixLength` to be zero when the row is submitted to
+/// `SetIpInterfaceEntry`; preserving the value returned by the getter can
+/// otherwise make an otherwise valid MTU update fail with
+/// `ERROR_INVALID_PARAMETER`.
+fn prepare_ip_interface_row_for_mtu_update(row: &mut MIB_IPINTERFACE_ROW, mtu: u32) {
+    row.NlMtu = mtu;
+    if row.Family == AF_INET {
+        row.SitePrefixLength = 0;
+    }
 }
 
 const IP_INTERFACE_FAMILIES: [ADDRESS_FAMILY; 2] = [AF_INET, AF_INET6];
@@ -1346,6 +1361,27 @@ mod tests {
         .expect("both IP families were submitted");
 
         assert_eq!(families, vec![AF_INET, AF_INET6]);
+    }
+
+    #[test]
+    fn interface_mtu_update_resets_only_the_ipv4_site_prefix_length() {
+        let mut ipv4 = MIB_IPINTERFACE_ROW {
+            Family: AF_INET,
+            SitePrefixLength: 24,
+            ..Default::default()
+        };
+        prepare_ip_interface_row_for_mtu_update(&mut ipv4, 1500);
+        assert_eq!(ipv4.NlMtu, 1500);
+        assert_eq!(ipv4.SitePrefixLength, 0);
+
+        let mut ipv6 = MIB_IPINTERFACE_ROW {
+            Family: AF_INET6,
+            SitePrefixLength: 64,
+            ..Default::default()
+        };
+        prepare_ip_interface_row_for_mtu_update(&mut ipv6, 1500);
+        assert_eq!(ipv6.NlMtu, 1500);
+        assert_eq!(ipv6.SitePrefixLength, 64);
     }
 
     #[test]
