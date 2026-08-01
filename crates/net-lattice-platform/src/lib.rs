@@ -8,7 +8,7 @@
 //!
 //! Stage 0.4 added `InterfaceProvider`; Stage 0.5 added `DnsProvider`;
 //! Stage 0.6 added `NeighborProvider`; Stage 0.7 added `AddressProvider`;
-//! Stage 0.8 adds `EventProvider`.
+//! Stage 0.8 added `EventProvider`; Stage 0.16 adds `InterfaceMutator`.
 
 mod address_mutator;
 mod address_provider;

@@ -8,10 +8,11 @@
 дизайна, лежащие в её основе. Он отражает предполагаемое направление, а не
 текущее состояние: см. [CHANGELOG.md](CHANGELOG.md) и [README.md](README.md)
 для того, что реально существует в репозитории на данный момент. На момент
-написания реализован этап 0.15 плана поэтапной поставки ниже: `net-lattice-core`,
+написания реализован этап 0.15 плана поэтапной поставки ниже, а у 0.16 уже
+есть модель и generic platform-контракт: `net-lattice-core`,
 `net-lattice-ip`, модули `route`, `interface`, `dns`, `neighbor`, `ifaddr` и `mutation` в `net-lattice-model`,
-`RouteProvider`, `InterfaceProvider`, `DnsProvider`, `DnsMutator`, `NeighborProvider`, `AddressProvider`, `AddressMutator`, `CapabilityProvider`, синхронный `EventProvider`, feature-gated `TokioEventProvider` и object/domain selectors `EventFilter` в `net-lattice-platform`,
-поддержка маршрутов, адресов интерфейсов, DNS, соседей (ARP/NDP), нативного изменения маршрутов/адресов/DNS, inspectable mutation plans, упорядоченный executor транзакций с runtime-preflight, cancellation на границах операций, типизированными snapshots, явной compensation и фазовыми отчётами, а также нативного мониторинга событий в `net-lattice-backend-linux`,
+`RouteProvider`, `InterfaceProvider`, `InterfaceMutator`, `DnsProvider`, `DnsMutator`, `NeighborProvider`, `AddressProvider`, `AddressMutator`, `CapabilityProvider`, синхронный `EventProvider`, feature-gated `TokioEventProvider` и object/domain selectors `EventFilter` в `net-lattice-platform`,
+поддержка маршрутов, адресов интерфейсов, DNS, соседей (ARP/NDP), нативного изменения маршрутов/адресов/DNS, inspectable mutation plans, упорядоченный executor транзакций с runtime-preflight, cancellation на границах операций, типизированными snapshots, явной compensation и фазовыми отчётами. `InterfaceConfig` и `DesiredAdminState` описывают intent интерфейса отдельно от наблюдаемого `Interface`; нативная настройка интерфейсов всё ещё остаётся целью 0.16. Нативный мониторинг событий реализован в `net-lattice-backend-linux`,
 `net-lattice-backend-windows`, `net-lattice-backend-darwin`, crate потока
 событий `net-lattice-async` и feature-gated async-фасад — всё, что описано
 дальше этого этапа, по-прежнему только цель, а не текущее состояние.
