@@ -2021,6 +2021,61 @@ mod tests {
     }
 
     #[test]
+    fn pf_route_ipv6_interface_address_messages_preserve_identity_and_events() {
+        fn message(message_type: u8) -> (Vec<libc::c_long>, usize) {
+            let header_size = mem::size_of::<libc::ifa_msghdr>();
+            let address = "2001:db8:0:16::7".parse().expect("IPv6 address");
+            let total = header_size
+                + mem::size_of::<libc::sockaddr_in6>()
+                + mem::size_of::<libc::sockaddr_in6>();
+            let mut storage =
+                vec![0 as libc::c_long; total.div_ceil(mem::size_of::<libc::c_long>())];
+            let bytes = storage.as_mut_ptr().cast::<u8>();
+            let header = libc::ifa_msghdr {
+                ifam_msglen: total as libc::c_ushort,
+                ifam_version: RTM_VERSION,
+                ifam_type: message_type,
+                ifam_addrs: RTA_IFA | RTA_NETMASK,
+                ifam_flags: 0,
+                ifam_index: 7,
+                ifam_metric: 0,
+            };
+            unsafe {
+                std::ptr::write(bytes.cast::<libc::ifa_msghdr>(), header);
+            }
+            let mut offset = header_size;
+            offset += push_sockaddr(
+                unsafe { std::slice::from_raw_parts_mut(bytes, total) },
+                offset,
+                IpAddr::V6(address),
+            );
+            offset += push_netmask(
+                unsafe { std::slice::from_raw_parts_mut(bytes, total) },
+                offset,
+                IpAddr::V6(address),
+                64,
+            );
+            (storage, offset)
+        }
+
+        let (add, add_len) = message(libc::RTM_NEWADDR as u8);
+        let add_bytes = add.as_ptr().cast::<u8>();
+        let header = unsafe { &*add_bytes.cast::<libc::ifa_msghdr>() };
+        let id = unsafe { message_to_interface_address_id(header) }
+            .expect("IPv6 address message has an identity");
+        assert!(matches!(
+            unsafe { route_socket_message_to_event(add_bytes, add_len) },
+            Some(Event::Address { id: observed, kind: ChangeKind::Changed }) if observed == id
+        ));
+
+        let (delete, delete_len) = message(libc::RTM_DELADDR as u8);
+        assert!(matches!(
+            unsafe { route_socket_message_to_event(delete.as_ptr().cast(), delete_len) },
+            Some(Event::Address { id: observed, kind: ChangeKind::Removed }) if observed == id
+        ));
+    }
+
+    #[test]
     fn darwin_scalar_mappings_cover_error_masks_interface_and_neighbor_states() {
         assert!(matches!(
             route_socket_error(&io::Error::from_raw_os_error(libc::EPERM)),

@@ -1240,6 +1240,26 @@ mod tests {
             observed.broadcast,
             Some(IpAddress::from(Ipv4Address::new(192, 0, 2, 255)))
         );
+
+        let mut ipv6_address = AddressMessage::default();
+        ipv6_address.header.index = 7;
+        ipv6_address.header.prefix_len = 64;
+        ipv6_address
+            .attributes
+            .push(AddressAttribute::Address(IpAddr::V6(
+                "2001:db8:0:16::7".parse().expect("IPv6 address"),
+            )));
+        let observed =
+            message_to_interface_address(&ipv6_address).expect("valid IPv6 address message");
+        assert_eq!(observed.interface_index, 7);
+        assert_eq!(
+            observed.address,
+            Network::from(net_lattice_ip::Ipv6Network::new(
+                net_lattice_ip::Ipv6Address::new([0x2001, 0xdb8, 0, 0x16, 0, 0, 0, 7]),
+                net_lattice_ip::Ipv6PrefixLength::new(64).expect("valid IPv6 prefix"),
+            ))
+        );
+        assert!(observed.broadcast.is_none());
         assert!(message_to_interface_address(&AddressMessage::default()).is_none());
 
         let route = RouteMessageBuilder::<std::net::Ipv4Addr>::new()
@@ -1488,6 +1508,26 @@ mod tests {
                 kind: ChangeKind::Removed,
                 ..
             })
+        ));
+
+        let mut ipv6_address = AddressMessage::default();
+        ipv6_address.header.index = 7;
+        ipv6_address.header.prefix_len = 64;
+        ipv6_address
+            .attributes
+            .push(AddressAttribute::Address(IpAddr::V6(
+                "2001:db8:0:16::7".parse().expect("IPv6 address"),
+            )));
+        let ipv6_id = message_to_interface_address(&ipv6_address)
+            .expect("valid IPv6 address event fixture")
+            .id;
+        assert!(matches!(
+            route_netlink_message_to_event(RouteNetlinkMessage::NewAddress(ipv6_address.clone())),
+            Some(Event::Address { id, kind: ChangeKind::Changed }) if id == ipv6_id
+        ));
+        assert!(matches!(
+            route_netlink_message_to_event(RouteNetlinkMessage::DelAddress(ipv6_address)),
+            Some(Event::Address { id, kind: ChangeKind::Removed }) if id == ipv6_id
         ));
 
         let mut neighbor = NeighbourMessage::default();

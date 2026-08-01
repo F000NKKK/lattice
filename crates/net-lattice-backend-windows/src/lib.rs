@@ -1667,6 +1667,48 @@ mod tests {
     }
 
     #[test]
+    fn ip_helper_ipv6_unicast_row_and_callbacks_preserve_address_identity() {
+        let network = Network::from(net_lattice_ip::Ipv6Network::new(
+            net_lattice_ip::Ipv6Address::new([0x2001, 0xdb8, 0, 0x16, 0, 0, 0, 7]),
+            net_lattice_ip::Ipv6PrefixLength::new(64).expect("valid IPv6 prefix"),
+        ));
+        let request = NewInterfaceAddress::new(Id::new(7), network);
+        let row = build_unicast_address_row(&request);
+        assert_eq!(unsafe { row.Address.si_family }, AF_INET6);
+        assert_eq!(row.InterfaceIndex, 7);
+        assert_eq!(row.OnLinkPrefixLength, 64);
+
+        let observed = row_to_interface_address(&row).expect("valid IPv6 unicast row");
+        assert_eq!(observed.interface_index, 7);
+        assert_eq!(observed.address, network);
+        assert!(observed.broadcast.is_none());
+
+        let (sender, receiver) = EventReceiver::bounded();
+        let state = WindowsWatchState {
+            sender,
+            filter: EventFilter::none().address(observed.id),
+        };
+        unsafe {
+            address_change_callback((&raw const state).cast(), &raw const row, MibAddInstance);
+            address_change_callback((&raw const state).cast(), &raw const row, MibDeleteInstance);
+        }
+        assert_eq!(
+            receiver.try_recv().expect("add callback succeeded"),
+            Some(Event::Address {
+                id: observed.id,
+                kind: ChangeKind::Added,
+            })
+        );
+        assert_eq!(
+            receiver.try_recv().expect("delete callback succeeded"),
+            Some(Event::Address {
+                id: observed.id,
+                kind: ChangeKind::Removed,
+            })
+        );
+    }
+
+    #[test]
     fn ip_helper_kind_and_state_mappings_cover_supported_values() {
         assert_eq!(
             if_type_to_kind(IF_TYPE_SOFTWARE_LOOPBACK),
