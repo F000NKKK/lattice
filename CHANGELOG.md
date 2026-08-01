@@ -9,6 +9,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 No unreleased changes.
 
+## [0.16.0] - 2026-08-01
+
+### Added
+
+- Stage 0.16 interface configuration: `InterfaceConfig` partial desired
+  patches and `DesiredAdminState`, explicitly separate from observed
+  `Interface` state.
+- `InterfaceMutator`, `Lattice::set_interface_config`,
+  `Mutation::SetInterfaceConfig`, and `MutationSnapshot::Interface`, with
+  independent `INTERFACE_ADMIN_STATE` and `INTERFACE_MTU` runtime capabilities.
+- Native read-after-write interface configuration on Linux (Netlink link
+  changes), Windows (IP Helper admin and per-family IP-interface MTU APIs),
+  and macOS (BSD MTU/flags ioctls).
+- A capability-gated `interface_configuration` example, deterministic native
+  request/event fixtures, and ignored privileged submission/readback tests
+  that restore their selected interface state.
+
+### Changed
+
+- A combined administrative-state and MTU patch is explicitly reported as
+  potentially partially applied; callers retain control of compensation via
+  Stage 0.15 `ExecutionOptions`.
+
+### Documentation
+
+- Document the interface configuration contract, platform capability gates,
+  native event mappings, and the shared-runner limitation for destructive
+  end-to-end interface-event testing in English and Russian project docs.
+
 ## [0.15.2] - 2026-08-01
 
 ### Added

@@ -3,13 +3,13 @@
 ## Supported Versions
 
 Net Lattice follows a rolling support policy. Security fixes are provided only
-for the latest stable release series. The current supported line is 0.15.x;
-support for the 0.1.x-0.14.x series has ended.
+for the latest stable release series. The current supported line is 0.16.x;
+support for the 0.1.x-0.15.x series has ended.
 
 | Version | Supported |
 | ------- | --------- |
-| 0.15.x | ✅ |
-| 0.1.x - 0.14.x | ❌ |
+| 0.16.x | ✅ |
+| 0.1.x - 0.15.x | ❌ |
 
 ## Reporting a Vulnerability
 
@@ -31,7 +31,7 @@ informed as the issue is investigated and resolved.
 
 ## Scope
 
-Net Lattice has completed Stage 0.15 of its [architecture](ARCHITECTURE.md)'s
+Net Lattice has completed Stage 0.16 of its [architecture](ARCHITECTURE.md)'s
 Incremental Delivery Plan: route inspection and mutation, interface
 inspection, DNS resolver inspection and mutation, neighbor inspection, and
 interface-address inspection and mutation on Linux
@@ -51,9 +51,10 @@ preflight, operation-boundary cancellation, typed prior-state snapshots,
 phase/timing reports, and explicit reverse-order compensation. The executor
 never infers inverse operations or elevates privileges on the caller's behalf.
 
-Route, interface-address, and DNS-mutation operations are privileged (see
-[ARCHITECTURE.md](ARCHITECTURE.md)'s Privilege Model). Reports involving
-unintended network mutation, partial DNS application, privilege confusion, or
+Route, interface-address, DNS, and interface-configuration operations are
+privileged (see [ARCHITECTURE.md](ARCHITECTURE.md)'s Privilege Model). Reports
+involving unintended network mutation, partial DNS or interface-configuration
+application, privilege confusion, or
 memory-safety issues in route, interface, DNS, neighbor, address, or
 monitoring message/data handling are in scope. Firewall, VLAN, VRF,
 namespace, and tunnel domains do not exist yet.
