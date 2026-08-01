@@ -2479,16 +2479,16 @@ mod tests {
             config.nameservers,
             vec![
                 IpAddress::from(Ipv4Address::new(1, 1, 1, 1)),
-                IpAddress::from(
+                IpAddress::from(net_lattice_ip::Ipv6Address::from(
                     "2606:4700:4700::1111"
                         .parse::<std::net::Ipv6Addr>()
-                        .unwrap()
-                ),
-                IpAddress::from(
+                        .unwrap(),
+                )),
+                IpAddress::from(net_lattice_ip::Ipv6Address::from(
                     "2001:4860:4860::8888"
                         .parse::<std::net::Ipv6Addr>()
-                        .unwrap()
-                ),
+                        .unwrap(),
+                )),
             ]
         );
         assert_eq!(
@@ -2502,16 +2502,16 @@ mod tests {
         let config = NewDnsConfig::with(
             vec![
                 IpAddress::from(Ipv4Address::new(1, 1, 1, 1)),
-                IpAddress::from(
+                IpAddress::from(net_lattice_ip::Ipv6Address::from(
                     "2606:4700:4700::1111"
                         .parse::<std::net::Ipv6Addr>()
                         .unwrap(),
-                ),
-                IpAddress::from(
+                )),
+                IpAddress::from(net_lattice_ip::Ipv6Address::from(
                     "2001:4860:4860::8888"
                         .parse::<std::net::Ipv6Addr>()
                         .unwrap(),
-                ),
+                )),
                 IpAddress::from(Ipv4Address::new(8, 8, 8, 8)),
             ],
             vec!["example.test".to_string(), "corp.test".to_string()],
