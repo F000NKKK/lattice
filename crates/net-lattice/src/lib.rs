@@ -1146,6 +1146,44 @@ mod tests {
     }
 
     #[test]
+    fn facade_executes_mixed_family_dns_plan_without_host_writes() {
+        let lattice = lattice(Capability::DNS_MUTATION);
+        let config = NewDnsConfig::with(
+            vec![
+                IpAddress::from(Ipv4Address::new(1, 1, 1, 1)),
+                IpAddress::from(Ipv6Address::new([
+                    0x2606, 0x4700, 0x4700, 0, 0, 0, 0, 0x1111,
+                ])),
+            ],
+            vec!["example.test".to_string()],
+        );
+        let plan = MutationPlan::from_operations([
+            Mutation::SetDnsConfig(config.clone()),
+            Mutation::SetDnsConfig(config),
+        ]);
+
+        lattice
+            .validate_plan(&plan)
+            .expect("DNS capability and plan");
+        assert!(matches!(
+            lattice.snapshot_for_mutation(plan.operation(0).unwrap()),
+            Ok(MutationSnapshot::Dns(_))
+        ));
+
+        let mut cancellation = |index, _: &Mutation| index == 1;
+        let mut options = ExecutionOptions::default().cancellation(&mut cancellation);
+        let report = lattice.execute_plan(&plan, &mut options);
+
+        assert!(matches!(report.outcome(0), Some(MutationOutcome::Applied)));
+        assert!(matches!(
+            report.outcome(1),
+            Some(MutationOutcome::NotAttempted)
+        ));
+        assert_eq!(report.applied_count(), 1);
+        assert_eq!(report.not_attempted_count(), 1);
+    }
+
+    #[test]
     fn facade_rejects_unsupported_capability_before_submitting_a_plan() {
         let lattice = lattice(Capability::empty());
         let plan = MutationPlan::from_operations([
