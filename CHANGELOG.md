@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Lattice::validate_plan` performs side-effect-free runtime capability
   preflight; execution rejects unsupported DNS mutation before submitting any
   operation.
+- `Lattice::execute_plan_with_snapshot` captures caller-defined prior state at
+  operation boundaries and supplies it to reverse-order compensation.
 
 ## [0.14.1] - 2026-08-01
 
