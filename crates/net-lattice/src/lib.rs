@@ -980,7 +980,7 @@ mod tests {
             Mutation::AddRoute(route.clone()),
         ]);
 
-        let mut snapshot = |_, operation| lattice.snapshot_for_mutation(operation);
+        let mut snapshot = |_, operation: Mutation| lattice.snapshot_for_mutation(&operation);
         let mut compensate = |_, operation: Mutation, _| match operation {
             Mutation::AddRoute(route) => lattice.remove_route(route.clone()),
             _ => Ok(()),
@@ -1008,7 +1008,7 @@ mod tests {
         let mut compensated = Vec::new();
 
         let mut cancelled = |index, _: Mutation| index == 1;
-        let mut compensate = |index, _, _| {
+        let mut compensate = |index, _: Mutation, _: Option<MutationSnapshot>| {
             compensated.push(index);
             Ok(())
         };
@@ -1060,7 +1060,7 @@ mod tests {
         ]);
 
         let mut cancelled = |index, _: Mutation| index == 1;
-        let mut compensate = |_, _, _| Err(Error::InvalidState);
+        let mut compensate = |_, _: Mutation, _: Option<MutationSnapshot>| Err(Error::InvalidState);
         let mut options = ExecutionOptions::default()
             .cancellation(&mut cancelled)
             .compensation(&mut compensate);
