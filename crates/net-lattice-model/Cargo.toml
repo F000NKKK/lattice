@@ -10,6 +10,7 @@ documentation.workspace = true
 categories.workspace = true
 keywords.workspace = true
 description = "The domain model of operating system networking state (routes, interfaces, DNS, ...), with no operating-system dependency."
+readme.workspace = true
 
 [dependencies]
 net-lattice-core = { workspace = true }

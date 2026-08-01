@@ -10,5 +10,6 @@ documentation.workspace = true
 categories.workspace = true
 keywords.workspace = true
 description = "Typed IPv4/IPv6 address and network primitives, with no operating-system dependency."
+readme.workspace = true
 
 [dependencies]

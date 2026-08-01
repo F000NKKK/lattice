@@ -7,3 +7,8 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+.ai/
+.agents/
+.codex/
+**/AGENTS.md
+index.md

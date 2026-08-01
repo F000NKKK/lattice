@@ -10,5 +10,6 @@ documentation.workspace = true
 categories.workspace = true
 keywords.workspace = true
 description = "Foundational error, ID, and result types shared across the Net Lattice workspace. No OS dependency, no networking-specific types."
+readme.workspace = true
 
 [dependencies]

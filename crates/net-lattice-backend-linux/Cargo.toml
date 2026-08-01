@@ -10,6 +10,7 @@ documentation.workspace = true
 categories.workspace = true
 keywords.workspace = true
 description = "Linux backend for Net Lattice: implements net-lattice-platform's provider traits via Netlink."
+readme.workspace = true
 
 [features]
 async = ["net-lattice-platform/async"]

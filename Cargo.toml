@@ -12,6 +12,7 @@ documentation = "https://docs.rs/net-lattice"
 authors = ["Net Lattice Contributors", "F000NK"]
 categories = ["network-programming", "os"]
 keywords = ["networking", "netlink", "cross-platform", "systems", "os"]
+readme = "README.md"
 
 # Single source of truth for every internal crate's version + path. Member
 # crates reference these as `net-lattice-foo = { workspace = true }` instead
