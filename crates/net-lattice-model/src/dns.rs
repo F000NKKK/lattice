@@ -117,9 +117,20 @@ mod tests {
         );
 
         assert_eq!(config.nameservers.len(), 3);
-        assert!(matches!(config.nameservers[0], IpAddress::V4(_)));
-        assert!(matches!(config.nameservers[1], IpAddress::V6(_)));
-        assert!(matches!(config.nameservers[2], IpAddress::V4(_)));
+        assert_eq!(
+            config.nameservers[0],
+            IpAddress::from(Ipv4Address::new(1, 1, 1, 1))
+        );
+        assert_eq!(
+            config.nameservers[1],
+            IpAddress::from(Ipv6Address::new([
+                0x2606, 0x4700, 0x4700, 0, 0, 0, 0, 0x1111,
+            ]))
+        );
+        assert_eq!(
+            config.nameservers[2],
+            IpAddress::from(Ipv4Address::new(8, 8, 8, 8))
+        );
         assert_eq!(config.search_domains, ["example.test"]);
     }
 }
