@@ -9,9 +9,12 @@ use net_lattice_model::{
     Mutation, MutationOutcome, MutationPlan, MutationPlanReport, MutationSnapshot, RollbackStatus,
 };
 
-type Cancellation<'a> = &'a mut dyn FnMut(usize, &Mutation) -> bool;
-type Snapshot<'a> = &'a mut dyn FnMut(usize, &Mutation) -> Result<MutationSnapshot>;
-type Compensation<'a> =
+/// Borrowed operation-boundary cancellation callback.
+pub type Cancellation<'a> = &'a mut dyn FnMut(usize, &Mutation) -> bool;
+/// Borrowed callback used to capture typed prior state.
+pub type Snapshot<'a> = &'a mut dyn FnMut(usize, &Mutation) -> Result<MutationSnapshot>;
+/// Borrowed callback used for explicit reverse-order compensation.
+pub type Compensation<'a> =
     &'a mut dyn FnMut(usize, &Mutation, Option<&MutationSnapshot>) -> Result<()>;
 
 /// Options controlling one ordered plan execution.
@@ -32,25 +35,19 @@ impl<'a> ExecutionOptions<'a> {
     }
 
     /// Installs an operation-boundary cancellation hook.
-    pub fn cancellation(mut self, callback: &'a mut dyn FnMut(usize, &Mutation) -> bool) -> Self {
+    pub fn cancellation(mut self, callback: Cancellation<'a>) -> Self {
         self.cancellation = Some(callback);
         self
     }
 
     /// Installs a typed prior-state capture hook.
-    pub fn snapshot(
-        mut self,
-        callback: &'a mut dyn FnMut(usize, &Mutation) -> Result<MutationSnapshot>,
-    ) -> Self {
+    pub fn snapshot(mut self, callback: Snapshot<'a>) -> Self {
         self.snapshot = Some(callback);
         self
     }
 
     /// Installs explicit reverse-order compensation.
-    pub fn compensation(
-        mut self,
-        callback: &'a mut dyn FnMut(usize, &Mutation, Option<&MutationSnapshot>) -> Result<()>,
-    ) -> Self {
+    pub fn compensation(mut self, callback: Compensation<'a>) -> Self {
         self.compensation = Some(callback);
         self
     }
