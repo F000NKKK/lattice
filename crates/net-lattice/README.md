@@ -8,6 +8,7 @@ Rust API. This is the application-facing Net Lattice crate.
 - automatic native backend selection on Linux, Windows, and macOS;
 - inspection of interfaces, addresses, routes, neighbors, and DNS;
 - imperative route, address, and resolver mutation;
+- partial interface MTU and administrative-state configuration;
 - filtered native change monitoring;
 - ordered `MutationPlan` execution with runtime validation, cancellation,
   snapshots, explicit compensation, and per-operation reports.
@@ -36,6 +37,35 @@ fn main() -> Result<()> {
 state, and perform explicit compensation without multiplying facade methods.
 The returned report preserves plan indices and distinguishes validation,
 snapshot, execution, cancellation, and compensation boundaries.
+
+## Interface configuration
+
+`InterfaceConfig` is desired intent, distinct from the observed `Interface`.
+Build a patch with at least one requested setting, check the matching runtime
+capabilities, then submit it. A successful call returns an observed interface
+read after the native update.
+
+```rust,no_run
+use net_lattice::{Capability, DesiredAdminState, InterfaceConfig, InterfaceId, Lattice, Result};
+
+fn main() -> Result<()> {
+    let lattice = Lattice::connect()?;
+    if lattice.supports(Capability::INTERFACE_ADMIN_STATE) {
+        let config = InterfaceConfig::new(
+            InterfaceId::new(7),
+            Some(DesiredAdminState::Up),
+            None,
+        )?;
+        let observed = lattice.set_interface_config(config)?;
+        println!("{observed:?}");
+    }
+    Ok(())
+}
+```
+
+When one patch asks for both MTU and administrative state, a native backend
+may use separate writes. Treat errors as potentially partially applied and use
+an explicit `MutationPlan` compensator if restoration is needed.
 
 ## Platform and privilege notes
 

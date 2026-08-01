@@ -7,7 +7,7 @@ It implements native inspection, mutation, and monitoring behind the generic
 ## What it provides
 
 - interface, address, route, neighbor, and resolver inspection;
-- route, address, and resolver mutation;
+- route, address, resolver, and interface MTU/administrative-state mutation;
 - Netlink change subscriptions and optional native async delivery;
 - translation of native errors and state into portable Net Lattice types.
 
@@ -31,7 +31,11 @@ fn main() -> net_lattice_core::Result<()> {
 
 ## Privileges and safety
 
-Read-only operations generally require no elevated privilege. Mutations need
-the relevant Linux networking capabilities; resolver replacement also depends
-on filesystem permissions and the host resolver manager. Privileged tests are
-ignored in ordinary test runs and must restore any state they change.
+Read-only operations generally require no elevated privilege. Interface,
+address, and route changes require `CAP_NET_ADMIN`; resolver replacement also
+depends on filesystem permissions and the host resolver manager. An interface
+configuration request may carry MTU and administrative-state changes together,
+which Linux can reject after applying one field, so callers must re-read state
+after an error and use explicit transaction compensation if restoration is
+required. Privileged tests are ignored in ordinary test runs and restore the
+observed interface configuration on every exit path.
