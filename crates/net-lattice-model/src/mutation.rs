@@ -44,8 +44,8 @@ pub enum Mutation {
 /// Observed state captured immediately before a mutation is submitted.
 ///
 /// The snapshot is intentionally scoped to the mutation's domain. `None`
-/// means that no matching route or interface address was observed; it is not
-/// a promise that the object cannot appear concurrently.
+/// means that no matching route, interface address, or interface was
+/// observed; it is not a promise that the object cannot appear concurrently.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum MutationSnapshot {
