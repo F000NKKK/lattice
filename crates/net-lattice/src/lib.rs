@@ -178,6 +178,9 @@ impl<B: LatticeBackend> Lattice<B> {
     /// privilege and current-state checks can still fail at execution time.
     pub fn validate_plan(&self, plan: &MutationPlan) -> Result<()> {
         let mut planned_routes = Vec::new();
+        let mut removed_routes = Vec::new();
+        let mut planned_addresses = Vec::new();
+        let mut removed_addresses = Vec::new();
         for operation in plan.operations() {
             if executor::requires_dns_capability(operation)
                 && !self.supports(Capability::DNS_MUTATION)
@@ -187,10 +190,14 @@ impl<B: LatticeBackend> Lattice<B> {
 
             match operation {
                 Mutation::AddRoute(route) => {
-                    let exists = self
+                    let exists_in_system = self
                         .routes()?
                         .iter()
                         .any(|candidate| Self::same_route(candidate, route))
+                        && !removed_routes
+                            .iter()
+                            .any(|candidate| Self::same_route(candidate, route));
+                    let exists = exists_in_system
                         || planned_routes
                             .iter()
                             .any(|candidate| Self::same_route(candidate, route));
@@ -198,12 +205,17 @@ impl<B: LatticeBackend> Lattice<B> {
                         return Err(Error::AlreadyExists);
                     }
                     planned_routes.push(route.clone());
+                    removed_routes.retain(|candidate| !Self::same_route(candidate, route));
                 }
                 Mutation::RemoveRoute(route) => {
-                    let exists = self
+                    let exists_in_system = self
                         .routes()?
                         .iter()
                         .any(|candidate| Self::same_route(candidate, route))
+                        && !removed_routes
+                            .iter()
+                            .any(|candidate| Self::same_route(candidate, route));
+                    let exists = exists_in_system
                         || planned_routes
                             .iter()
                             .any(|candidate| Self::same_route(candidate, route));
@@ -211,6 +223,7 @@ impl<B: LatticeBackend> Lattice<B> {
                         return Err(Error::NotFound);
                     }
                     planned_routes.retain(|candidate| !Self::same_route(candidate, route));
+                    removed_routes.push(route.clone());
                 }
                 Mutation::AddAddress(address) => {
                     let interface_index = address.interface_id.value() as u32;
@@ -219,21 +232,35 @@ impl<B: LatticeBackend> Lattice<B> {
                     }) {
                         return Err(Error::NotFound);
                     }
-                    if self.addresses()?.iter().any(|candidate| {
-                        candidate.interface_index == interface_index
-                            && candidate.address == address.address
-                    }) {
+                    let key = (interface_index, address.address.clone());
+                    let exists_in_system =
+                        self.addresses()?.iter().any(|candidate| {
+                            candidate.interface_index == interface_index
+                                && candidate.address == address.address
+                        }) && !removed_addresses.iter().any(|candidate| candidate == &key);
+                    if exists_in_system
+                        || planned_addresses.iter().any(|candidate| candidate == &key)
+                    {
                         return Err(Error::AlreadyExists);
                     }
+                    planned_addresses.push(key.clone());
+                    removed_addresses.retain(|candidate| candidate != &key);
                 }
                 Mutation::RemoveAddress(address) => {
-                    if !self.addresses()?.iter().any(|candidate| {
-                        candidate.id == address.id
-                            || (candidate.interface_index == address.interface_index
-                                && candidate.address == address.address)
-                    }) {
+                    let key = (address.interface_index, address.address.clone());
+                    let exists_in_system =
+                        self.addresses()?.iter().any(|candidate| {
+                            candidate.id == address.id
+                                || (candidate.interface_index == address.interface_index
+                                    && candidate.address == address.address)
+                        }) && !removed_addresses.iter().any(|candidate| candidate == &key);
+                    if !exists_in_system
+                        && !planned_addresses.iter().any(|candidate| candidate == &key)
+                    {
                         return Err(Error::NotFound);
                     }
+                    planned_addresses.retain(|candidate| candidate != &key);
+                    removed_addresses.push(key);
                 }
                 Mutation::SetDnsConfig(_) => {}
                 _ => return Err(Error::Unsupported),
