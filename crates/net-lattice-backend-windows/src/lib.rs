@@ -1615,6 +1615,26 @@ mod tests {
         assert_eq!(observed.interface_index, 7);
         assert_eq!(observed.state, NeighborState::Reachable);
         assert_eq!(observed.mac, Some(MacAddress::new([5, 4, 3, 2, 1, 0])));
+
+        let mut ipv6_neighbor = MIB_IPNET_ROW2 {
+            InterfaceIndex: 7,
+            Address: ip_to_sockaddr_inet(IpAddr::V6(
+                "2001:db8:0:16::1".parse().expect("valid IPv6 NDP address"),
+            )),
+            State: NlnsReachable,
+            PhysicalAddressLength: 6,
+            ..Default::default()
+        };
+        ipv6_neighbor.PhysicalAddress[..6].copy_from_slice(&[2, 0, 0, 0, 0, 0x16]);
+        let observed = row_to_neighbor(&ipv6_neighbor).expect("valid IPv6 neighbor row");
+        let expected_address = IpAddress::from(net_lattice_ip::Ipv6Address::new([
+            0x2001, 0xdb8, 0, 0x16, 0, 0, 0, 1,
+        ]));
+        assert_eq!(observed.interface_index, 7);
+        assert_eq!(observed.address, expected_address);
+        assert_eq!(observed.state, NeighborState::Reachable);
+        assert_eq!(observed.mac, Some(MacAddress::new([2, 0, 0, 0, 0, 0x16])));
+        assert_eq!(observed.id, synthesize_neighbor_id(7, &expected_address));
     }
 
     #[test]

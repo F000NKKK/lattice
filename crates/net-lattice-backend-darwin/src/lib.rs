@@ -2092,6 +2092,79 @@ mod tests {
     }
 
     #[test]
+    fn pf_route_ipv6_neighbor_messages_preserve_identity_and_events() {
+        fn message(message_type: u8) -> (Vec<libc::c_long>, usize) {
+            let header_size = mem::size_of::<libc::rt_msghdr>();
+            let destination: std::net::Ipv6Addr =
+                "2001:db8:0:16::1".parse().expect("valid IPv6 NDP address");
+            let gateway_len = (8 + 6 + 3) & !3;
+            let total = header_size + mem::size_of::<libc::sockaddr_in6>() + gateway_len;
+            let mut storage =
+                vec![0 as libc::c_long; total.div_ceil(mem::size_of::<libc::c_long>())];
+            let bytes = storage.as_mut_ptr().cast::<u8>();
+
+            let mut header: libc::rt_msghdr = unsafe { mem::zeroed() };
+            header.rtm_msglen = total as u16;
+            header.rtm_version = RTM_VERSION;
+            header.rtm_type = message_type;
+            header.rtm_index = 7;
+            header.rtm_flags = libc::RTF_LLINFO;
+            header.rtm_addrs = RTA_DST | RTA_GATEWAY;
+            unsafe { bytes.cast::<libc::rt_msghdr>().write(header) };
+
+            let mut offset = header_size;
+            offset += push_sockaddr(
+                unsafe { std::slice::from_raw_parts_mut(bytes, total) },
+                offset,
+                IpAddr::V6(destination),
+            );
+
+            let mut gateway: libc::sockaddr_dl = unsafe { mem::zeroed() };
+            gateway.sdl_len = 14;
+            gateway.sdl_family = libc::AF_LINK as u8;
+            gateway.sdl_index = 7;
+            gateway.sdl_alen = 6;
+            gateway.sdl_data[..6].copy_from_slice(&[2, 0, 0, 0, 0, 0x16]);
+            unsafe { bytes.add(offset).cast::<libc::sockaddr_dl>().write(gateway) };
+            offset += gateway_len;
+
+            assert_eq!(offset, total);
+            (storage, total)
+        }
+
+        let expected_address = IpAddress::from(net_lattice_ip::Ipv6Address::new([
+            0x2001, 0xdb8, 0, 0x16, 0, 0, 0, 1,
+        ]));
+        let expected_id = synthesize_neighbor_id(7, &expected_address);
+
+        let (add, add_len) = message(RTM_ADD);
+        let add_header = unsafe { &*add.as_ptr().cast::<libc::rt_msghdr>() };
+        let observed = unsafe { message_to_neighbor(add_header) }
+            .expect("IPv6 PF_ROUTE NDP message has an observed neighbor");
+        assert_eq!(observed.id, expected_id);
+        assert_eq!(observed.interface_index, 7);
+        assert_eq!(observed.address, expected_address);
+        assert_eq!(observed.mac, Some(MacAddress::new([2, 0, 0, 0, 0, 0x16])));
+        assert_eq!(observed.state, NeighborState::Reachable);
+        assert!(matches!(
+            unsafe { route_socket_message_to_event(add.as_ptr().cast(), add_len) },
+            Some(Event::Neighbor {
+                id,
+                kind: ChangeKind::Changed,
+            }) if id == expected_id
+        ));
+
+        let (delete, delete_len) = message(RTM_DELETE);
+        assert!(matches!(
+            unsafe { route_socket_message_to_event(delete.as_ptr().cast(), delete_len) },
+            Some(Event::Neighbor {
+                id,
+                kind: ChangeKind::Removed,
+            }) if id == expected_id
+        ));
+    }
+
+    #[test]
     fn darwin_scalar_mappings_cover_error_masks_interface_and_neighbor_states() {
         assert!(matches!(
             route_socket_error(&io::Error::from_raw_os_error(libc::EPERM)),

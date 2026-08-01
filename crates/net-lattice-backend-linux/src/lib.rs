@@ -1316,6 +1316,31 @@ mod tests {
         assert_eq!(observed.state, NeighborState::Reachable);
         assert_eq!(observed.mac, Some(MacAddress::new([0, 1, 2, 3, 4, 5])));
         assert!(message_to_neighbor(&NeighbourMessage::default()).is_none());
+
+        let mut ipv6_neighbor = NeighbourMessage::default();
+        ipv6_neighbor.header.ifindex = 7;
+        ipv6_neighbor.header.state = RtNeighbourState::Reachable;
+        ipv6_neighbor.attributes = vec![
+            NeighbourAttribute::Destination(NeighbourAddress::Inet6(
+                "2001:db8:0:16::1".parse().expect("valid IPv6 NDP address"),
+            )),
+            NeighbourAttribute::LinkLayerAddress(vec![2, 0, 0, 0, 0, 0x16]),
+        ];
+        let observed = message_to_neighbor(&ipv6_neighbor).expect("valid IPv6 neighbour");
+        assert_eq!(observed.interface_index, 7);
+        assert_eq!(
+            observed.address,
+            IpAddress::from(net_lattice_ip::Ipv6Address::new([
+                0x2001, 0xdb8, 0, 0x16, 0, 0, 0, 1,
+            ]))
+        );
+        assert_eq!(observed.state, NeighborState::Reachable);
+        assert_eq!(observed.mac, Some(MacAddress::new([2, 0, 0, 0, 0, 0x16])));
+        assert_eq!(
+            observed.id,
+            synthesize_neighbor_id(7, &observed.address),
+            "IPv6 neighbor identity uses the same interface/address key"
+        );
     }
 
     #[test]
@@ -1551,6 +1576,33 @@ mod tests {
                 kind: ChangeKind::Removed,
                 ..
             })
+        ));
+
+        let mut ipv6_neighbor = NeighbourMessage::default();
+        ipv6_neighbor.header.ifindex = 7;
+        ipv6_neighbor.header.state = RtNeighbourState::Reachable;
+        ipv6_neighbor.attributes = vec![
+            NeighbourAttribute::Destination(NeighbourAddress::Inet6(
+                "2001:db8:0:16::1".parse().expect("valid IPv6 NDP address"),
+            )),
+            NeighbourAttribute::LinkLayerAddress(vec![2, 0, 0, 0, 0, 0x16]),
+        ];
+        let ipv6_id = message_to_neighbor(&ipv6_neighbor)
+            .expect("valid IPv6 neighbor event fixture")
+            .id;
+        assert!(matches!(
+            route_netlink_message_to_event(RouteNetlinkMessage::NewNeighbour(ipv6_neighbor.clone())),
+            Some(Event::Neighbor {
+                id,
+                kind: ChangeKind::Changed,
+            }) if id == ipv6_id
+        ));
+        assert!(matches!(
+            route_netlink_message_to_event(RouteNetlinkMessage::DelNeighbour(ipv6_neighbor)),
+            Some(Event::Neighbor {
+                id,
+                kind: ChangeKind::Removed,
+            }) if id == ipv6_id
         ));
     }
 
