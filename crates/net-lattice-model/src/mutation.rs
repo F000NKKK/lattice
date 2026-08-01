@@ -5,6 +5,7 @@
 //! [`MutationPlan`] only after the caller has inspected each operation's
 //! preconditions and limits.
 
+use crate::dns::DnsConfig;
 use crate::dns::NewDnsConfig;
 use crate::ifaddr::{InterfaceAddress, NewInterfaceAddress};
 use crate::route::Route;
@@ -29,6 +30,22 @@ pub enum Mutation {
     RemoveAddress(InterfaceAddress),
     /// Replaces the portable resolver configuration.
     SetDnsConfig(NewDnsConfig),
+}
+
+/// Observed state captured immediately before a mutation is submitted.
+///
+/// The snapshot is intentionally scoped to the mutation's domain. `None`
+/// means that no matching route or interface address was observed; it is not
+/// a promise that the object cannot appear concurrently.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum MutationSnapshot {
+    /// The matching route, if one was observed.
+    Route(Option<Route>),
+    /// The matching interface address, if one was observed.
+    InterfaceAddress(Option<InterfaceAddress>),
+    /// The resolver view observed before replacement.
+    Dns(DnsConfig),
 }
 
 /// The broad effect an operation requests.

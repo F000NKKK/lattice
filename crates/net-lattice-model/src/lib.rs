@@ -23,7 +23,7 @@ pub use mac::MacAddress;
 pub use mutation::{
     Mutation, MutationConfirmation, MutationIdempotency, MutationKind, MutationOutcome,
     MutationPlan, MutationPlanReport, MutationPrecondition, MutationPreflight, MutationPrivilege,
-    MutationReversibility, MutationSemantics, RollbackStatus,
+    MutationReversibility, MutationSemantics, MutationSnapshot, RollbackStatus,
 };
 pub use neighbor::{NeighborEntry, NeighborId, NeighborState};
 pub use route::Route;

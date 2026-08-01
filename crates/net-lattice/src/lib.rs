@@ -45,7 +45,7 @@ pub use net_lattice_model::mac::MacAddress;
 pub use net_lattice_model::mutation::{
     Mutation, MutationConfirmation, MutationIdempotency, MutationKind, MutationOutcome,
     MutationPlan, MutationPlanReport, MutationPrecondition, MutationPreflight, MutationPrivilege,
-    MutationReversibility, MutationSemantics, RollbackStatus,
+    MutationReversibility, MutationSemantics, MutationSnapshot, RollbackStatus,
 };
 pub use net_lattice_model::neighbor::{NeighborEntry, NeighborId, NeighborState};
 pub use net_lattice_model::route::{Route, RouteId};
@@ -184,6 +184,38 @@ impl<B: LatticeBackend> Lattice<B> {
             }
         }
         Ok(())
+    }
+
+    /// Captures the currently observed state relevant to one mutation.
+    ///
+    /// This performs only provider reads and is safe to call before an
+    /// operation. The returned value is a point-in-time observation; callers
+    /// must still handle concurrent changes before compensation.
+    pub fn snapshot_for_mutation(&self, operation: &Mutation) -> Result<MutationSnapshot> {
+        match operation {
+            Mutation::AddRoute(route) | Mutation::RemoveRoute(route) => {
+                let observed = self.routes()?.into_iter().find(|candidate| {
+                    candidate.destination == route.destination
+                        && candidate.gateway == route.gateway
+                        && candidate.metric == route.metric
+                        && candidate.interface_index == route.interface_index
+                });
+                Ok(MutationSnapshot::Route(observed))
+            }
+            Mutation::AddAddress(address) => {
+                let interface_index = address.interface_id.value() as u32;
+                let observed = self.addresses()?.into_iter().find(|candidate| {
+                    candidate.interface_index == interface_index
+                        && candidate.address == address.address
+                });
+                Ok(MutationSnapshot::InterfaceAddress(observed))
+            }
+            Mutation::RemoveAddress(address) => {
+                Ok(MutationSnapshot::InterfaceAddress(Some(address.clone())))
+            }
+            Mutation::SetDnsConfig(_) => Ok(MutationSnapshot::Dns(self.dns_config()?)),
+            _ => Err(Error::Unsupported),
+        }
     }
 
     /// Executes an ordered mutation plan through this backend.
@@ -859,6 +891,31 @@ mod tests {
         assert!(matches!(
             report.outcome(1),
             Some(MutationOutcome::NotAttempted)
+        ));
+    }
+
+    #[test]
+    fn facade_captures_native_snapshots_for_each_mutation_domain() {
+        let lattice = lattice(Capability::DNS_MUTATION);
+        let route = route();
+        let address = NewInterfaceAddress::new(InterfaceId::new(1), network());
+        let observed_address = InterfaceAddress::new(InterfaceAddressId::new(1), 1, network());
+
+        assert!(matches!(
+            lattice.snapshot_for_mutation(&Mutation::AddRoute(route.clone())),
+            Ok(MutationSnapshot::Route(Some(_)))
+        ));
+        assert!(matches!(
+            lattice.snapshot_for_mutation(&Mutation::AddAddress(address)),
+            Ok(MutationSnapshot::InterfaceAddress(Some(_)))
+        ));
+        assert!(matches!(
+            lattice.snapshot_for_mutation(&Mutation::RemoveAddress(observed_address)),
+            Ok(MutationSnapshot::InterfaceAddress(Some(_)))
+        ));
+        assert!(matches!(
+            lattice.snapshot_for_mutation(&Mutation::SetDnsConfig(NewDnsConfig::new())),
+            Ok(MutationSnapshot::Dns(_))
         ));
     }
 
