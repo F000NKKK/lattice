@@ -170,6 +170,22 @@ impl<B: LatticeBackend> Lattice<B> {
         self.backend.remove_address(address)
     }
 
+    /// Performs the runtime portion of mutation preflight.
+    ///
+    /// This check is side-effect free. It validates capabilities exposed by
+    /// the connected backend before an executor submits any operation; native
+    /// privilege and current-state checks can still fail at execution time.
+    pub fn validate_plan(&self, plan: &MutationPlan) -> Result<()> {
+        for operation in plan.operations() {
+            if matches!(operation, Mutation::SetDnsConfig(_))
+                && !self.supports(Capability::DNS_MUTATION)
+            {
+                return Err(Error::Unsupported);
+            }
+        }
+        Ok(())
+    }
+
     /// Executes an ordered mutation plan through this backend.
     ///
     /// The plan remains data-only; this method is the Stage 0.15 execution
@@ -233,6 +249,18 @@ impl<B: LatticeBackend> Lattice<B> {
         C: FnMut(usize, &Mutation) -> bool,
         F: FnMut(usize, &Mutation) -> Result<()>,
     {
+        if let Err(error) = self.validate_plan(plan) {
+            let mut outcomes = Vec::with_capacity(plan.len());
+            if !plan.is_empty() {
+                outcomes.push(MutationOutcome::Failed {
+                    error,
+                    may_have_applied: false,
+                });
+                outcomes.extend((0..plan.len() - 1).map(|_| MutationOutcome::NotAttempted));
+            }
+            return MutationPlanReport::new(outcomes, RollbackStatus::NotNeeded);
+        }
+
         let mut outcomes = Vec::with_capacity(plan.len());
         let mut applied_indices = Vec::new();
         let mut stopped = false;
@@ -643,7 +671,7 @@ mod tests {
 
     #[test]
     fn facade_executes_ordered_plan_and_preserves_report_indices() {
-        let lattice = lattice(Capability::empty());
+        let lattice = lattice(Capability::DNS_MUTATION);
         let plan = MutationPlan::from_operations([
             Mutation::AddRoute(route()),
             Mutation::SetDnsConfig(NewDnsConfig::new()),
@@ -683,7 +711,7 @@ mod tests {
     fn facade_reports_partial_application_boundary_on_failed_dns_operation() {
         let lattice = Lattice {
             backend: TestBackend {
-                capabilities: Capability::empty(),
+                capabilities: Capability::DNS_MUTATION,
                 fail_events: false,
                 fail_mutations: true,
             },
@@ -700,6 +728,32 @@ mod tests {
             })
         ));
         assert!(matches!(report.rollback(), RollbackStatus::NotAttempted));
+    }
+
+    #[test]
+    fn facade_rejects_unsupported_capability_before_submitting_a_plan() {
+        let lattice = lattice(Capability::empty());
+        let plan = MutationPlan::from_operations([
+            Mutation::SetDnsConfig(NewDnsConfig::new()),
+            Mutation::AddRoute(route()),
+        ]);
+
+        assert!(matches!(
+            lattice.validate_plan(&plan),
+            Err(Error::Unsupported)
+        ));
+        let report = lattice.execute_plan(&plan);
+        assert!(matches!(
+            report.outcome(0),
+            Some(MutationOutcome::Failed {
+                error: Error::Unsupported,
+                may_have_applied: false,
+            })
+        ));
+        assert!(matches!(
+            report.outcome(1),
+            Some(MutationOutcome::NotAttempted)
+        ));
     }
 
     #[test]
