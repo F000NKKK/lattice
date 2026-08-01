@@ -21,9 +21,10 @@ pub use ifaddr::{InterfaceAddress, InterfaceAddressId, NewInterfaceAddress};
 pub use interface::{AdminState, Interface, InterfaceId, InterfaceKind, OperationalState};
 pub use mac::MacAddress;
 pub use mutation::{
-    Mutation, MutationConfirmation, MutationIdempotency, MutationKind, MutationOutcome,
-    MutationPlan, MutationPlanReport, MutationPrecondition, MutationPreflight, MutationPrivilege,
-    MutationReversibility, MutationSemantics, MutationSnapshot, RollbackStatus,
+    Mutation, MutationConfirmation, MutationExecutionPhase, MutationIdempotency, MutationKind,
+    MutationOperationReport, MutationOutcome, MutationPlan, MutationPlanReport,
+    MutationPrecondition, MutationPreflight, MutationPrivilege, MutationReversibility,
+    MutationSemantics, MutationSnapshot, MutationStopReason, RollbackStatus,
 };
 pub use neighbor::{NeighborEntry, NeighborId, NeighborState};
 pub use route::Route;

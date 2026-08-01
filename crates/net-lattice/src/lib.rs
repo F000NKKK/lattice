@@ -45,9 +45,10 @@ pub use net_lattice_model::interface::{
 };
 pub use net_lattice_model::mac::MacAddress;
 pub use net_lattice_model::mutation::{
-    Mutation, MutationConfirmation, MutationIdempotency, MutationKind, MutationOutcome,
-    MutationPlan, MutationPlanReport, MutationPrecondition, MutationPreflight, MutationPrivilege,
-    MutationReversibility, MutationSemantics, MutationSnapshot, RollbackStatus,
+    Mutation, MutationConfirmation, MutationExecutionPhase, MutationIdempotency, MutationKind,
+    MutationOperationReport, MutationOutcome, MutationPlan, MutationPlanReport,
+    MutationPrecondition, MutationPreflight, MutationPrivilege, MutationReversibility,
+    MutationSemantics, MutationSnapshot, MutationStopReason, RollbackStatus,
 };
 pub use net_lattice_model::neighbor::{NeighborEntry, NeighborId, NeighborState};
 pub use net_lattice_model::route::{Route, RouteId};
@@ -61,6 +62,7 @@ pub use net_lattice_platform::{
 
 #[cfg(test)]
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Instant;
 
 /// Contracts for implementing a third-party Net Lattice backend.
 ///
@@ -328,6 +330,7 @@ impl<B: LatticeBackend> Lattice<B> {
         }
 
         let mut outcomes = Vec::with_capacity(plan.len());
+        let mut operation_reports = vec![MutationOperationReport::not_attempted(); plan.len()];
         let mut applied = Vec::new();
         let mut stopped = false;
         let mut rollback_boundary = false;
@@ -340,27 +343,47 @@ impl<B: LatticeBackend> Lattice<B> {
                     .is_some_and(|callback| callback(index, operation))
             {
                 outcomes.push(MutationOutcome::NotAttempted);
+                if !stopped {
+                    operation_reports[index] = MutationOperationReport {
+                        phase: MutationExecutionPhase::Cancellation,
+                        duration: std::time::Duration::ZERO,
+                        stop_reason: Some(MutationStopReason::Cancelled),
+                    };
+                }
                 rollback_boundary |= !applied.is_empty();
                 stopped = true;
                 continue;
             }
 
             let prior = match options.snapshot.as_mut() {
-                Some(snapshot) => match snapshot(index, operation) {
-                    Ok(prior) => Some(prior),
-                    Err(error) => {
-                        outcomes.push(MutationOutcome::Failed {
-                            error,
-                            may_have_applied: false,
-                        });
-                        stopped = true;
-                        rollback_boundary = !applied.is_empty();
-                        continue;
+                Some(snapshot) => {
+                    let started = Instant::now();
+                    match snapshot(index, operation) {
+                        Ok(prior) => {
+                            operation_reports[index].phase = MutationExecutionPhase::Snapshot;
+                            operation_reports[index].duration = started.elapsed();
+                            Some(prior)
+                        }
+                        Err(error) => {
+                            outcomes.push(MutationOutcome::Failed {
+                                error,
+                                may_have_applied: false,
+                            });
+                            operation_reports[index] = MutationOperationReport {
+                                phase: MutationExecutionPhase::Snapshot,
+                                duration: started.elapsed(),
+                                stop_reason: Some(MutationStopReason::SnapshotFailed),
+                            };
+                            stopped = true;
+                            rollback_boundary = !applied.is_empty();
+                            continue;
+                        }
                     }
-                },
+                }
                 None => None,
             };
 
+            let started = Instant::now();
             let result = match operation {
                 Mutation::AddRoute(route) => self.add_route(route.clone()),
                 Mutation::RemoveRoute(route) => self.remove_route(route.clone()),
@@ -373,6 +396,8 @@ impl<B: LatticeBackend> Lattice<B> {
             match result {
                 Ok(()) => {
                     outcomes.push(MutationOutcome::Applied);
+                    operation_reports[index].phase = MutationExecutionPhase::Execution;
+                    operation_reports[index].duration += started.elapsed();
                     applied.push((index, prior));
                 }
                 Err(error) => {
@@ -382,6 +407,11 @@ impl<B: LatticeBackend> Lattice<B> {
                         error,
                         may_have_applied: operation.semantics().may_partially_apply,
                     });
+                    operation_reports[index] = MutationOperationReport {
+                        phase: MutationExecutionPhase::Execution,
+                        duration: operation_reports[index].duration + started.elapsed(),
+                        stop_reason: Some(MutationStopReason::ExecutionFailed),
+                    };
                     stopped = true;
                 }
             }
@@ -392,13 +422,20 @@ impl<B: LatticeBackend> Lattice<B> {
                 RollbackStatus::NotAttempted
             } else {
                 let Some(compensate) = options.compensation.as_mut() else {
-                    return MutationPlanReport::new(outcomes, RollbackStatus::NotAttempted);
+                    return MutationPlanReport::with_operation_reports(
+                        outcomes,
+                        RollbackStatus::NotAttempted,
+                        operation_reports,
+                    );
                 };
                 let mut status = RollbackStatus::Completed;
                 for (index, prior) in applied.into_iter().rev() {
                     if let Err(error) =
                         compensate(index, plan.operation(index).expect("index"), prior.as_ref())
                     {
+                        operation_reports[index].phase = MutationExecutionPhase::Compensation;
+                        operation_reports[index].stop_reason =
+                            Some(MutationStopReason::CompensationFailed);
                         status = RollbackStatus::Failed {
                             operation_index: index,
                             error,
@@ -412,7 +449,7 @@ impl<B: LatticeBackend> Lattice<B> {
             RollbackStatus::NotNeeded
         };
 
-        MutationPlanReport::new(outcomes, rollback)
+        MutationPlanReport::with_operation_reports(outcomes, rollback, operation_reports)
     }
 
     /// The full set of runtime-dependent [`Capability`] flags the connected
@@ -781,6 +818,11 @@ mod tests {
         assert!(matches!(report.outcome(0), Some(MutationOutcome::Applied)));
         assert!(matches!(report.outcome(1), Some(MutationOutcome::Applied)));
         assert!(matches!(report.rollback(), RollbackStatus::NotNeeded));
+        assert_eq!(report.operation_reports().len(), plan.len());
+        assert!(matches!(
+            report.operation_reports()[0].phase,
+            MutationExecutionPhase::Execution
+        ));
     }
 
     #[test]
@@ -801,6 +843,10 @@ mod tests {
         assert!(matches!(
             report.outcome(1),
             Some(MutationOutcome::NotAttempted)
+        ));
+        assert!(matches!(
+            report.operation_reports()[1].stop_reason,
+            Some(MutationStopReason::Cancelled)
         ));
         assert!(matches!(report.rollback(), RollbackStatus::NotAttempted));
     }
@@ -827,6 +873,10 @@ mod tests {
             })
         ));
         assert!(matches!(report.rollback(), RollbackStatus::NotAttempted));
+        assert!(matches!(
+            report.operation_reports()[0].stop_reason,
+            Some(MutationStopReason::ExecutionFailed)
+        ));
     }
 
     #[test]
@@ -853,6 +903,10 @@ mod tests {
         assert!(matches!(
             report.outcome(1),
             Some(MutationOutcome::NotAttempted)
+        ));
+        assert!(matches!(
+            report.operation_reports()[0].stop_reason,
+            Some(MutationStopReason::ValidationFailed)
         ));
     }
 
@@ -1091,6 +1145,10 @@ mod tests {
                 operation_index: 0,
                 error: Error::InvalidState,
             }
+        ));
+        assert!(matches!(
+            report.operation_reports()[0].stop_reason,
+            Some(MutationStopReason::CompensationFailed)
         ));
     }
 

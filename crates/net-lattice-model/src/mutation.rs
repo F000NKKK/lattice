@@ -5,6 +5,8 @@
 //! [`MutationPlan`] only after the caller has inspected each operation's
 //! preconditions and limits.
 
+use std::time::Duration;
+
 use crate::dns::DnsConfig;
 use crate::dns::NewDnsConfig;
 use crate::ifaddr::{InterfaceAddress, NewInterfaceAddress};
@@ -273,6 +275,46 @@ pub enum RollbackStatus {
     },
 }
 
+/// Execution phase associated with an operation report.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum MutationExecutionPhase {
+    Validation,
+    Snapshot,
+    Execution,
+    Compensation,
+    Cancellation,
+}
+
+/// Why an operation or plan stopped progressing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum MutationStopReason {
+    ValidationFailed,
+    SnapshotFailed,
+    ExecutionFailed,
+    Cancelled,
+    CompensationFailed,
+}
+
+/// Timing and phase metadata for one plan-local operation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct MutationOperationReport {
+    pub phase: MutationExecutionPhase,
+    pub duration: Duration,
+    pub stop_reason: Option<MutationStopReason>,
+}
+
+impl MutationOperationReport {
+    pub const fn not_attempted() -> Self {
+        Self {
+            phase: MutationExecutionPhase::Validation,
+            duration: Duration::ZERO,
+            stop_reason: None,
+        }
+    }
+}
+
 /// Executor report for an ordered [`MutationPlan`].
 ///
 /// A report is intentionally not called a transaction: operations may have
@@ -285,6 +327,7 @@ pub enum RollbackStatus {
 pub struct MutationPlanReport {
     outcomes: Vec<MutationOutcome>,
     rollback: RollbackStatus,
+    operation_reports: Vec<MutationOperationReport>,
 }
 
 impl MutationPlanReport {
@@ -296,6 +339,20 @@ impl MutationPlanReport {
         Self {
             outcomes: outcomes.into_iter().collect(),
             rollback,
+            operation_reports: Vec::new(),
+        }
+    }
+
+    /// Creates a report with phase and timing metadata aligned to outcomes.
+    pub fn with_operation_reports(
+        outcomes: impl IntoIterator<Item = MutationOutcome>,
+        rollback: RollbackStatus,
+        operation_reports: impl IntoIterator<Item = MutationOperationReport>,
+    ) -> Self {
+        Self {
+            outcomes: outcomes.into_iter().collect(),
+            rollback,
+            operation_reports: operation_reports.into_iter().collect(),
         }
     }
 
@@ -322,6 +379,11 @@ impl MutationPlanReport {
     /// Returns the rollback status recorded by the executor.
     pub fn rollback(&self) -> &RollbackStatus {
         &self.rollback
+    }
+
+    /// Returns phase and timing metadata aligned with [`Self::outcomes`].
+    pub fn operation_reports(&self) -> &[MutationOperationReport] {
+        &self.operation_reports
     }
 
     /// Whether every recorded operation was applied successfully.

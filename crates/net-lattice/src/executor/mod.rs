@@ -6,7 +6,8 @@
 
 use net_lattice_core::{Error, Result};
 use net_lattice_model::{
-    Mutation, MutationOutcome, MutationPlan, MutationPlanReport, MutationSnapshot, RollbackStatus,
+    Mutation, MutationExecutionPhase, MutationOperationReport, MutationOutcome, MutationPlan,
+    MutationPlanReport, MutationSnapshot, MutationStopReason, RollbackStatus,
 };
 
 /// Borrowed operation-boundary cancellation callback.
@@ -67,12 +68,18 @@ pub(crate) fn requires_dns_capability(operation: &Mutation) -> bool {
 /// Builds the complete report for a plan rejected before native submission.
 pub(crate) fn unsupported_plan_report(plan: &MutationPlan, error: Error) -> MutationPlanReport {
     let mut outcomes = Vec::with_capacity(plan.len());
+    let mut reports = vec![MutationOperationReport::not_attempted(); plan.len()];
     if !plan.is_empty() {
         outcomes.push(MutationOutcome::Failed {
             error,
             may_have_applied: false,
         });
         outcomes.extend((0..plan.len() - 1).map(|_| MutationOutcome::NotAttempted));
+        reports[0] = MutationOperationReport {
+            phase: MutationExecutionPhase::Validation,
+            duration: std::time::Duration::ZERO,
+            stop_reason: Some(MutationStopReason::ValidationFailed),
+        };
     }
-    MutationPlanReport::new(outcomes, RollbackStatus::NotNeeded)
+    MutationPlanReport::with_operation_reports(outcomes, RollbackStatus::NotNeeded, reports)
 }
