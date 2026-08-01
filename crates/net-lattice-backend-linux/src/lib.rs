@@ -338,9 +338,6 @@ impl RouteProvider for LinuxBackend {
             let mut v4 = route_handle
                 .get(RouteMessageBuilder::<std::net::Ipv4Addr>::new().build())
                 .execute();
-            let mut v6 = route_handle
-                .get(RouteMessageBuilder::<std::net::Ipv6Addr>::new().build())
-                .execute();
 
             let mut routes = Vec::new();
             while let Some(message) = v4
@@ -350,6 +347,10 @@ impl RouteProvider for LinuxBackend {
             {
                 routes.extend(message_to_route(&message));
             }
+
+            let mut v6 = route_handle
+                .get(RouteMessageBuilder::<std::net::Ipv6Addr>::new().build())
+                .execute();
             while let Some(message) = v6
                 .try_next()
                 .await

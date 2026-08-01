@@ -622,6 +622,18 @@ impl Lattice<net_lattice_backend_darwin::DarwinBackend> {
 mod tests {
     use super::*;
 
+    /// Serializes ignored native facade tests on Linux. Their real Netlink
+    /// operations share one network namespace, whose route dumps can reject
+    /// concurrent submissions with `EBUSY`.
+    #[cfg(target_os = "linux")]
+    fn native_facade_linux_guard() -> std::sync::MutexGuard<'static, ()> {
+        static GUARD: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+        GUARD
+            .get_or_init(|| std::sync::Mutex::new(()))
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
     struct TestBackend {
         capabilities: Capability,
         fail_events: bool,
@@ -1195,6 +1207,24 @@ mod tests {
         }
     }
 
+    /// Removes a submitted native test route if a later assertion exits the
+    /// test before its explicit remove plan succeeds. This is test cleanup,
+    /// not executor rollback.
+    #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+    struct RouteRestore<'a, B: LatticeBackend> {
+        lattice: &'a Lattice<B>,
+        route: Option<Route>,
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+    impl<B: LatticeBackend> Drop for RouteRestore<'_, B> {
+        fn drop(&mut self) {
+            if let Some(route) = self.route.take() {
+                let _ = self.lattice.remove_route(route);
+            }
+        }
+    }
+
     /// Exercises interface configuration through the complete public facade:
     /// capability checks, direct admin-only/MTU-only/combined read-after-write
     /// submissions, transaction-plan dispatch with a public snapshot callback,
@@ -1204,6 +1234,9 @@ mod tests {
     #[test]
     #[ignore = "requires native networking privilege; run with the platform privileged test job"]
     fn native_facade_interface_configuration_round_trip() {
+        #[cfg(target_os = "linux")]
+        let _guard = native_facade_linux_guard();
+
         let lattice = Lattice::connect().expect("failed to connect native backend");
         assert!(
             lattice.supports(Capability::INTERFACE_MTU),
@@ -1344,6 +1377,9 @@ mod tests {
     #[test]
     #[ignore = "requires native networking privilege; run with the platform privileged test job"]
     fn native_facade_route_transaction_round_trip() {
+        #[cfg(target_os = "linux")]
+        let _guard = native_facade_linux_guard();
+
         let lattice = Lattice::connect().expect("failed to connect native backend");
         let interface = lattice
             .interfaces()
@@ -1367,6 +1403,11 @@ mod tests {
         let mut snapshot = |_, operation: &Mutation| lattice.snapshot_for_mutation(operation);
         let mut options = ExecutionOptions::default().snapshot(&mut snapshot);
         let add_report = lattice.execute_plan(&add_plan, &mut options);
+        assert!(add_report.is_success(), "route add report: {add_report:?}");
+        let mut restore = RouteRestore {
+            lattice: &lattice,
+            route: Some(route.clone()),
+        };
 
         let observed_route = lattice
             .routes()
@@ -1380,11 +1421,11 @@ mod tests {
         let remove_plan = MutationPlan::from_operations([Mutation::RemoveRoute(observed_route)]);
         let mut options = ExecutionOptions::default();
         let remove_report = lattice.execute_plan(&remove_plan, &mut options);
-        assert!(add_report.is_success(), "route add report: {add_report:?}");
         assert!(
             remove_report.is_success(),
             "route remove report: {remove_report:?}"
         );
+        restore.route = None;
     }
 
     /// Exercises native first-failure stopping and reverse-order compensation
@@ -1393,6 +1434,9 @@ mod tests {
     #[test]
     #[ignore = "requires native networking privilege; run with the platform privileged test job"]
     fn native_facade_compensates_after_second_route_operation_fails() {
+        #[cfg(target_os = "linux")]
+        let _guard = native_facade_linux_guard();
+
         let lattice = Lattice::connect().expect("failed to connect native backend");
         let interface = lattice
             .interfaces()
