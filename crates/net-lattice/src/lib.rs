@@ -232,7 +232,7 @@ impl<B: LatticeBackend> Lattice<B> {
                     }) {
                         return Err(Error::NotFound);
                     }
-                    let key = (interface_index, address.address.clone());
+                    let key = (interface_index, address.address);
                     let exists_in_system =
                         self.addresses()?.iter().any(|candidate| {
                             candidate.interface_index == interface_index
@@ -243,11 +243,11 @@ impl<B: LatticeBackend> Lattice<B> {
                     {
                         return Err(Error::AlreadyExists);
                     }
-                    planned_addresses.push(key.clone());
+                    planned_addresses.push(key);
                     removed_addresses.retain(|candidate| candidate != &key);
                 }
                 Mutation::RemoveAddress(address) => {
-                    let key = (address.interface_index, address.address.clone());
+                    let key = (address.interface_index, address.address);
                     let exists_in_system =
                         self.addresses()?.iter().any(|candidate| {
                             candidate.id == address.id
