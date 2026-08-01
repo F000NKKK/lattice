@@ -3,13 +3,13 @@
 ## Supported Versions
 
 Net Lattice follows a rolling support policy. Security fixes are provided only
-for the latest stable release series. With the release of 0.13.0, support for
-the 0.1.x-0.12.x series has ended — upgrade to 0.13.x to receive fixes.
+for the latest stable release series. With the release of 0.14.0, support for
+the 0.1.x-0.13.x series has ended — upgrade to 0.14.x to receive fixes.
 
 | Version | Supported |
 | ------- | --------- |
-| 0.13.x | ✅ |
-| 0.1.x - 0.12.x | ❌ |
+| 0.14.x | ✅ |
+| 0.1.x - 0.14.0 | ❌ |
 
 ## Reporting a Vulnerability
 
@@ -44,8 +44,10 @@ Netlink multicast; Windows observes routes, interfaces, and unicast addresses
 via IP Helper; macOS observes routes, interfaces, neighbors, and addresses via
 PF_ROUTE. DNS changes do not currently produce watcher events. Stage 0.14 also
 publishes inspectable, data-only mutation plans for the existing route,
-interface-address, and DNS operations; it does not add a transaction executor
-or change the underlying mutation behavior.
+interface-address, and DNS operations, side-effect-free `MutationPreflight`
+analysis, and typed `MutationOutcome`, `MutationPlanReport`, and
+`RollbackStatus` contracts. These APIs do not add a transaction executor,
+elevate privileges, or change the underlying mutation behavior.
 
 Route, interface-address, and DNS-mutation operations are privileged (see
 [ARCHITECTURE.md](ARCHITECTURE.md)'s Privilege Model). Reports involving

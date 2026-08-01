@@ -17,6 +17,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Explicit `MutationSemantics` for preconditions, idempotency, elevated
   privilege, completion confirmation, reversibility, and partial-application
   risk. Plans are data only; execution remains Stage 0.15 work.
+- Side-effect-free `MutationPreflight` analysis classifies operations that
+  require prior observed state or may be partially applied.
+- Typed `MutationOutcome`, `MutationPlanReport`, and `RollbackStatus` contracts
+  describe execution and compensation boundaries without executing mutations.
+- Plan-local operation and outcome accessors preserve the ordered association
+  between a requested mutation and its eventual report entry.
+
+### Documentation
+
+- Document Stage 0.14 planning, preflight, partial-application, prior-state,
+  and compensation boundaries in the English and Russian project guides.
+
+### Tests
+
+- Add coverage for preflight risk classification and partial-failure report
+  states.
 
 ## [0.13.0] - 2026-08-01
 

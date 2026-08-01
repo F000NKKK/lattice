@@ -8,10 +8,12 @@ Net Lattice has landed Stage 0.14 of its [architecture](ARCHITECTURE.md)'s
 Incremental Delivery Plan: route and interface-address mutation, DNS resolver
 inspection and mutation, interface and neighbor inspection, bounded
 object/domain-filterable monitoring, optional native async event delivery, and
-inspectable data-only mutation plans for the existing route, address, and DNS
-operations on Linux, Windows, and macOS. Large capability domains remain
-ahead, but the published read, mutation, monitoring, planning, and
-backend-extension APIs are real public surface. The most valuable
+inspectable data-only mutation plans, side-effect-free `MutationPreflight`
+analysis, and typed execution-report and compensation-boundary contracts for
+the existing route, address, and DNS operations on Linux, Windows, and macOS.
+Large capability domains remain ahead, but the published read, mutation,
+monitoring, planning, and backend-extension APIs are real public surface. The
+most valuable
 contributions right now are:
 
 - Feedback on the project's vision, scope, and roadmap (see [README.md](README.md))
