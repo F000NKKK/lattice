@@ -569,6 +569,27 @@ fn set_interface_mtu(index: u32, mtu: u32) -> Result<()> {
     submit_interface_mtu(|family| set_family_mtu(index, family, mtu))
 }
 
+#[cfg(test)]
+/// Returns whether Windows currently exposes at least one IP-interface row
+/// for `index`.
+///
+/// This is intentionally test-only: production configuration reports native
+/// failures through [`set_interface_mtu`] instead of treating an unavailable
+/// address family as a generic capability check. The privileged smoke test
+/// uses it solely to avoid selecting a non-loopback adapter with no TCP/IP
+/// binding, for which re-submitting an MTU is guaranteed to return
+/// `ERROR_NOT_FOUND`.
+fn has_ip_interface_row(index: u32) -> bool {
+    IP_INTERFACE_FAMILIES.into_iter().any(|family| {
+        let mut row = MIB_IPINTERFACE_ROW {
+            Family: family,
+            InterfaceIndex: index,
+            ..Default::default()
+        };
+        unsafe { GetIpInterfaceEntry(&mut row) }.0 == 0
+    })
+}
+
 impl InterfaceMutator for WindowsBackend {
     type InterfaceConfig = InterfaceConfig;
 
@@ -1543,10 +1564,11 @@ mod tests {
         assert!(capabilities.contains(Capability::INTERFACE_MTU));
     }
 
-    /// Submits the already-observed values for one suitable non-loopback
-    /// interface. This exercises the privileged native write/readback path
-    /// without deliberately changing host networking state; the drop guard
-    /// attempts restoration even if an assertion panics after submission.
+    /// Re-submits the already-observed MTU for one non-loopback interface
+    /// with an actual TCP/IP binding. This exercises the privileged native
+    /// MTU write/readback path without deliberately changing host networking
+    /// state; the drop guard attempts restoration even if an assertion panics
+    /// after submission.
     #[test]
     #[ignore = "requires Administrator; run from elevated cmd/PowerShell: cargo test -p net-lattice-backend-windows interface_configuration_round_trips_observed_values -- --ignored"]
     fn interface_configuration_round_trips_observed_values() {
@@ -1568,8 +1590,8 @@ mod tests {
             .into_iter()
             .find(|interface| {
                 !matches!(interface.kind, InterfaceKind::Loopback)
-                    && matches!(interface.admin_state, AdminState::Up | AdminState::Down)
                     && interface.mtu.is_some()
+                    && has_ip_interface_row(interface.index)
             })
         else {
             // Shared runners can expose only loopback or adapter classes that
@@ -1578,12 +1600,7 @@ mod tests {
             return;
         };
 
-        let desired_admin_state = match original.admin_state {
-            AdminState::Up => DesiredAdminState::Up,
-            AdminState::Down => DesiredAdminState::Down,
-            _ => unreachable!("filter excluded unknown administrative state"),
-        };
-        let config = InterfaceConfig::new(original.id, Some(desired_admin_state), original.mtu)
+        let config = InterfaceConfig::new(original.id, None, original.mtu)
             .expect("observed values form a valid configuration patch");
         let _restore = RestoreInterfaceConfig {
             backend: &backend,
