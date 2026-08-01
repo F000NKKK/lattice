@@ -25,6 +25,23 @@ Operating systems expose networking configuration and state through wildly diffe
 
 Net Lattice aims to unify these interfaces behind a single, strongly typed, idiomatic Rust API, so that consumers never need to deal with raw platform structures, shell commands, or ad hoc string parsing.
 
+## Workspace crates
+
+The published workspace is split into focused crates. Each crate has its own
+crate-level README with its scope and a usage example:
+
+| Crate | Purpose |
+|---|---|
+| [`net-lattice`](crates/net-lattice/README.md) | Public facade and transaction executor |
+| [`net-lattice-model`](crates/net-lattice-model/README.md) | Observed state, intent, events, and mutation plans |
+| [`net-lattice-platform`](crates/net-lattice-platform/README.md) | Provider and capability contracts |
+| [`net-lattice-core`](crates/net-lattice-core/README.md) | Shared errors, results, and IDs |
+| [`net-lattice-ip`](crates/net-lattice-ip/README.md) | IPv4/IPv6 addresses and networks |
+| [`net-lattice-async`](crates/net-lattice-async/README.md) | Runtime-independent event stream adapter |
+| [`net-lattice-backend-linux`](crates/net-lattice-backend-linux/README.md) | Linux Netlink backend |
+| [`net-lattice-backend-windows`](crates/net-lattice-backend-windows/README.md) | Windows IP Helper backend |
+| [`net-lattice-backend-darwin`](crates/net-lattice-backend-darwin/README.md) | macOS BSD/PF_ROUTE backend |
+
 ## Motivation
 
 Cross-platform networking tooling in the Rust ecosystem is fragmented. Existing solutions are frequently platform-specific, incomplete, or built around shelling out to system utilities such as `ip`, `netsh`, or `route`. This is fragile, hard to test, and unsuitable for building robust, production-grade network management software.

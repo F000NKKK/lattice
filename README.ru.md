@@ -25,6 +25,23 @@
 
 Net Lattice призвана объединить эти интерфейсы под единым, строго типизированным, идиоматичным API на Rust, чтобы потребителям никогда не приходилось иметь дело с сырыми платформенными структурами, shell-командами или произвольным парсингом строк.
 
+## Crates workspace
+
+Workspace разделён на отдельные crates. У каждого crate есть собственный
+README с назначением и примером использования:
+
+| Crate | Назначение |
+|---|---|
+| [`net-lattice`](crates/net-lattice/README.md) | Публичный фасад и transaction executor |
+| [`net-lattice-model`](crates/net-lattice-model/README.md) | Observed state, intent, события и mutation plans |
+| [`net-lattice-platform`](crates/net-lattice-platform/README.md) | Provider- и capability-контракты |
+| [`net-lattice-core`](crates/net-lattice-core/README.md) | Общие ошибки, результаты и ID |
+| [`net-lattice-ip`](crates/net-lattice-ip/README.md) | IPv4/IPv6 адреса и сети |
+| [`net-lattice-async`](crates/net-lattice-async/README.md) | Runtime-independent адаптер event stream |
+| [`net-lattice-backend-linux`](crates/net-lattice-backend-linux/README.md) | Linux Netlink backend |
+| [`net-lattice-backend-windows`](crates/net-lattice-backend-windows/README.md) | Windows IP Helper backend |
+| [`net-lattice-backend-darwin`](crates/net-lattice-backend-darwin/README.md) | macOS BSD/PF_ROUTE backend |
+
 ## Мотивация
 
 Кроссплатформенные сетевые инструменты в экосистеме Rust фрагментированы. Существующие решения зачастую платформо-специфичны, неполны или построены на вызове системных утилит, таких как `ip`, `netsh` или `route`. Это хрупко, сложно тестировать и не подходит для создания надёжного, production-grade программного обеспечения для управления сетью.
