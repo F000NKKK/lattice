@@ -1,8 +1,9 @@
 //! Typed, inspectable descriptions of imperative network mutations.
 //!
-//! These types describe work; they do not execute it. A future transaction
-//! executor consumes a [`MutationPlan`] only after the caller has inspected
-//! each operation's preconditions and limits.
+//! These types describe work and its execution report. The model remains
+//! operating-system independent; the facade's Stage 0.15 executor consumes a
+//! [`MutationPlan`] only after the caller has inspected each operation's
+//! preconditions and limits.
 
 use crate::dns::NewDnsConfig;
 use crate::ifaddr::{InterfaceAddress, NewInterfaceAddress};
@@ -170,8 +171,9 @@ impl Mutation {
 
 /// An ordered, inspectable list of mutations.
 ///
-/// Creating a plan has no side effects. Stage 0.15 will define execution,
-/// outcomes, cancellation, and best-effort compensation.
+/// Creating a plan has no side effects. Stage 0.15 executes it through a
+/// backend and records outcomes, cancellation boundaries, and rollback status
+/// in [`MutationPlanReport`].
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct MutationPlan {
     operations: Vec<Mutation>,

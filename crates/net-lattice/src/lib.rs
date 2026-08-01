@@ -170,6 +170,76 @@ impl<B: LatticeBackend> Lattice<B> {
         self.backend.remove_address(address)
     }
 
+    /// Executes an ordered mutation plan through this backend.
+    ///
+    /// The plan remains data-only; this method is the Stage 0.15 execution
+    /// boundary. Operations are submitted in order and execution stops after
+    /// the first error. The returned report always contains one outcome per
+    /// plan operation. Failed operations carry their documented
+    /// partial-application risk, and later operations are `NotAttempted`.
+    /// Compensation is not inferred: until a caller supplies a prior-state
+    /// snapshot, the report records [`RollbackStatus::NotAttempted`].
+    pub fn execute_plan(&self, plan: &MutationPlan) -> MutationPlanReport {
+        self.execute_plan_with_cancel(plan, |_, _| false)
+    }
+
+    /// Executes a plan while allowing the caller to stop at an operation
+    /// boundary. Returning `true` marks the current and remaining operations
+    /// as [`MutationOutcome::NotAttempted`] without submitting the current
+    /// operation. The callback is never invoked after an operation fails.
+    pub fn execute_plan_with_cancel<F>(
+        &self,
+        plan: &MutationPlan,
+        mut cancelled: F,
+    ) -> MutationPlanReport
+    where
+        F: FnMut(usize, &Mutation) -> bool,
+    {
+        let mut outcomes = Vec::with_capacity(plan.len());
+        let mut stopped = false;
+        let mut applied = false;
+        let mut rollback_boundary = false;
+
+        for (index, operation) in plan.operations().iter().enumerate() {
+            if stopped || cancelled(index, operation) {
+                outcomes.push(MutationOutcome::NotAttempted);
+                stopped = true;
+                continue;
+            }
+
+            let result = match operation {
+                Mutation::AddRoute(route) => self.add_route(route.clone()),
+                Mutation::RemoveRoute(route) => self.remove_route(route.clone()),
+                Mutation::AddAddress(address) => self.add_address(address.clone()).map(|_| ()),
+                Mutation::RemoveAddress(address) => self.remove_address(address.clone()),
+                Mutation::SetDnsConfig(config) => self.set_dns_config(config.clone()).map(|_| ()),
+                _ => Err(Error::Unsupported),
+            };
+
+            match result {
+                Ok(()) => {
+                    outcomes.push(MutationOutcome::Applied);
+                    applied = true;
+                }
+                Err(error) => {
+                    rollback_boundary = applied || operation.semantics().may_partially_apply;
+                    outcomes.push(MutationOutcome::Failed {
+                        error,
+                        may_have_applied: operation.semantics().may_partially_apply,
+                    });
+                    stopped = true;
+                }
+            }
+        }
+
+        let rollback = if stopped && rollback_boundary {
+            RollbackStatus::NotAttempted
+        } else {
+            RollbackStatus::NotNeeded
+        };
+        MutationPlanReport::new(outcomes, rollback)
+    }
+
     /// The full set of runtime-dependent [`Capability`] flags the connected
     /// backend currently has available.
     pub fn capabilities(&self) -> Capability {
@@ -296,6 +366,7 @@ mod tests {
     struct TestBackend {
         capabilities: Capability,
         fail_events: bool,
+        fail_mutations: bool,
     }
 
     fn network() -> Network {
@@ -317,11 +388,19 @@ mod tests {
         }
 
         fn add_route(&self, _route: Self::Route) -> Result<()> {
-            Ok(())
+            if self.fail_mutations {
+                Err(Error::InvalidState)
+            } else {
+                Ok(())
+            }
         }
 
         fn remove_route(&self, _route: Self::Route) -> Result<()> {
-            Ok(())
+            if self.fail_mutations {
+                Err(Error::InvalidState)
+            } else {
+                Ok(())
+            }
         }
     }
 
@@ -350,7 +429,11 @@ mod tests {
         type NewDnsConfig = NewDnsConfig;
 
         fn set_dns_config(&self, _config: Self::NewDnsConfig) -> Result<Self::DnsConfig> {
-            Ok(DnsConfig::new())
+            if self.fail_mutations {
+                Err(Error::InvalidState)
+            } else {
+                Ok(DnsConfig::new())
+            }
         }
     }
 
@@ -386,15 +469,23 @@ mod tests {
             &self,
             address: Self::NewInterfaceAddress,
         ) -> Result<Self::InterfaceAddress> {
-            Ok(InterfaceAddress::new(
-                InterfaceAddressId::new(1),
-                address.interface_id.value() as u32,
-                address.address,
-            ))
+            if self.fail_mutations {
+                Err(Error::InvalidState)
+            } else {
+                Ok(InterfaceAddress::new(
+                    InterfaceAddressId::new(1),
+                    address.interface_id.value() as u32,
+                    address.address,
+                ))
+            }
         }
 
         fn remove_address(&self, _address: Self::InterfaceAddress) -> Result<()> {
-            Ok(())
+            if self.fail_mutations {
+                Err(Error::InvalidState)
+            } else {
+                Ok(())
+            }
         }
     }
 
@@ -464,6 +555,7 @@ mod tests {
             backend: TestBackend {
                 capabilities,
                 fail_events: false,
+                fail_mutations: false,
             },
         }
     }
@@ -491,6 +583,67 @@ mod tests {
                 .len(),
             0
         );
+    }
+
+    #[test]
+    fn facade_executes_ordered_plan_and_preserves_report_indices() {
+        let lattice = lattice(Capability::empty());
+        let plan = MutationPlan::from_operations([
+            Mutation::AddRoute(route()),
+            Mutation::SetDnsConfig(NewDnsConfig::new()),
+        ]);
+
+        let report = lattice.execute_plan(&plan);
+
+        assert_eq!(report.len(), plan.len());
+        assert!(report.is_success());
+        assert_eq!(report.applied_count(), 2);
+        assert!(matches!(report.outcome(0), Some(MutationOutcome::Applied)));
+        assert!(matches!(report.outcome(1), Some(MutationOutcome::Applied)));
+        assert!(matches!(report.rollback(), RollbackStatus::NotNeeded));
+    }
+
+    #[test]
+    fn facade_cancellation_stops_at_an_operation_boundary() {
+        let lattice = lattice(Capability::empty());
+        let plan = MutationPlan::from_operations([
+            Mutation::AddRoute(route()),
+            Mutation::RemoveRoute(route()),
+        ]);
+
+        let report = lattice.execute_plan_with_cancel(&plan, |index, _| index == 1);
+
+        assert_eq!(report.applied_count(), 1);
+        assert_eq!(report.not_attempted_count(), 1);
+        assert!(matches!(report.outcome(0), Some(MutationOutcome::Applied)));
+        assert!(matches!(
+            report.outcome(1),
+            Some(MutationOutcome::NotAttempted)
+        ));
+        assert!(matches!(report.rollback(), RollbackStatus::NotAttempted));
+    }
+
+    #[test]
+    fn facade_reports_partial_application_boundary_on_failed_dns_operation() {
+        let lattice = Lattice {
+            backend: TestBackend {
+                capabilities: Capability::empty(),
+                fail_events: false,
+                fail_mutations: true,
+            },
+        };
+        let plan = MutationPlan::from_operations([Mutation::SetDnsConfig(NewDnsConfig::new())]);
+
+        let report = lattice.execute_plan(&plan);
+
+        assert!(matches!(
+            report.outcome(0),
+            Some(MutationOutcome::Failed {
+                may_have_applied: true,
+                ..
+            })
+        ));
+        assert!(matches!(report.rollback(), RollbackStatus::NotAttempted));
     }
 
     #[test]
@@ -527,6 +680,7 @@ mod tests {
             backend: TestBackend {
                 capabilities: Capability::MONITORING,
                 fail_events: true,
+                fail_mutations: false,
             },
         };
         assert!(lattice.watch().is_err());
@@ -540,6 +694,7 @@ mod tests {
             backend: TestBackend {
                 capabilities: Capability::MONITORING,
                 fail_events: true,
+                fail_mutations: false,
             },
         };
         assert!(lattice.watch_async(EventFilter::ALL).is_err());
