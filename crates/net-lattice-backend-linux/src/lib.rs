@@ -17,20 +17,23 @@ use net_lattice_core::{Error, Id, PlatformErrorCode, Result};
 use net_lattice_model::dns::{DnsConfig, NewDnsConfig};
 use net_lattice_model::event::{ChangeKind, Event, EventFilter};
 use net_lattice_model::ifaddr::{InterfaceAddress, InterfaceAddressId, NewInterfaceAddress};
-use net_lattice_model::interface::{AdminState, Interface, InterfaceKind, OperationalState};
+use net_lattice_model::interface::{
+    AdminState, DesiredAdminState, Interface, InterfaceConfig, InterfaceKind, OperationalState,
+};
 use net_lattice_model::mac::MacAddress;
 use net_lattice_model::neighbor::{NeighborEntry, NeighborId, NeighborState};
 use net_lattice_model::route::{Route, RouteId};
 use net_lattice_model::{IpAddress, Network};
 use net_lattice_platform::{
     AddressMutator, AddressProvider, Capability, CapabilityProvider, DnsMutator, DnsProvider,
-    EventProvider, EventReceiver, InterfaceProvider, NeighborProvider, RouteProvider,
+    EventProvider, EventReceiver, InterfaceMutator, InterfaceProvider, NeighborProvider,
+    RouteProvider,
 };
 #[cfg(feature = "async")]
 use net_lattice_platform::{TokioEventProvider, TokioEventReceiver};
 use rtnetlink::packet_route::RouteNetlinkMessage;
 use rtnetlink::packet_route::address::{AddressAttribute, AddressMessage};
-use rtnetlink::packet_route::link::{LinkAttribute, LinkLayerType, LinkMessage, State};
+use rtnetlink::packet_route::link::{LinkAttribute, LinkFlags, LinkLayerType, LinkMessage, State};
 use rtnetlink::packet_route::neighbour::{
     NeighbourAddress, NeighbourAttribute, NeighbourMessage, NeighbourState as RtNeighbourState,
 };
@@ -521,6 +524,68 @@ impl InterfaceProvider for LinuxBackend {
     }
 }
 
+/// Builds the minimal `RTM_NEWLINK` request used to modify an existing link.
+///
+/// Linux uses `ifi_change` to select which `IFF_*` bits the request may
+/// alter. Only `IFF_UP` is included, so a request to change administrative
+/// state cannot accidentally overwrite flags the caller did not request.
+fn interface_config_to_link_change(config: &InterfaceConfig) -> Result<LinkMessage> {
+    let index = u32::try_from(config.interface_id().value()).map_err(|_| Error::NotFound)?;
+    let mut message = LinkMessage::default();
+    message.header.index = index;
+
+    if let Some(admin_state) = config.admin_state() {
+        message.header.change_mask = LinkFlags::Up;
+        message.header.flags = match admin_state {
+            DesiredAdminState::Up => LinkFlags::Up,
+            DesiredAdminState::Down => LinkFlags::empty(),
+            _ => unreachable!("DesiredAdminState has no unsupported Linux intent"),
+        };
+    }
+
+    if let Some(mtu) = config.mtu() {
+        message.attributes.push(LinkAttribute::Mtu(mtu));
+    }
+
+    Ok(message)
+}
+
+impl InterfaceMutator for LinuxBackend {
+    type InterfaceConfig = InterfaceConfig;
+
+    /// Applies an MTU and/or administrative-state patch through
+    /// `RTM_NEWLINK`, then re-reads the link before reporting success.
+    ///
+    /// Linux may apply one requested field before rejecting another, notably
+    /// when a combined MTU/admin-state request is constrained by device
+    /// policy. Callers using a transaction must therefore rely on the
+    /// mutation's partial-application semantics and opt into explicit
+    /// compensation when restoration is required.
+    fn set_interface_config(&self, config: Self::InterfaceConfig) -> Result<Self::Interface> {
+        let index = u32::try_from(config.interface_id().value()).map_err(|_| Error::NotFound)?;
+        let message = interface_config_to_link_change(&config)?;
+
+        self.runtime.block_on(async {
+            self.handle
+                .link()
+                .change(message)
+                .execute()
+                .await
+                .map_err(|err| Error::Platform(rtnetlink_error_code(&err)))
+        })?;
+
+        self.runtime.block_on(async {
+            let mut links = self.handle.link().get().match_index(index).execute();
+            links
+                .try_next()
+                .await
+                .map_err(|err| Error::Platform(rtnetlink_error_code(&err)))?
+                .map(|message| message_to_interface(&message))
+                .ok_or(Error::NotFound)
+        })
+    }
+}
+
 /// Placeholder identity scheme, same rationale as `synthesize_route_id`: a
 /// neighbor entry has no kernel-assigned numeric ID, so this hashes its
 /// interface and address together (the pair the kernel itself keys entries
@@ -670,7 +735,11 @@ impl CapabilityProvider for LinuxBackend {
     /// Lattice doesn't implement either yet, and a `Capability` this
     /// backend can't actually act on would be a lie to the caller.
     fn capabilities(&self) -> Capability {
-        Capability::IPV6 | Capability::MONITORING | Capability::DNS_MUTATION
+        Capability::IPV6
+            | Capability::MONITORING
+            | Capability::DNS_MUTATION
+            | Capability::INTERFACE_ADMIN_STATE
+            | Capability::INTERFACE_MTU
     }
 }
 
@@ -948,6 +1017,8 @@ mod tests {
         assert!(capabilities.contains(Capability::IPV6));
         assert!(capabilities.contains(Capability::MONITORING));
         assert!(capabilities.contains(Capability::DNS_MUTATION));
+        assert!(capabilities.contains(Capability::INTERFACE_ADMIN_STATE));
+        assert!(capabilities.contains(Capability::INTERFACE_MTU));
     }
 
     #[test]
@@ -1282,6 +1353,38 @@ mod tests {
     }
 
     #[test]
+    fn interface_config_netlink_message_changes_only_requested_fields() {
+        let combined = InterfaceConfig::new(Id::new(7), Some(DesiredAdminState::Up), Some(9000))
+            .expect("valid combined patch");
+        let message = interface_config_to_link_change(&combined).expect("link request");
+        assert_eq!(message.header.index, 7);
+        assert_eq!(message.header.change_mask, LinkFlags::Up);
+        assert_eq!(message.header.flags, LinkFlags::Up);
+        assert!(matches!(
+            message.attributes.as_slice(),
+            [LinkAttribute::Mtu(9000)]
+        ));
+
+        let down_only = InterfaceConfig::new(Id::new(8), Some(DesiredAdminState::Down), None)
+            .expect("valid admin-only patch");
+        let message = interface_config_to_link_change(&down_only).expect("link request");
+        assert_eq!(message.header.index, 8);
+        assert_eq!(message.header.change_mask, LinkFlags::Up);
+        assert!(message.header.flags.is_empty());
+        assert!(message.attributes.is_empty());
+
+        let mtu_only =
+            InterfaceConfig::new(Id::new(9), None, Some(1500)).expect("valid mtu-only patch");
+        let message = interface_config_to_link_change(&mtu_only).expect("link request");
+        assert_eq!(message.header.change_mask, LinkFlags::empty());
+        assert!(message.header.flags.is_empty());
+        assert!(matches!(
+            message.attributes.as_slice(),
+            [LinkAttribute::Mtu(1500)]
+        ));
+    }
+
+    #[test]
     fn netlink_event_mapper_covers_every_supported_domain_and_change_kind() {
         let route = RouteMessageBuilder::<std::net::Ipv4Addr>::new()
             .destination_prefix(std::net::Ipv4Addr::new(198, 51, 100, 0), 24)
@@ -1438,6 +1541,31 @@ mod tests {
             .expect("this test environment has no `lo` interface")
     }
 
+    fn restore_config(interface: &Interface) -> InterfaceConfig {
+        let admin_state = match interface.admin_state {
+            AdminState::Up => DesiredAdminState::Up,
+            AdminState::Down => DesiredAdminState::Down,
+            AdminState::Unknown => panic!("Linux must report an administrative state"),
+            _ => panic!("unexpected future administrative state"),
+        };
+        InterfaceConfig::new(interface.id, Some(admin_state), interface.mtu)
+            .expect("observed Linux interface is a valid restoration patch")
+    }
+
+    struct InterfaceRestore<'a> {
+        backend: &'a LinuxBackend,
+        config: InterfaceConfig,
+    }
+
+    impl Drop for InterfaceRestore<'_> {
+        fn drop(&mut self) {
+            // A test failure must not leave a privileged runner's link in a
+            // changed state. There is no useful way for `Drop` to report a
+            // second failure, so the test also verifies restoration below.
+            let _ = self.backend.set_interface_config(self.config.clone());
+        }
+    }
+
     /// Requires `CAP_NET_ADMIN` (root, or `sudo -E cargo test -- --ignored`
     /// in this crate). Not run by default because most development and CI
     /// environments — including the one this crate was originally written
@@ -1551,6 +1679,53 @@ mod tests {
             absent,
             "removed address was still present in addresses() afterward"
         );
+    }
+
+    /// Exercises the interface-configuration path without inventing a test
+    /// interface or changing its steady state: it submits the current MTU and
+    /// administrative state, observes the read-after-write result, and has a
+    /// drop guard restore the original patch on every exit path.
+    #[test]
+    #[ignore = "requires CAP_NET_ADMIN; run with `sudo -E cargo test -p net-lattice-backend-linux interface_configuration_round_trips_through_the_kernel -- --ignored`"]
+    fn interface_configuration_round_trips_through_the_kernel() {
+        let _guard = kernel_test_guard();
+        let backend = LinuxBackend::new().expect("failed to open a Netlink connection");
+        let before = backend
+            .interfaces()
+            .expect("interfaces() failed before configuration")
+            .into_iter()
+            .find(|interface| interface.kind != InterfaceKind::Loopback && interface.mtu.is_some())
+            .or_else(|| {
+                backend
+                    .interfaces()
+                    .expect("interfaces() failed while selecting fallback")
+                    .into_iter()
+                    .find(|interface| interface.mtu.is_some())
+            })
+            .expect("this test environment has no interface with an MTU");
+        let original = restore_config(&before);
+
+        {
+            let _restore = InterfaceRestore {
+                backend: &backend,
+                config: original.clone(),
+            };
+            let observed = backend
+                .set_interface_config(original.clone())
+                .expect("set_interface_config failed - are you running with CAP_NET_ADMIN?");
+            assert_eq!(observed.id, before.id);
+            assert_eq!(observed.mtu, before.mtu);
+            assert_eq!(observed.admin_state, before.admin_state);
+        }
+
+        let restored = backend
+            .interfaces()
+            .expect("interfaces() failed after restoration")
+            .into_iter()
+            .find(|interface| interface.id == before.id)
+            .expect("configured interface disappeared during the test");
+        assert_eq!(restored.mtu, before.mtu);
+        assert_eq!(restored.admin_state, before.admin_state);
     }
 
     /// End-to-end monitoring verification: a route mutation must travel from
