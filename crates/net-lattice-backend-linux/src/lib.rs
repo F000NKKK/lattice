@@ -363,37 +363,7 @@ impl RouteProvider for LinuxBackend {
 
     fn add_route(&self, route: Self::Route) -> Result<()> {
         self.runtime.block_on(async {
-            let (destination, prefix_len) = network_to_std(route.destination);
-            let message = match destination {
-                IpAddr::V4(addr) => {
-                    let mut builder = RouteMessageBuilder::<std::net::Ipv4Addr>::new()
-                        .destination_prefix(addr, prefix_len);
-                    if let Some(IpAddr::V4(gateway)) = route.gateway.map(ip_address_to_std) {
-                        builder = builder.gateway(gateway);
-                    }
-                    if let Some(metric) = route.metric {
-                        builder = builder.priority(metric);
-                    }
-                    if let Some(interface_index) = route.interface_index {
-                        builder = builder.output_interface(interface_index);
-                    }
-                    builder.build()
-                }
-                IpAddr::V6(addr) => {
-                    let mut builder = RouteMessageBuilder::<std::net::Ipv6Addr>::new()
-                        .destination_prefix(addr, prefix_len);
-                    if let Some(IpAddr::V6(gateway)) = route.gateway.map(ip_address_to_std) {
-                        builder = builder.gateway(gateway);
-                    }
-                    if let Some(metric) = route.metric {
-                        builder = builder.priority(metric);
-                    }
-                    if let Some(interface_index) = route.interface_index {
-                        builder = builder.output_interface(interface_index);
-                    }
-                    builder.build()
-                }
-            };
+            let message = route_request_message(&route, true);
 
             self.handle
                 .route()
@@ -406,25 +376,7 @@ impl RouteProvider for LinuxBackend {
 
     fn remove_route(&self, route: Self::Route) -> Result<()> {
         self.runtime.block_on(async {
-            let (destination, prefix_len) = network_to_std(route.destination);
-            let message = match destination {
-                IpAddr::V4(addr) => {
-                    let mut builder = RouteMessageBuilder::<std::net::Ipv4Addr>::new()
-                        .destination_prefix(addr, prefix_len);
-                    if let Some(interface_index) = route.interface_index {
-                        builder = builder.output_interface(interface_index);
-                    }
-                    builder.build()
-                }
-                IpAddr::V6(addr) => {
-                    let mut builder = RouteMessageBuilder::<std::net::Ipv6Addr>::new()
-                        .destination_prefix(addr, prefix_len);
-                    if let Some(interface_index) = route.interface_index {
-                        builder = builder.output_interface(interface_index);
-                    }
-                    builder.build()
-                }
-            };
+            let message = route_request_message(&route, false);
 
             self.handle
                 .route()
@@ -433,6 +385,49 @@ impl RouteProvider for LinuxBackend {
                 .await
                 .map_err(|err| Error::Platform(rtnetlink_error_code(&err)))
         })
+    }
+}
+
+/// Builds the shared native route request used for add and delete operations.
+///
+/// A delete request deliberately omits the optional gateway and metric, while
+/// the destination family and output interface are retained for both request
+/// kinds.
+fn route_request_message(route: &Route, include_gateway_and_metric: bool) -> RouteMessage {
+    let (destination, prefix_len) = network_to_std(route.destination);
+    match destination {
+        IpAddr::V4(addr) => {
+            let mut builder = RouteMessageBuilder::<std::net::Ipv4Addr>::new()
+                .destination_prefix(addr, prefix_len);
+            if include_gateway_and_metric {
+                if let Some(IpAddr::V4(gateway)) = route.gateway.map(ip_address_to_std) {
+                    builder = builder.gateway(gateway);
+                }
+                if let Some(metric) = route.metric {
+                    builder = builder.priority(metric);
+                }
+            }
+            if let Some(interface_index) = route.interface_index {
+                builder = builder.output_interface(interface_index);
+            }
+            builder.build()
+        }
+        IpAddr::V6(addr) => {
+            let mut builder = RouteMessageBuilder::<std::net::Ipv6Addr>::new()
+                .destination_prefix(addr, prefix_len);
+            if include_gateway_and_metric {
+                if let Some(IpAddr::V6(gateway)) = route.gateway.map(ip_address_to_std) {
+                    builder = builder.gateway(gateway);
+                }
+                if let Some(metric) = route.metric {
+                    builder = builder.priority(metric);
+                }
+            }
+            if let Some(interface_index) = route.interface_index {
+                builder = builder.output_interface(interface_index);
+            }
+            builder.build()
+        }
     }
 }
 
@@ -1262,6 +1257,30 @@ mod tests {
         assert_eq!(observed.interface_index, Some(7));
         assert!(message_to_route(&RouteMessage::default()).is_none());
 
+        let ipv6_destination = Network::from(net_lattice_ip::Ipv6Network::new(
+            net_lattice_ip::Ipv6Address::new([0x2001, 0xdb8, 0, 0x16, 0, 0, 0, 0]),
+            net_lattice_ip::Ipv6PrefixLength::new(64).expect("valid IPv6 prefix"),
+        ));
+        let ipv6_route = Route::new(RouteId::new(16), ipv6_destination)
+            .with_gateway(IpAddress::from(net_lattice_ip::Ipv6Address::new([
+                0x2001, 0xdb8, 0, 0x16, 0, 0, 0, 1,
+            ])))
+            .with_metric(42)
+            .with_interface_index(7);
+        let add_request = route_request_message(&ipv6_route, true);
+        let observed = message_to_route(&add_request).expect("valid IPv6 add request");
+        assert_eq!(observed.destination, ipv6_destination);
+        assert_eq!(observed.gateway, ipv6_route.gateway);
+        assert_eq!(observed.metric, ipv6_route.metric);
+        assert_eq!(observed.interface_index, ipv6_route.interface_index);
+
+        let delete_request = route_request_message(&ipv6_route, false);
+        let observed = message_to_route(&delete_request).expect("valid IPv6 delete request");
+        assert_eq!(observed.destination, ipv6_destination);
+        assert_eq!(observed.gateway, None);
+        assert_eq!(observed.metric, None);
+        assert_eq!(observed.interface_index, ipv6_route.interface_index);
+
         let mut neighbor = NeighbourMessage::default();
         neighbor.header.ifindex = 7;
         neighbor.header.state = RtNeighbourState::Reachable;
@@ -1376,9 +1395,17 @@ mod tests {
         assert!(message.header.flags.is_empty());
         assert!(message.attributes.is_empty());
 
+        let up_only = InterfaceConfig::new(Id::new(9), Some(DesiredAdminState::Up), None)
+            .expect("valid admin-only patch");
+        let message = interface_config_to_link_change(&up_only).expect("link request");
+        assert_eq!(message.header.change_mask, LinkFlags::Up);
+        assert_eq!(message.header.flags, LinkFlags::Up);
+        assert!(message.attributes.is_empty());
+
         let mtu_only =
-            InterfaceConfig::new(Id::new(9), None, Some(1500)).expect("valid mtu-only patch");
+            InterfaceConfig::new(Id::new(10), None, Some(1500)).expect("valid mtu-only patch");
         let message = interface_config_to_link_change(&mtu_only).expect("link request");
+        assert_eq!(message.header.index, 10);
         assert_eq!(message.header.change_mask, LinkFlags::empty());
         assert!(message.header.flags.is_empty());
         assert!(matches!(
@@ -1405,6 +1432,30 @@ mod tests {
                 kind: ChangeKind::Removed,
                 ..
             })
+        ));
+
+        let ipv6_route = RouteMessageBuilder::<std::net::Ipv6Addr>::new()
+            .destination_prefix("2001:db8:0:16::".parse().expect("IPv6 destination"), 64)
+            .gateway("2001:db8:0:16::1".parse().expect("IPv6 gateway"))
+            .priority(42)
+            .output_interface(7)
+            .build();
+        let ipv6_id = message_to_route(&ipv6_route)
+            .expect("valid IPv6 route event fixture")
+            .id;
+        assert!(matches!(
+            route_netlink_message_to_event(RouteNetlinkMessage::NewRoute(ipv6_route.clone())),
+            Some(Event::Route {
+                id,
+                kind: ChangeKind::Changed,
+            }) if id == ipv6_id
+        ));
+        assert!(matches!(
+            route_netlink_message_to_event(RouteNetlinkMessage::DelRoute(ipv6_route)),
+            Some(Event::Route {
+                id,
+                kind: ChangeKind::Removed,
+            }) if id == ipv6_id
         ));
 
         let mut link = LinkMessage::default();
@@ -1685,9 +1736,10 @@ mod tests {
     }
 
     /// Exercises the interface-configuration path without inventing a test
-    /// interface or changing its steady state: it submits the current MTU and
-    /// administrative state, observes the read-after-write result, and has a
-    /// drop guard restore the original patch on every exit path.
+    /// interface or changing its steady state: it separately submits the
+    /// current administrative state, MTU, and combined patch, observes each
+    /// read-after-write result, and has a full combined drop guard restore
+    /// the original patch on every exit path.
     #[test]
     #[ignore = "requires CAP_NET_ADMIN; run with `sudo -E cargo test -p net-lattice-backend-linux interface_configuration_round_trips_through_the_kernel -- --ignored`"]
     fn interface_configuration_round_trips_through_the_kernel() {
@@ -1697,28 +1749,56 @@ mod tests {
             .interfaces()
             .expect("interfaces() failed before configuration")
             .into_iter()
-            .find(|interface| interface.kind != InterfaceKind::Loopback && interface.mtu.is_some())
+            .find(|interface| {
+                interface.kind != InterfaceKind::Loopback
+                    && matches!(interface.admin_state, AdminState::Up | AdminState::Down)
+                    && interface.mtu.is_some_and(|mtu| mtu != 0)
+            })
             .or_else(|| {
                 backend
                     .interfaces()
                     .expect("interfaces() failed while selecting fallback")
                     .into_iter()
-                    .find(|interface| interface.mtu.is_some())
+                    .find(|interface| {
+                        matches!(interface.admin_state, AdminState::Up | AdminState::Down)
+                            && interface.mtu.is_some_and(|mtu| mtu != 0)
+                    })
             })
-            .expect("this test environment has no interface with an MTU");
-        let original = restore_config(&before);
+            .expect(
+                "this test environment has no interface with known admin state and a nonzero MTU",
+            );
+        let admin_state = match before.admin_state {
+            AdminState::Up => DesiredAdminState::Up,
+            AdminState::Down => DesiredAdminState::Down,
+            _ => unreachable!("selection requires a known administrative state"),
+        };
+        let mtu = before.mtu.expect("selection requires a nonzero MTU");
+        let combined = restore_config(&before);
+        let admin_only = InterfaceConfig::new(before.id, Some(admin_state), None)
+            .expect("observed administrative state forms a valid patch");
+        let mtu_only = InterfaceConfig::new(before.id, None, Some(mtu))
+            .expect("observed MTU forms a valid patch");
 
         {
             let _restore = InterfaceRestore {
                 backend: &backend,
-                config: original.clone(),
+                config: combined.clone(),
             };
-            let observed = backend
-                .set_interface_config(original.clone())
-                .expect("set_interface_config failed - are you running with CAP_NET_ADMIN?");
-            assert_eq!(observed.id, before.id);
-            assert_eq!(observed.mtu, before.mtu);
-            assert_eq!(observed.admin_state, before.admin_state);
+            for (shape, config) in [
+                ("admin-only", admin_only),
+                ("MTU-only", mtu_only),
+                ("combined", combined),
+            ] {
+                let observed = backend.set_interface_config(config).unwrap_or_else(|error| {
+                    panic!("{shape} set_interface_config failed - are you running with CAP_NET_ADMIN?: {error:?}")
+                });
+                assert_eq!(observed.id, before.id, "{shape} readback changed target");
+                assert_eq!(observed.mtu, before.mtu, "{shape} readback changed MTU");
+                assert_eq!(
+                    observed.admin_state, before.admin_state,
+                    "{shape} readback changed administrative state"
+                );
+            }
         }
 
         let restored = backend

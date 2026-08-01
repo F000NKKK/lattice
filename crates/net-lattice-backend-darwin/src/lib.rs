@@ -1034,17 +1034,18 @@ impl InterfaceMutator for DarwinBackend {
             return Err(interface_ioctl_error(&io::Error::last_os_error()));
         }
 
-        let result = (|| {
-            if let Some(mtu) = config.mtu() {
+        let result = submit_interface_config(
+            &config,
+            |mtu| {
                 let mut request = interface_request(&target.name)?;
                 request.ifr_ifru.ifru_mtu =
                     libc::c_int::try_from(mtu).map_err(|_| Error::InvalidState)?;
                 if unsafe { libc::ioctl(socket, siocsifmtu(), &mut request) } != 0 {
                     return Err(interface_ioctl_error(&io::Error::last_os_error()));
                 }
-            }
-
-            if let Some(admin_state) = config.admin_state() {
+                Ok(())
+            },
+            |admin_state| {
                 let mut request = interface_request(&target.name)?;
                 if unsafe { libc::ioctl(socket, siocgifflags(), &mut request) } != 0 {
                     return Err(interface_ioctl_error(&io::Error::last_os_error()));
@@ -1063,9 +1064,9 @@ impl InterfaceMutator for DarwinBackend {
                 if unsafe { libc::ioctl(socket, siocsifflags(), &mut request) } != 0 {
                     return Err(interface_ioctl_error(&io::Error::last_os_error()));
                 }
-            }
-            Ok(())
-        })();
+                Ok(())
+            },
+        );
         unsafe { libc::close(socket) };
         result?;
 
@@ -1074,6 +1075,30 @@ impl InterfaceMutator for DarwinBackend {
             .find(|interface| interface.id == config.interface_id())
             .ok_or(Error::NotFound)
     }
+}
+
+/// Submits the requested Darwin interface fields in their ioctl order.
+///
+/// MTU is written before administrative flags. The ioctls do not constitute
+/// one transaction, so a flags failure after a successful MTU write leaves a
+/// documented partial-application boundary for the caller to handle through
+/// explicit compensation.
+fn submit_interface_config<FMtu, FAdmin>(
+    config: &InterfaceConfig,
+    mut set_mtu: FMtu,
+    mut set_admin: FAdmin,
+) -> Result<()>
+where
+    FMtu: FnMut(u32) -> Result<()>,
+    FAdmin: FnMut(DesiredAdminState) -> Result<()>,
+{
+    if let Some(mtu) = config.mtu() {
+        set_mtu(mtu)?;
+    }
+    if let Some(admin_state) = config.admin_state() {
+        set_admin(admin_state)?;
+    }
+    Ok(())
 }
 
 /// Placeholder identity scheme, same rationale as `synthesize_route_id`: an
@@ -1954,6 +1979,48 @@ mod tests {
     }
 
     #[test]
+    fn pf_route_ipv6_messages_round_trip_and_map_add_delete_events() {
+        let destination = Network::from(net_lattice_ip::Ipv6Network::new(
+            net_lattice_ip::Ipv6Address::new([0x2001, 0xdb8, 0, 0x16, 0, 0, 0, 0]),
+            net_lattice_ip::Ipv6PrefixLength::new(64).expect("valid IPv6 prefix"),
+        ));
+        let route = Route::new(RouteId::new(16), destination)
+            .with_gateway(IpAddress::from(net_lattice_ip::Ipv6Address::new([
+                0x2001, 0xdb8, 0, 0x16, 0, 0, 0, 1,
+            ])))
+            .with_interface_index(7);
+
+        let add = build_add_message(&route).expect("IPv6 add message");
+        let add_header = unsafe { &*add.as_ptr().cast::<libc::rt_msghdr>() };
+        let observed = unsafe { message_to_route(add_header) }.expect("IPv6 add route decodes");
+        assert_eq!(observed.destination, destination);
+        assert_eq!(observed.gateway, route.gateway);
+        assert_eq!(observed.interface_index, route.interface_index);
+        assert!(matches!(
+            unsafe { route_socket_message_to_event(add.as_ptr(), add.len()) },
+            Some(Event::Route {
+                id,
+                kind: ChangeKind::Changed,
+            }) if id == observed.id
+        ));
+
+        let delete = build_delete_message(&route).expect("IPv6 delete message");
+        let delete_header = unsafe { &*delete.as_ptr().cast::<libc::rt_msghdr>() };
+        let deleted =
+            unsafe { message_to_route(delete_header) }.expect("IPv6 delete route decodes");
+        assert_eq!(deleted.destination, destination);
+        assert_eq!(deleted.gateway, route.gateway);
+        assert_eq!(deleted.interface_index, route.interface_index);
+        assert!(matches!(
+            unsafe { route_socket_message_to_event(delete.as_ptr(), delete.len()) },
+            Some(Event::Route {
+                id,
+                kind: ChangeKind::Removed,
+            }) if id == observed.id
+        ));
+    }
+
+    #[test]
     fn darwin_scalar_mappings_cover_error_masks_interface_and_neighbor_states() {
         assert!(matches!(
             route_socket_error(&io::Error::from_raw_os_error(libc::EPERM)),
@@ -2044,6 +2111,69 @@ mod tests {
     }
 
     #[test]
+    fn interface_configuration_dispatches_each_requested_shape_in_ioctl_order() {
+        fn calls_for(config: InterfaceConfig) -> Vec<String> {
+            let calls = std::cell::RefCell::new(Vec::new());
+            submit_interface_config(
+                &config,
+                |mtu| {
+                    calls.borrow_mut().push(format!("mtu:{mtu}"));
+                    Ok(())
+                },
+                |state| {
+                    calls.borrow_mut().push(format!("admin:{state:?}"));
+                    Ok(())
+                },
+            )
+            .expect("deterministic dispatch fixture succeeds");
+            calls.into_inner()
+        }
+
+        assert_eq!(
+            calls_for(
+                InterfaceConfig::new(Id::new(7), Some(DesiredAdminState::Down), None)
+                    .expect("valid admin-only patch"),
+            ),
+            ["admin:Down"]
+        );
+        assert_eq!(
+            calls_for(
+                InterfaceConfig::new(Id::new(7), None, Some(1500)).expect("valid MTU-only patch"),
+            ),
+            ["mtu:1500"]
+        );
+        assert_eq!(
+            calls_for(
+                InterfaceConfig::new(Id::new(7), Some(DesiredAdminState::Up), Some(9000))
+                    .expect("valid combined patch"),
+            ),
+            ["mtu:9000", "admin:Up"]
+        );
+    }
+
+    #[test]
+    fn interface_configuration_reports_the_darwin_partial_application_boundary() {
+        let config = InterfaceConfig::new(Id::new(7), Some(DesiredAdminState::Up), Some(9000))
+            .expect("valid combined patch");
+        let calls = std::cell::RefCell::new(Vec::new());
+        let error = submit_interface_config(
+            &config,
+            |mtu| {
+                calls.borrow_mut().push(format!("mtu:{mtu}"));
+                Ok(())
+            },
+            |state| {
+                calls.borrow_mut().push(format!("admin:{state:?}"));
+                Err(Error::InvalidState)
+            },
+        )
+        .expect_err("a flags failure after the MTU write is observable");
+
+        assert!(matches!(error, Error::InvalidState));
+        assert_eq!(calls.into_inner(), ["mtu:9000", "admin:Up"]);
+    }
+
+    #[test]
     fn interface_info_messages_map_to_changed_interface_events() {
         let mut header: libc::if_msghdr = unsafe { mem::zeroed() };
         header.ifm_msglen = mem::size_of::<libc::if_msghdr>() as libc::c_ushort;
@@ -2092,9 +2222,10 @@ mod tests {
     }
 
     /// Verifies the privileged ioctl path without changing a working
-    /// interface's values: the current non-loopback MTU/admin state is
-    /// submitted back to the kernel and read after write. The `Drop` guard
-    /// attempts restoration on every exit path, including a failed assertion.
+    /// interface's values: the current non-loopback administrative state,
+    /// MTU, and combined patch are each submitted back to the kernel and read
+    /// after write. The `Drop` guard attempts full combined restoration on
+    /// every exit path, including a failed assertion.
     ///
     /// A shared macOS runner cannot safely create and destroy a disposable
     /// interface, so this test deliberately does not claim to prove a
@@ -2111,20 +2242,44 @@ mod tests {
             .expect("getifaddrs should list interfaces")
             .into_iter()
             .find(|interface| {
-                !matches!(interface.kind, InterfaceKind::Loopback) && interface.mtu.is_some()
+                !matches!(interface.kind, InterfaceKind::Loopback)
+                    && matches!(interface.admin_state, AdminState::Up | AdminState::Down)
+                    && interface.mtu.is_some_and(|mtu| mtu != 0)
             })
-            .expect("expected a non-loopback interface with an observed MTU");
+            .expect("expected a non-loopback interface with known admin state and a nonzero MTU");
+        let admin_state = match original.admin_state {
+            AdminState::Up => DesiredAdminState::Up,
+            AdminState::Down => DesiredAdminState::Down,
+            _ => unreachable!("selection requires a known administrative state"),
+        };
+        let mtu = original.mtu.expect("selection requires a nonzero MTU");
+        let combined = restoration_config(&original);
+        let admin_only = InterfaceConfig::new(original.id, Some(admin_state), None)
+            .expect("observed administrative state forms a valid patch");
+        let mtu_only = InterfaceConfig::new(original.id, None, Some(mtu))
+            .expect("observed MTU forms a valid patch");
         let restore = InterfaceConfigRestore {
             backend: &backend,
-            config: restoration_config(&original),
+            config: combined.clone(),
         };
 
-        let observed = backend
-            .set_interface_config(restoration_config(&original))
-            .expect("setting the observed values should succeed as root");
-        assert_eq!(observed.id, original.id);
-        assert_eq!(observed.admin_state, original.admin_state);
-        assert_eq!(observed.mtu, original.mtu);
+        for (shape, config) in [
+            ("admin-only", admin_only),
+            ("MTU-only", mtu_only),
+            ("combined", combined),
+        ] {
+            let observed = backend
+                .set_interface_config(config)
+                .unwrap_or_else(|error| {
+                    panic!("{shape} observed-value submission failed as root: {error:?}")
+                });
+            assert_eq!(observed.id, original.id, "{shape} readback changed target");
+            assert_eq!(
+                observed.admin_state, original.admin_state,
+                "{shape} readback changed administrative state"
+            );
+            assert_eq!(observed.mtu, original.mtu, "{shape} readback changed MTU");
+        }
 
         drop(restore);
         let restored = backend

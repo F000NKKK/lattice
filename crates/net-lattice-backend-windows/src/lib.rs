@@ -584,6 +584,31 @@ fn set_interface_mtu(index: u32, mtu: u32) -> Result<()> {
     submit_interface_mtu(|family| set_family_mtu(index, family, mtu))
 }
 
+/// Submits the requested Windows interface fields in their native order.
+///
+/// Administrative status is submitted before the per-family MTU rows.  The
+/// calls cannot form one atomic IP Helper transaction, so an MTU failure can
+/// follow a successful administrative-state update.  Keeping this small
+/// dispatch boundary independent of FFI makes that contract deterministic to
+/// test without mutating a host interface.
+fn submit_interface_config<FAdmin, FMtu>(
+    config: &InterfaceConfig,
+    mut set_admin: FAdmin,
+    mut set_mtu: FMtu,
+) -> Result<()>
+where
+    FAdmin: FnMut(DesiredAdminState) -> Result<()>,
+    FMtu: FnMut(u32) -> Result<()>,
+{
+    if let Some(admin_state) = config.admin_state() {
+        set_admin(admin_state)?;
+    }
+    if let Some(mtu) = config.mtu() {
+        set_mtu(mtu)?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 /// Returns whether Windows currently exposes at least one IP-interface row
 /// for `index`.
@@ -620,12 +645,11 @@ impl InterfaceMutator for WindowsBackend {
         // helpers from operating on an arbitrary stale index.
         get_interface(index)?;
 
-        if let Some(admin_state) = config.admin_state() {
-            set_admin_state(index, admin_state)?;
-        }
-        if let Some(mtu) = config.mtu() {
-            set_interface_mtu(index, mtu)?;
-        }
+        submit_interface_config(
+            &config,
+            |admin_state| set_admin_state(index, admin_state),
+            |mtu| set_interface_mtu(index, mtu),
+        )?;
 
         // Native acknowledgement is insufficient for the Stage 0.16
         // ReadAfterWrite contract.
@@ -1352,6 +1376,69 @@ mod tests {
     }
 
     #[test]
+    fn interface_configuration_dispatches_each_requested_shape_in_windows_order() {
+        fn calls_for(config: InterfaceConfig) -> Vec<String> {
+            let calls = std::cell::RefCell::new(Vec::new());
+            submit_interface_config(
+                &config,
+                |state| {
+                    calls.borrow_mut().push(format!("admin:{state:?}"));
+                    Ok(())
+                },
+                |mtu| {
+                    calls.borrow_mut().push(format!("mtu:{mtu}"));
+                    Ok(())
+                },
+            )
+            .expect("deterministic dispatch fixture succeeds");
+            calls.into_inner()
+        }
+
+        assert_eq!(
+            calls_for(
+                InterfaceConfig::new(Id::new(7), Some(DesiredAdminState::Down), None)
+                    .expect("valid admin-only patch"),
+            ),
+            ["admin:Down"]
+        );
+        assert_eq!(
+            calls_for(
+                InterfaceConfig::new(Id::new(7), None, Some(1500)).expect("valid MTU-only patch"),
+            ),
+            ["mtu:1500"]
+        );
+        assert_eq!(
+            calls_for(
+                InterfaceConfig::new(Id::new(7), Some(DesiredAdminState::Up), Some(9000))
+                    .expect("valid combined patch"),
+            ),
+            ["admin:Up", "mtu:9000"]
+        );
+    }
+
+    #[test]
+    fn interface_configuration_reports_the_windows_partial_application_boundary() {
+        let config = InterfaceConfig::new(Id::new(7), Some(DesiredAdminState::Up), Some(9000))
+            .expect("valid combined patch");
+        let calls = std::cell::RefCell::new(Vec::new());
+        let error = submit_interface_config(
+            &config,
+            |state| {
+                calls.borrow_mut().push(format!("admin:{state:?}"));
+                Ok(())
+            },
+            |mtu| {
+                calls.borrow_mut().push(format!("mtu:{mtu}"));
+                Err(Error::InvalidState)
+            },
+        )
+        .expect_err("a failure after the administrative write is observable");
+
+        assert!(matches!(error, Error::InvalidState));
+        assert_eq!(calls.into_inner(), ["admin:Up", "mtu:9000"]);
+    }
+
+    #[test]
     fn interface_mtu_submission_covers_every_applicable_ip_family() {
         let mut families = Vec::new();
         submit_interface_mtu(|family| {
@@ -1531,6 +1618,55 @@ mod tests {
     }
 
     #[test]
+    fn ip_helper_ipv6_route_row_and_callbacks_preserve_route_identity() {
+        let destination = Network::from(net_lattice_ip::Ipv6Network::new(
+            net_lattice_ip::Ipv6Address::new([0x2001, 0xdb8, 0, 0x16, 0, 0, 0, 0]),
+            net_lattice_ip::Ipv6PrefixLength::new(64).expect("valid IPv6 prefix"),
+        ));
+        let route = Route::new(RouteId::new(16), destination)
+            .with_gateway(IpAddress::from(net_lattice_ip::Ipv6Address::new([
+                0x2001, 0xdb8, 0, 0x16, 0, 0, 0, 1,
+            ])))
+            .with_interface_index(7)
+            .with_metric(42);
+        let row = build_row(route.clone());
+        assert_eq!(unsafe { row.DestinationPrefix.Prefix.si_family }, AF_INET6);
+        assert_eq!(unsafe { row.NextHop.si_family }, AF_INET6);
+
+        let observed = row_to_route(&row)
+            .expect("IPv6 route row is supported")
+            .expect("IPv6 route row has a destination");
+        assert_eq!(observed.destination, destination);
+        assert_eq!(observed.gateway, route.gateway);
+        assert_eq!(observed.interface_index, route.interface_index);
+        assert_eq!(observed.metric, route.metric);
+
+        let (sender, receiver) = EventReceiver::bounded();
+        let state = WindowsWatchState {
+            sender,
+            filter: EventFilter::none().route(observed.id),
+        };
+        unsafe {
+            route_change_callback((&raw const state).cast(), &raw const row, MibAddInstance);
+            route_change_callback((&raw const state).cast(), &raw const row, MibDeleteInstance);
+        }
+        assert_eq!(
+            receiver.try_recv().expect("add callback succeeded"),
+            Some(Event::Route {
+                id: observed.id,
+                kind: ChangeKind::Added,
+            })
+        );
+        assert_eq!(
+            receiver.try_recv().expect("delete callback succeeded"),
+            Some(Event::Route {
+                id: observed.id,
+                kind: ChangeKind::Removed,
+            })
+        );
+    }
+
+    #[test]
     fn ip_helper_kind_and_state_mappings_cover_supported_values() {
         assert_eq!(
             if_type_to_kind(IF_TYPE_SOFTWARE_LOOPBACK),
@@ -1600,11 +1736,11 @@ mod tests {
         assert!(capabilities.contains(Capability::INTERFACE_MTU));
     }
 
-    /// Re-submits the already-observed MTU for one non-loopback interface
-    /// with an actual TCP/IP binding. This exercises the privileged native
-    /// MTU write/readback path without deliberately changing host networking
-    /// state; the drop guard attempts restoration even if an assertion panics
-    /// after submission.
+    /// Re-submits the already-observed administrative state, MTU, and combined
+    /// patch for one non-loopback interface with an actual TCP/IP binding.
+    /// This exercises each privileged native write/readback shape without
+    /// deliberately changing host networking state; the drop guard attempts
+    /// full combined restoration even if an assertion panics after submission.
     #[test]
     #[ignore = "requires Administrator; run from elevated cmd/PowerShell: cargo test -p net-lattice-backend-windows interface_configuration_round_trips_observed_values -- --ignored"]
     fn interface_configuration_round_trips_observed_values() {
@@ -1620,35 +1756,67 @@ mod tests {
         }
 
         let backend = WindowsBackend::new().expect("failed to create Windows backend");
-        let Some(original) = backend
+        let interfaces = backend
             .interfaces()
-            .expect("failed to list Windows interfaces")
-            .into_iter()
+            .expect("failed to list Windows interfaces");
+        let original = interfaces
+            .iter()
             .find(|interface| {
                 !matches!(interface.kind, InterfaceKind::Loopback)
-                    && interface.mtu.is_some()
+                    && matches!(interface.admin_state, AdminState::Up | AdminState::Down)
+                    && interface.mtu.is_some_and(|mtu| mtu != 0)
                     && has_ip_interface_row(interface.index)
             })
-        else {
-            // Shared runners can expose only loopback or adapter classes that
-            // cannot safely exercise this contract. The deterministic tests
-            // above still cover sequencing and event mapping in that case.
-            return;
-        };
+            .cloned()
+            .unwrap_or_else(|| {
+                panic!(
+                    "no non-loopback interface with known admin state, nonzero MTU, and an IP-interface row was available: {interfaces:?}"
+                )
+            });
 
-        let config = InterfaceConfig::new(original.id, None, original.mtu)
-            .expect("observed values form a valid configuration patch");
-        let _restore = RestoreInterfaceConfig {
-            backend: &backend,
-            config: config.clone(),
+        let admin_state = match original.admin_state {
+            AdminState::Up => DesiredAdminState::Up,
+            AdminState::Down => DesiredAdminState::Down,
+            _ => unreachable!("selection requires a known administrative state"),
         };
+        let mtu = original.mtu.expect("selection requires a nonzero MTU");
+        let combined = InterfaceConfig::new(original.id, Some(admin_state), Some(mtu))
+            .expect("observed values form a valid combined configuration patch");
+        let admin_only = InterfaceConfig::new(original.id, Some(admin_state), None)
+            .expect("observed administrative state forms a valid patch");
+        let mtu_only = InterfaceConfig::new(original.id, None, Some(mtu))
+            .expect("observed MTU forms a valid patch");
+        {
+            let _restore = RestoreInterfaceConfig {
+                backend: &backend,
+                config: combined.clone(),
+            };
 
-        let observed = backend
-            .set_interface_config(config)
-            .expect("setting observed interface values failed - are you running as Administrator?");
-        assert_eq!(observed.id, original.id);
-        assert_eq!(observed.admin_state, original.admin_state);
-        assert_eq!(observed.mtu, original.mtu);
+            for (shape, config) in [
+                ("admin-only", admin_only),
+                ("MTU-only", mtu_only),
+                ("combined", combined),
+            ] {
+                let observed = backend.set_interface_config(config).unwrap_or_else(|error| {
+                    panic!("{shape} observed-value submission failed - are you running as Administrator?: {error:?}")
+                });
+                assert_eq!(observed.id, original.id, "{shape} readback changed target");
+                assert_eq!(
+                    observed.admin_state, original.admin_state,
+                    "{shape} readback changed administrative state"
+                );
+                assert_eq!(observed.mtu, original.mtu, "{shape} readback changed MTU");
+            }
+        }
+
+        let restored = backend
+            .interfaces()
+            .expect("failed to list Windows interfaces after restoration")
+            .into_iter()
+            .find(|interface| interface.id == original.id)
+            .expect("configured interface disappeared during restoration");
+        assert_eq!(restored.admin_state, original.admin_state);
+        assert_eq!(restored.mtu, original.mtu);
     }
 
     /// Exercises a real round trip through `GetUnicastIpAddressTable`, no
