@@ -40,6 +40,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   end-to-end interface-event testing in English and Russian project docs.
 - Document the domain-specific monitoring capability matrix and the required
   migration from a coarse `MONITORING` check to a selected-domain check.
+- Mark Stage 0.16 interface configuration as verified across privileged Linux,
+  Windows, and macOS CI. IPv6 DNS parity and isolated destructive-topology
+  acceptance are explicitly deferred to Stage 0.17.
 
 ## [0.15.2] - 2026-08-01
 

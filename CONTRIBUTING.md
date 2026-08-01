@@ -11,9 +11,10 @@ object/domain-filterable monitoring, optional native async event delivery, and
 inspectable data-only mutation plans, side-effect-free `MutationPreflight`
 analysis, and typed execution-report and compensation-boundary contracts for
 the existing route, address, and DNS operations on Linux, Windows, and macOS.
-Stage 0.16 interface configuration is ready for privileged CI verification;
-`InterfaceConfig` remains a partial imperative patch, not a declarative
-desired-state model.
+Stage 0.16 interface configuration is verified by privileged Linux, Windows,
+and macOS CI; `InterfaceConfig` remains a partial imperative patch, not a
+declarative desired-state model. DNS-family parity and isolated destructive
+topology testing are tracked in Stage 0.17.
 Large capability domains remain ahead, but the published read, mutation,
 monitoring, planning, and backend-extension APIs are real public surface. The
 most valuable contributions right now are:
