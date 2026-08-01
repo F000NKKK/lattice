@@ -15,8 +15,12 @@
 `RouteProvider`, `InterfaceProvider`, `InterfaceMutator`, `DnsProvider`, `DnsMutator`, `NeighborProvider`, `AddressProvider`, `AddressMutator`, `CapabilityProvider`, синхронный `EventProvider`, feature-gated `TokioEventProvider` и object/domain selectors `EventFilter` в `net-lattice-platform`,
 поддержка маршрутов, адресов интерфейсов, DNS, соседей (ARP/NDP), нативного изменения маршрутов/адресов/DNS, inspectable mutation plans, упорядоченный executor транзакций с runtime-preflight, cancellation на границах операций, типизированными snapshots, явной compensation и фазовыми отчётами. `InterfaceConfig` и `DesiredAdminState` описывают intent интерфейса отдельно от наблюдаемого `Interface`; `InterfaceMutator` применяет capability-gated патчи administrative state и MTU с read-after-write наблюдением во всех встроенных backend'ах. Нативный мониторинг событий реализован в `net-lattice-backend-linux`,
 `net-lattice-backend-windows`, `net-lattice-backend-darwin`, crate потока
-событий `net-lattice-async` и feature-gated async-фасад — всё, что описано
-дальше этого этапа, по-прежнему только цель, а не текущее состояние.
+событий `net-lattice-async` и feature-gated async-фасад. Capabilities
+мониторинга зависят от домена: aggregate-бит `MONITORING` означает native-путь
+доставки для каждого текущего домена, а filtered watch требует выбранный бит
+route/interface/neighbor/address. В Windows нет native callback изменений
+соседей, поэтому neighbor и all-domain subscriptions отклоняются. Всё, что
+описано дальше этого этапа, по-прежнему только цель, а не текущее состояние.
 
 ## Руководящий принцип
 
@@ -665,7 +669,7 @@ Stages 0.15–0.20 должны строить transactions и declarative apply
 | 0.9 ✅ | `NewInterfaceAddress` + `AddressMutator`; нативное назначение/удаление IPv4/IPv6-адресов через Netlink (Linux), IP Helper (Windows) и address ioctl (macOS). |
 | 0.10 ✅ | Семантика событий: bounded delivery, overflow/resynchronization, filtering, cancellation и распространение ошибок фонового watcher'а. |
 | 0.11 ✅ | Опциональная feature `async` в `net-lattice`; `net-lattice-async` предоставляет один runtime-agnostic `EventStream`, а Linux (Tokio Netlink), Windows (callbacks IP Helper) и macOS (reader PF_ROUTE) доставляют события прямо в bounded Tokio transports. |
-| 0.12 ✅ | Стабилизация API watcher'ов: composable object/domain filters до помещения в очередь, validation capability мониторинга и одинаковая sync/async семантика filter без изменения опубликованного API 0.11. |
+| 0.12 ✅ | Стабилизация API watcher'ов: composable object/domain filters до помещения в очередь, validation capabilities мониторинга по доменам и одинаковая sync/async семантика filter. `MONITORING` — aggregate всех доменов; filter с недоступным доменом отклоняется до native-регистрации. |
 | 0.13 ✅ | Изменение DNS с моделью intent/observed state: `NewDnsConfig` применяется через поддерживаемые системные механизмы, а результирующий `DnsConfig` повторно читается на Linux, Windows и macOS. |
 | 0.14 ✅ | Модель mutation-операций: inspectable значения `Mutation` и упорядоченные `MutationPlan` для существующих изменений routes/addresses/DNS; явные классификации preconditions, idempotency, privileges, confirmation, partial application и reversibility. Добавлен side-effect-free анализ `MutationPreflight`, а также типизированные `MutationOutcome`, `MutationPlanReport` и `RollbackStatus` для отчёта исполнителя; сами планы не имеют side effects исполнения или rollback. |
 | 0.15 ✅ | Базовое исполнение транзакций: runtime capability и object-precondition preflight через `Lattice::validate_plan`, provider-backed capture `MutationSnapshot` через `snapshot_for_mutation`, отправка операций по порядку через `Lattice::execute_plan`, настроенный единым `ExecutionOptions`, результаты операций с фазами и длительностями, остановка после первой ошибки, cancellation на границе операции, capture prior state и явно переданный compensator в обратном порядке. Ignored native facade route round-trip и compensation scenarios запускаются в каждом privileged CI job; DNS partial-application integration намеренно остаётся non-destructive. |

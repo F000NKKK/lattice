@@ -24,8 +24,12 @@ and MTU patches with read-after-write observation on all built-in backends.
 Native event monitoring is implemented in
 `net-lattice-backend-linux`, `net-lattice-backend-windows`, and
 `net-lattice-backend-darwin`, the `net-lattice-async` event stream crate, and
-the feature-gated async facade — everything past that stage is still a target,
-not current state.
+the feature-gated async facade. Monitoring capabilities are domain-specific:
+the aggregate `MONITORING` bit means a native delivery path exists for every
+currently modeled domain, while filtered watches require their selected
+route/interface/neighbor/address bit. Windows has no native neighbor-change
+callback and therefore rejects neighbor and all-domain subscriptions. Everything
+past that stage is still a target, not current state.
 
 ## Guiding Principle
 
@@ -663,7 +667,7 @@ are introduced only when there is real implementation work for them:
 | 0.9 ✅ | `NewInterfaceAddress` + `AddressMutator`; native IPv4/IPv6 address assignment/removal via Netlink (Linux), IP Helper (Windows), and address ioctls (macOS). |
 | 0.10 ✅ | Event semantics: bounded delivery, overflow/resynchronization, filtering, cancellation, and background-error propagation. |
 | 0.11 ✅ | Optional `net-lattice` `async` feature; `net-lattice-async` exposes one runtime-agnostic `EventStream`, while Linux (Tokio Netlink), Windows (IP Helper callbacks), and macOS (PF_ROUTE reader) deliver directly into bounded Tokio transports. |
-| 0.12 ✅ | Watcher API stabilization: composable object/domain filters applied before enqueueing, monitoring-capability validation, and consistent synchronous/async filter semantics without changing the released 0.11 API. |
+| 0.12 ✅ | Watcher API stabilization: composable object/domain filters applied before enqueueing, domain-specific monitoring-capability validation, and consistent synchronous/async filter semantics. `MONITORING` is the all-domain aggregate; a filter requiring an unavailable domain fails before native registration. |
 | 0.13 ✅ | DNS mutation with an intent/observed-state model: `NewDnsConfig` is applied through supported system mechanisms and the resulting `DnsConfig` is re-read on Linux, Windows, and macOS. |
 | 0.14 ✅ | Mutation operation model: inspectable `Mutation` values and ordered `MutationPlan`s for existing route/address/DNS mutations; explicit preconditions, idempotency, privilege, confirmation, partial-application, and reversibility classifications. Adds side-effect-free `MutationPreflight` analysis plus typed `MutationOutcome`, `MutationPlanReport`, and `RollbackStatus` contracts for executor reporting, while plans themselves retain no execution or rollback side effects. |
 | 0.15 ✅ | Transaction execution baseline: runtime capability and object-precondition preflight via `Lattice::validate_plan`, provider-backed `MutationSnapshot` capture through `snapshot_for_mutation`, ordered submission through `Lattice::execute_plan` configured by `ExecutionOptions`, per-operation outcomes, phase/timing diagnostics, first-failure stopping, operation-boundary cancellation, caller-defined prior-state capture, and an explicitly supplied reverse-order compensator. Ignored native facade route round-trip and compensation scenarios run in each privileged CI job; DNS partial-application integration remains intentionally non-destructive. |
