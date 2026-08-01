@@ -11,10 +11,19 @@ use net_lattice_model::{
 
 /// Options controlling one ordered plan execution.
 pub struct ExecutionOptions<'a> {
-    pub(crate) cancellation: Option<&'a mut dyn FnMut(usize, &Mutation) -> bool>,
-    pub(crate) snapshot: Option<&'a mut dyn FnMut(usize, &Mutation) -> Result<MutationSnapshot>>,
-    pub(crate) compensation:
-        Option<&'a mut dyn FnMut(usize, &Mutation, Option<&MutationSnapshot>) -> Result<()>>,
+    pub(crate) cancellation: Option<&'a mut (dyn for<'m> FnMut(usize, &'m Mutation) -> bool + 'a)>,
+    pub(crate) snapshot:
+        Option<&'a mut (dyn for<'m> FnMut(usize, &'m Mutation) -> Result<MutationSnapshot> + 'a)>,
+    pub(crate) compensation: Option<
+        &'a mut (
+                    dyn for<'m, 's> FnMut(
+            usize,
+            &'m Mutation,
+            Option<&'s MutationSnapshot>,
+        ) -> Result<()>
+                        + 'a
+                ),
+    >,
 }
 
 impl<'a> ExecutionOptions<'a> {
@@ -28,7 +37,10 @@ impl<'a> ExecutionOptions<'a> {
     }
 
     /// Installs an operation-boundary cancellation hook.
-    pub fn cancellation(mut self, callback: &'a mut dyn FnMut(usize, &Mutation) -> bool) -> Self {
+    pub fn cancellation(
+        mut self,
+        callback: &'a mut (dyn for<'m> FnMut(usize, &'m Mutation) -> bool + 'a),
+    ) -> Self {
         self.cancellation = Some(callback);
         self
     }
@@ -36,7 +48,7 @@ impl<'a> ExecutionOptions<'a> {
     /// Installs a typed prior-state capture hook.
     pub fn snapshot(
         mut self,
-        callback: &'a mut dyn FnMut(usize, &Mutation) -> Result<MutationSnapshot>,
+        callback: &'a mut (dyn for<'m> FnMut(usize, &'m Mutation) -> Result<MutationSnapshot> + 'a),
     ) -> Self {
         self.snapshot = Some(callback);
         self
@@ -45,7 +57,14 @@ impl<'a> ExecutionOptions<'a> {
     /// Installs explicit reverse-order compensation.
     pub fn compensation(
         mut self,
-        callback: &'a mut dyn FnMut(usize, &Mutation, Option<&MutationSnapshot>) -> Result<()>,
+        callback: &'a mut (
+                    dyn for<'m, 's> FnMut(
+            usize,
+            &'m Mutation,
+            Option<&'s MutationSnapshot>,
+        ) -> Result<()>
+                        + 'a
+                ),
     ) -> Self {
         self.compensation = Some(callback);
         self
