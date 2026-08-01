@@ -276,7 +276,7 @@ are reported as distinct phases.
 8. **Stage 0.12: Watcher API stabilization** *(completed)* — composable object/domain filters, filtering before queueing, monitoring-capability validation, and consistent filter semantics across synchronous and async watchers while preserving the released 0.11 API.
 9. **Stage 0.13: DNS mutation** *(completed)* — capability-gated resolver replacement through supported system mechanisms on Linux, Windows, and macOS.
 10. **Stage 0.14: Mutation operation model** *(completed)* — inspectable `Mutation` values and data-only `MutationPlan`s for existing route, address, and DNS mutations; preconditions, idempotency, privilege, confirmation, partial-application, and reversibility are explicit.
-11. **Stage 0.15: Transaction execution** — ordered plans, per-operation outcomes, cancellation and failure boundaries, plus compensation only for documented reversible operations.
+11. **Stage 0.15: Transaction execution** *(completed)* — ordered plans, per-operation outcomes, phase/timing diagnostics, cancellation and failure boundaries, plus compensation only for documented reversible operations.
 12. **Stage 0.16: Interface configuration** — separate desired interface configuration, capability-gated admin-state and MTU mutation, and platform-parity tests.
 13. **Stage 0.17: Neighbor mutation** — intent/observed types and capability-gated static ARP/NDP management.
 14. **Stage 0.18: Snapshots** — consistently assembled `CurrentState` with explicit scope, consistency, and partial-read semantics.
