@@ -18,7 +18,10 @@ pub use address::{IpAddress, Network};
 pub use dns::{DnsConfig, NewDnsConfig};
 pub use event::{ChangeKind, Event, EventDomain, EventFilter};
 pub use ifaddr::{InterfaceAddress, InterfaceAddressId, NewInterfaceAddress};
-pub use interface::{AdminState, Interface, InterfaceId, InterfaceKind, OperationalState};
+pub use interface::{
+    AdminState, DesiredAdminState, Interface, InterfaceConfig, InterfaceId, InterfaceKind,
+    OperationalState,
+};
 pub use mac::MacAddress;
 pub use mutation::{
     Mutation, MutationConfirmation, MutationExecutionPhase, MutationIdempotency, MutationKind,

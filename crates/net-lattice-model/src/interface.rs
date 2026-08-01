@@ -1,6 +1,6 @@
 use std::fmt;
 
-use net_lattice_core::Id;
+use net_lattice_core::{Error, Id, Result};
 
 use crate::mac::MacAddress;
 
@@ -58,6 +58,78 @@ pub enum AdminState {
     /// The platform does not expose a separate administrative state (e.g.
     /// BSD/macOS route-socket interfaces report a single combined state).
     Unknown,
+}
+
+/// The administrative state requested for an interface configuration patch.
+///
+/// This is intentionally separate from observed [`AdminState`]. In
+/// particular, [`AdminState::Unknown`] reports an observation limitation and
+/// is never valid caller intent. A successful configuration operation returns
+/// a fresh observed [`Interface`] instead of converting this value back into
+/// [`AdminState`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum DesiredAdminState {
+    /// Request that the interface be administratively enabled.
+    Up,
+    /// Request that the interface be administratively disabled.
+    Down,
+}
+
+/// A partial desired configuration for one network interface.
+///
+/// `InterfaceConfig` describes only the settings requested by a caller; it
+/// is not an observed [`Interface`] and does not require callers to supply
+/// names, hardware attributes, or operational state. At least one setting
+/// must be requested. Zero is never a valid MTU, while every other MTU range
+/// remains platform- and interface-specific and is validated by the backend.
+///
+/// Build a patch with [`InterfaceConfig::new`], then submit it through the
+/// facade's interface-configuration API or as
+/// [`crate::Mutation::SetInterfaceConfig`].
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct InterfaceConfig {
+    interface_id: InterfaceId,
+    admin_state: Option<DesiredAdminState>,
+    mtu: Option<u32>,
+}
+
+impl InterfaceConfig {
+    /// Creates a patch for `interface_id`.
+    ///
+    /// Returns [`Error::InvalidState`] when no setting is requested or when
+    /// `mtu` is zero. Platform-specific MTU constraints are checked by the
+    /// backend at submission time.
+    pub fn new(
+        interface_id: InterfaceId,
+        admin_state: Option<DesiredAdminState>,
+        mtu: Option<u32>,
+    ) -> Result<Self> {
+        if admin_state.is_none() && mtu.is_none() || mtu == Some(0) {
+            return Err(Error::InvalidState);
+        }
+
+        Ok(Self {
+            interface_id,
+            admin_state,
+            mtu,
+        })
+    }
+
+    /// Returns the interface targeted by this patch.
+    pub const fn interface_id(&self) -> InterfaceId {
+        self.interface_id
+    }
+
+    /// Returns the requested administrative state, if any.
+    pub const fn admin_state(&self) -> Option<DesiredAdminState> {
+        self.admin_state
+    }
+
+    /// Returns the requested MTU, if any.
+    pub const fn mtu(&self) -> Option<u32> {
+        self.mtu
+    }
 }
 
 /// The operational state of an interface, as observed from the link layer.
@@ -168,5 +240,40 @@ mod tests {
         assert_eq!(InterfaceKind::PointToPoint.to_string(), "point-to-point");
         assert_eq!(InterfaceKind::Bridge.to_string(), "bridge");
         assert_eq!(InterfaceKind::Other(42).to_string(), "other(42)");
+    }
+
+    #[test]
+    fn interface_config_preserves_only_requested_settings() {
+        let config =
+            InterfaceConfig::new(InterfaceId::new(7), Some(DesiredAdminState::Up), Some(1500))
+                .expect("valid partial patch");
+
+        assert_eq!(config.interface_id(), InterfaceId::new(7));
+        assert_eq!(config.admin_state(), Some(DesiredAdminState::Up));
+        assert_eq!(config.mtu(), Some(1500));
+    }
+
+    #[test]
+    fn interface_config_allows_each_setting_independently() {
+        let admin_only =
+            InterfaceConfig::new(InterfaceId::new(7), Some(DesiredAdminState::Down), None)
+                .expect("admin-only patch");
+        let mtu_only =
+            InterfaceConfig::new(InterfaceId::new(7), None, Some(9000)).expect("mtu-only patch");
+
+        assert_eq!(admin_only.mtu(), None);
+        assert_eq!(mtu_only.admin_state(), None);
+    }
+
+    #[test]
+    fn interface_config_rejects_empty_or_zero_mtu_patches() {
+        assert!(matches!(
+            InterfaceConfig::new(InterfaceId::new(7), None, None),
+            Err(Error::InvalidState)
+        ));
+        assert!(matches!(
+            InterfaceConfig::new(InterfaceId::new(7), None, Some(0)),
+            Err(Error::InvalidState)
+        ));
     }
 }

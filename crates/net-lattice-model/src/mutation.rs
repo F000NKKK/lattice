@@ -10,6 +10,7 @@ use std::time::Duration;
 use crate::dns::DnsConfig;
 use crate::dns::NewDnsConfig;
 use crate::ifaddr::{InterfaceAddress, NewInterfaceAddress};
+use crate::interface::{Interface, InterfaceConfig};
 use crate::route::Route;
 use net_lattice_core::Error;
 
@@ -32,6 +33,12 @@ pub enum Mutation {
     RemoveAddress(InterfaceAddress),
     /// Replaces the portable resolver configuration.
     SetDnsConfig(NewDnsConfig),
+    /// Applies a partial desired configuration to one network interface.
+    ///
+    /// The requested MTU and administrative state can require separate native
+    /// writes, so callers must treat a failure as potentially partially
+    /// applied and re-read the observed interface state.
+    SetInterfaceConfig(InterfaceConfig),
 }
 
 /// Observed state captured immediately before a mutation is submitted.
@@ -48,6 +55,9 @@ pub enum MutationSnapshot {
     InterfaceAddress(Option<InterfaceAddress>),
     /// The resolver view observed before replacement.
     Dns(DnsConfig),
+    /// The interface observed before a configuration patch, if it was still
+    /// present when the snapshot was captured.
+    Interface(Option<Interface>),
 }
 
 /// The broad effect an operation requests.
@@ -59,6 +69,7 @@ pub enum MutationKind {
     AddAddress,
     RemoveAddress,
     SetDnsConfig,
+    SetInterfaceConfig,
 }
 
 /// State that must hold for an operation to be meaningful.
@@ -182,6 +193,15 @@ impl Mutation {
                 privilege: MutationPrivilege::Elevated,
                 confirmation: MutationConfirmation::ReadAfterWrite,
                 reversibility: MutationReversibility::NotGuaranteed,
+                may_partially_apply: true,
+            },
+            Self::SetInterfaceConfig(_) => MutationSemantics {
+                kind: MutationKind::SetInterfaceConfig,
+                precondition: MutationPrecondition::Present,
+                idempotency: MutationIdempotency::Replace,
+                privilege: MutationPrivilege::Elevated,
+                confirmation: MutationConfirmation::ReadAfterWrite,
+                reversibility: MutationReversibility::RequiresPriorState,
                 may_partially_apply: true,
             },
         }
@@ -514,7 +534,7 @@ impl IntoIterator for MutationPlan {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{IpAddress, Network};
+    use crate::{DesiredAdminState, InterfaceConfig, InterfaceId, IpAddress, Network};
     use net_lattice_ip::{Ipv4Address, Ipv4Network, Ipv4PrefixLength};
 
     fn network() -> Network {
@@ -694,5 +714,30 @@ mod tests {
         assert_eq!(preflight.partial_application_indices(), &[1]);
         assert!(preflight.requires_prior_state());
         assert!(preflight.may_partially_apply());
+    }
+
+    #[test]
+    fn interface_configuration_exposes_readback_and_partial_application_contracts() {
+        let operation = Mutation::SetInterfaceConfig(
+            InterfaceConfig::new(InterfaceId::new(7), Some(DesiredAdminState::Up), Some(1500))
+                .expect("valid configuration"),
+        );
+        let semantics = operation.semantics();
+
+        assert_eq!(semantics.kind, MutationKind::SetInterfaceConfig);
+        assert_eq!(semantics.precondition, MutationPrecondition::Present);
+        assert_eq!(semantics.idempotency, MutationIdempotency::Replace);
+        assert_eq!(semantics.privilege, MutationPrivilege::Elevated);
+        assert_eq!(semantics.confirmation, MutationConfirmation::ReadAfterWrite);
+        assert_eq!(
+            semantics.reversibility,
+            MutationReversibility::RequiresPriorState
+        );
+        assert!(semantics.may_partially_apply);
+
+        let plan = MutationPlan::from_operations([operation]);
+        let preflight = plan.preflight();
+        assert_eq!(preflight.prior_state_indices(), &[0]);
+        assert_eq!(preflight.partial_application_indices(), &[0]);
     }
 }
