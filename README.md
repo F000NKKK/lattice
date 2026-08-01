@@ -20,8 +20,8 @@
 > **Status:** Net Lattice provides cross-platform network inspection, route,
 > address, DNS, administrative-state, and MTU mutation, inspectable mutation
 > plans, and ordered transaction execution with cancellation, snapshots,
-> compensation, and phase-aware reports. Stage 0.16 of the architecture plan
-> has shipped; see Current Status below.
+> compensation, and phase-aware reports. Stage 0.16 implementation is ready
+> for privileged CI verification; see Current Status below.
 
 ## Overview
 
@@ -94,7 +94,8 @@ Planned:
 
 ## Current Status
 
-Stage 0.16 of the [architecture](ARCHITECTURE.md)'s Incremental Delivery Plan has landed:
+Stage 0.16 implementation of the [architecture](ARCHITECTURE.md)'s Incremental
+Delivery Plan is ready for privileged CI verification:
 
 - `net-lattice-core`, `net-lattice-ip`
 - `net-lattice-model`'s `route`, `mac`, `interface`, `dns`, `neighbor`, `ifaddr`, `event`, and `mutation` modules; `NewInterfaceAddress` and `NewDnsConfig` express mutation intent separately from observed state
@@ -191,7 +192,7 @@ duplicating those contracts here.
 9. **Stage 0.13: DNS mutation** *(completed)* — capability-gated resolver replacement through supported system mechanisms on Linux, Windows, and macOS.
 10. **Stage 0.14: Mutation operation model** *(completed)* — inspectable `Mutation` values and data-only `MutationPlan`s for existing route, address, and DNS mutations; preconditions, idempotency, privilege, confirmation, partial-application, and reversibility are explicit.
 11. **Stage 0.15: Transaction execution** *(completed)* — ordered plans, per-operation outcomes, phase/timing diagnostics, cancellation and failure boundaries, plus compensation only for documented reversible operations.
-12. **Stage 0.16: Interface configuration** *(completed)* — separate desired interface configuration, capability-gated admin-state and MTU mutation, read-after-write results, and platform-parity tests.
+12. **Stage 0.16: Interface configuration** *(implementation complete; privileged CI pending)* — separate desired interface configuration, capability-gated admin-state and MTU mutation, read-after-write results, and platform-parity tests.
 13. **Stage 0.17: Neighbor mutation** — intent/observed types and capability-gated static ARP/NDP management.
 14. **Stage 0.18: Snapshots** — consistently assembled `CurrentState` with explicit scope, consistency, and partial-read semantics.
 15. **Stage 0.19: Declarative diff** — separate `DesiredState` configuration types and an inspectable `Diff`, without mutation.

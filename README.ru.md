@@ -21,8 +21,8 @@
 > изменение маршрутов, адресов, DNS, administrative state и MTU интерфейсов,
 > inspectable планы mutation-операций и упорядоченное исполнение транзакций с
 > cancellation, snapshots, compensation и фазовыми отчётами через нативные API
-> Linux, Windows и macOS. Stage 0.16 плана архитектуры завершён; см. «Текущий
-> статус» ниже.
+> Linux, Windows и macOS. Реализация Stage 0.16 готова к privileged CI
+> verification; см. «Текущий статус» ниже.
 
 ## Обзор
 
@@ -95,7 +95,8 @@ Net Lattice призвана закрыть этот пробел, предос�
 
 ## Текущий статус
 
-Реализован этап 0.16 плана поэтапной поставки из [архитектуры](ARCHITECTURE.ru.md):
+Реализация этапа 0.16 плана поэтапной поставки из
+[архитектуры](ARCHITECTURE.ru.md) готова к privileged CI verification:
 
 - `net-lattice-core`, `net-lattice-ip`
 - модули `route`, `mac`, `interface`, `dns`, `neighbor`, `ifaddr`, `event` и `mutation` в `net-lattice-model`; `NewInterfaceAddress` и `NewDnsConfig` выражают намерение изменения отдельно от наблюдаемого состояния
@@ -171,7 +172,7 @@ let watcher = lattice.watch_filtered(route_events)?;
 9. **Stage 0.13: Изменение DNS** *(завершён)* — замена конфигурации резолвера через поддерживаемые системные механизмы, закрытая capability, на Linux, Windows и macOS.
 10. **Stage 0.14: Модель mutation-операций** *(завершён)* — inspectable значения `Mutation` и планы `MutationPlan` только из данных для существующих изменений routes, addresses и DNS; явно определены preconditions, idempotency, privileges, confirmation, partial application и reversibility.
 11. **Stage 0.15: Исполнение транзакций** *(завершён)* — упорядоченные планы, результаты каждой операции, диагностика фаз и длительностей, границы cancellation и ошибок, а также compensation только для документированно reversible операций.
-12. **Stage 0.16: Конфигурация интерфейсов** *(завершён)* — отдельная desired-конфигурация интерфейса, capability-gated изменение admin state и MTU, read-after-write результаты и platform-parity tests.
+12. **Stage 0.16: Конфигурация интерфейсов** *(реализация завершена; privileged CI pending)* — отдельная desired-конфигурация интерфейса, capability-gated изменение admin state и MTU, read-after-write результаты и platform-parity tests.
 13. **Stage 0.17: Изменение соседей** — intent/observed-типы и capability-gated управление статическими ARP/NDP-записями.
 14. **Stage 0.18: Snapshots** — последовательно собранный `CurrentState` с явно определёнными scope, consistency и partial-read семантиками.
 15. **Stage 0.19: Декларативный diff** — отдельные конфигурационные типы `DesiredState` и inspectable `Diff` без mutation.
