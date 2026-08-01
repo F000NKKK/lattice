@@ -67,7 +67,7 @@ impl NewDnsConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use net_lattice_ip::Ipv4Address;
+    use net_lattice_ip::{Ipv4Address, Ipv6Address};
 
     #[test]
     fn new_config_has_no_entries() {
@@ -100,6 +100,26 @@ mod tests {
             vec!["example.test".to_string()],
         );
         assert_eq!(config.nameservers.len(), 1);
+        assert_eq!(config.search_domains, ["example.test"]);
+    }
+
+    #[test]
+    fn mixed_family_config_preserves_order_and_values() {
+        let config = NewDnsConfig::with(
+            vec![
+                IpAddress::from(Ipv4Address::new(1, 1, 1, 1)),
+                IpAddress::from(Ipv6Address::new([
+                    0x2606, 0x4700, 0x4700, 0, 0, 0, 0, 0x1111,
+                ])),
+                IpAddress::from(Ipv4Address::new(8, 8, 8, 8)),
+            ],
+            vec!["example.test".to_string()],
+        );
+
+        assert_eq!(config.nameservers.len(), 3);
+        assert!(matches!(config.nameservers[0], IpAddress::V4(_)));
+        assert!(matches!(config.nameservers[1], IpAddress::V6(_)));
+        assert!(matches!(config.nameservers[2], IpAddress::V4(_)));
         assert_eq!(config.search_domains, ["example.test"]);
     }
 }
