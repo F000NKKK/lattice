@@ -16,7 +16,7 @@ Read first:
 
 1. `index.md`;
 2. `ARCHITECTURE.md` and `ARCHITECTURE.ru.md` roadmap rows;
-3. the active `./ai/<task-name>/` workspace (implemented as `.ai/<task-name>/`):
+3. the active `.ai/<task-name>/` workspace:
    `plan.md`, `AUDIT.md`, and all relevant ADRs;
 4. relevant model, platform, facade, backend, CI, and documentation files.
 

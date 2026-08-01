@@ -18,6 +18,7 @@ net-lattice/
 │   ├── net-lattice-backend-darwin/  macOS BSD/PF_ROUTE/ioctl implementation
 │   ├── net-lattice-async/       Runtime-independent futures::Stream adapter
 │   └── net-lattice/             Public facade, validation, and transaction executor
+├── .ai/<task-name>/              Ignored task plans, audits, and ADRs
 ├── .github/workflows/           Cross-platform CI and privileged coverage jobs
 ├── .codex/                      Reusable Codex rules, roles, and templates
 ├── scripts/                     Repository helper scripts
