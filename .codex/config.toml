@@ -1,0 +1,5 @@
+# Repository-local Codex settings.
+# Root AGENTS.md is the durable entry point. It routes work to the active
+# .ai/<task-name>/ workspace and reusable .codex rules and role profiles.
+project_doc_fallback_filenames = ["AGENTS.md"]
+project_doc_max_bytes = 65536
