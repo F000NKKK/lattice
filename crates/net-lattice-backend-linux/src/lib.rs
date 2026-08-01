@@ -935,6 +935,32 @@ mod tests {
     use net_lattice_ip::{Ipv4Address, Ipv4Network, Ipv4PrefixLength};
     use std::sync::{Mutex, MutexGuard, OnceLock};
 
+    /// Builds the `ndmsg` payload shape that rtnetlink 0.21's
+    /// `neighbours().add(index, destination)` starts with before adding its
+    /// `NDA_LLADDR` attribute. This is deliberately test-local: Stage 0.17
+    /// has not accepted a public static-neighbor mutation contract yet.
+    fn static_neighbour_add_fixture(
+        interface_index: u32,
+        destination: IpAddr,
+        mac: [u8; 6],
+    ) -> NeighbourMessage {
+        let mut message = NeighbourMessage::default();
+        message.header.family = match destination {
+            IpAddr::V4(_) => rtnetlink::packet_route::AddressFamily::Inet,
+            IpAddr::V6(_) => rtnetlink::packet_route::AddressFamily::Inet6,
+        };
+        message.header.ifindex = interface_index;
+        message.header.state = RtNeighbourState::Permanent;
+        message.attributes = vec![
+            NeighbourAttribute::Destination(match destination {
+                IpAddr::V4(address) => NeighbourAddress::Inet(address),
+                IpAddr::V6(address) => NeighbourAddress::Inet6(address),
+            }),
+            NeighbourAttribute::LinkLayerAddress(mac.to_vec()),
+        ];
+        message
+    }
+
     #[cfg(feature = "async")]
     fn tokio_route_event(watcher: &mut TokioEventReceiver<Event>, id: RouteId) -> bool {
         use std::pin::Pin;
@@ -1347,6 +1373,51 @@ mod tests {
             observed.id,
             synthesize_neighbor_id(7, &observed.address),
             "IPv6 neighbor identity uses the same interface/address key"
+        );
+    }
+
+    #[test]
+    fn static_neighbour_add_fixtures_preserve_ipv4_arp_and_ipv6_ndp_abi_fields() {
+        let ipv4 = static_neighbour_add_fixture(
+            7,
+            IpAddr::V4(std::net::Ipv4Addr::new(192, 0, 2, 17)),
+            [0, 1, 2, 3, 4, 5],
+        );
+        assert_eq!(
+            ipv4.header.family,
+            rtnetlink::packet_route::AddressFamily::Inet
+        );
+        assert_eq!(ipv4.header.ifindex, 7);
+        assert_eq!(ipv4.header.state, RtNeighbourState::Permanent);
+        assert_eq!(
+            ipv4.attributes,
+            vec![
+                NeighbourAttribute::Destination(NeighbourAddress::Inet(std::net::Ipv4Addr::new(
+                    192, 0, 2, 17
+                ),)),
+                NeighbourAttribute::LinkLayerAddress(vec![0, 1, 2, 3, 4, 5]),
+            ]
+        );
+
+        let ipv6 = static_neighbour_add_fixture(
+            9,
+            IpAddr::V6("2001:db8:0:17::1".parse().expect("valid IPv6 NDP address")),
+            [2, 0, 0, 0, 0, 0x17],
+        );
+        assert_eq!(
+            ipv6.header.family,
+            rtnetlink::packet_route::AddressFamily::Inet6
+        );
+        assert_eq!(ipv6.header.ifindex, 9);
+        assert_eq!(ipv6.header.state, RtNeighbourState::Permanent);
+        assert_eq!(
+            ipv6.attributes,
+            vec![
+                NeighbourAttribute::Destination(NeighbourAddress::Inet6(
+                    "2001:db8:0:17::1".parse().expect("valid IPv6 NDP address"),
+                )),
+                NeighbourAttribute::LinkLayerAddress(vec![2, 0, 0, 0, 0, 0x17]),
+            ]
         );
     }
 

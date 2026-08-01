@@ -1381,6 +1381,37 @@ mod tests {
     use net_lattice_ip::{Ipv4Address, Ipv4Network, Ipv4PrefixLength};
     use windows::Win32::NetworkManagement::IpHelper::MibParameterNotification;
 
+    /// Builds the `MIB_IPNET_ROW2` input required by `CreateIpNetEntry2` for
+    /// a static ARP/NDP entry. It is test-local feasibility evidence only:
+    /// Stage 0.17 has not accepted a production neighbor-mutator contract.
+    fn static_neighbour_create_row(
+        interface_index: u32,
+        address: IpAddr,
+        mac: [u8; 6],
+    ) -> MIB_IPNET_ROW2 {
+        let mut row = MIB_IPNET_ROW2 {
+            InterfaceIndex: interface_index,
+            Address: ip_to_sockaddr_inet(address),
+            PhysicalAddressLength: mac.len() as u32,
+            State: NlnsPermanent,
+            ..Default::default()
+        };
+        row.PhysicalAddress[..mac.len()].copy_from_slice(&mac);
+        row
+    }
+
+    /// Builds the documented identity-only input for `DeleteIpNetEntry2`.
+    /// Microsoft documents the interface and a family-tagged neighbor address
+    /// as delete inputs; the physical address and state are not part of this
+    /// request fixture.
+    fn neighbour_delete_row(interface_index: u32, address: IpAddr) -> MIB_IPNET_ROW2 {
+        MIB_IPNET_ROW2 {
+            InterfaceIndex: interface_index,
+            Address: ip_to_sockaddr_inet(address),
+            ..Default::default()
+        }
+    }
+
     #[test]
     fn interface_configuration_uses_legacy_admin_status_values() {
         assert_eq!(
@@ -1391,6 +1422,51 @@ mod tests {
             desired_admin_status(DesiredAdminState::Down).expect("down is supported"),
             MIB_IF_ADMIN_STATUS_DOWN
         );
+    }
+
+    #[test]
+    fn static_neighbour_rows_preserve_ipv4_arp_and_ipv6_ndp_create_delete_inputs() {
+        let ipv4 = IpAddr::V4(std::net::Ipv4Addr::new(192, 0, 2, 17));
+        let ipv4_create = static_neighbour_create_row(7, ipv4, [0, 1, 2, 3, 4, 5]);
+        assert_eq!(ipv4_create.InterfaceIndex, 7);
+        assert_eq!(unsafe { ipv4_create.Address.si_family }, AF_INET);
+        assert_eq!(
+            unsafe { sockaddr_inet_to_ip(&ipv4_create.Address) },
+            Some(ipv4)
+        );
+        assert_eq!(ipv4_create.PhysicalAddressLength, 6);
+        assert_eq!(&ipv4_create.PhysicalAddress[..6], &[0, 1, 2, 3, 4, 5]);
+        assert_eq!(ipv4_create.State, NlnsPermanent);
+
+        let ipv4_delete = neighbour_delete_row(7, ipv4);
+        assert_eq!(ipv4_delete.InterfaceIndex, 7);
+        assert_eq!(unsafe { ipv4_delete.Address.si_family }, AF_INET);
+        assert_eq!(
+            unsafe { sockaddr_inet_to_ip(&ipv4_delete.Address) },
+            Some(ipv4)
+        );
+        assert_eq!(ipv4_delete.PhysicalAddressLength, 0);
+
+        let ipv6 = IpAddr::V6("2001:db8:0:17::1".parse().expect("valid IPv6 NDP address"));
+        let ipv6_create = static_neighbour_create_row(9, ipv6, [2, 0, 0, 0, 0, 0x17]);
+        assert_eq!(ipv6_create.InterfaceIndex, 9);
+        assert_eq!(unsafe { ipv6_create.Address.si_family }, AF_INET6);
+        assert_eq!(
+            unsafe { sockaddr_inet_to_ip(&ipv6_create.Address) },
+            Some(ipv6)
+        );
+        assert_eq!(ipv6_create.PhysicalAddressLength, 6);
+        assert_eq!(&ipv6_create.PhysicalAddress[..6], &[2, 0, 0, 0, 0, 0x17]);
+        assert_eq!(ipv6_create.State, NlnsPermanent);
+
+        let ipv6_delete = neighbour_delete_row(9, ipv6);
+        assert_eq!(ipv6_delete.InterfaceIndex, 9);
+        assert_eq!(unsafe { ipv6_delete.Address.si_family }, AF_INET6);
+        assert_eq!(
+            unsafe { sockaddr_inet_to_ip(&ipv6_delete.Address) },
+            Some(ipv6)
+        );
+        assert_eq!(ipv6_delete.PhysicalAddressLength, 0);
     }
 
     #[test]
