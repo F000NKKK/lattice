@@ -25,6 +25,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Public `MutationSnapshot` values cover observed route, interface-address,
   and DNS state through provider-backed reads.
 
+### Tests
+
+- Add an ignored native facade transaction round-trip and run it in the
+  privileged Linux, Windows, and macOS CI coverage jobs alongside backend
+  integration tests.
+
 ## [0.14.1] - 2026-08-01
 
 ### Added
