@@ -919,6 +919,53 @@ mod tests {
         ));
     }
 
+    /// Exercises the complete facade transaction path against the native
+    /// backend. This is intentionally ignored because route mutation requires
+    /// root/CAP_NET_ADMIN/Administrator and changes the host routing table.
+    #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+    #[test]
+    #[ignore = "requires native networking privilege; run with the platform privileged test job"]
+    fn native_facade_route_transaction_round_trip() {
+        let lattice = Lattice::connect().expect("failed to connect native backend");
+        let interface = lattice
+            .interfaces()
+            .expect("failed to list interfaces")
+            .into_iter()
+            .find(|interface| matches!(interface.kind, InterfaceKind::Loopback))
+            .or_else(|| {
+                lattice
+                    .interfaces()
+                    .ok()
+                    .and_then(|mut interfaces| interfaces.pop())
+            })
+            .expect("native backend reported no interfaces");
+        let destination = Network::from(Ipv4Network::new(
+            Ipv4Address::new(203, 0, 113, 0),
+            Ipv4PrefixLength::new(24).expect("valid prefix"),
+        ));
+        let route = Route::new(RouteId::new(0), destination).with_interface_index(interface.index);
+
+        let add_plan = MutationPlan::from_operations([Mutation::AddRoute(route.clone())]);
+        let add_report = lattice.execute_plan_with_snapshot(
+            &add_plan,
+            |_, _| false,
+            |index, operation| {
+                lattice
+                    .snapshot_for_mutation(operation)
+                    .map(|snapshot| (index, snapshot))
+            },
+            |_, _, _| Ok(()),
+        );
+
+        let remove_plan = MutationPlan::from_operations([Mutation::RemoveRoute(route)]);
+        let remove_report = lattice.execute_plan(&remove_plan);
+        assert!(add_report.is_success(), "route add report: {add_report:?}");
+        assert!(
+            remove_report.is_success(),
+            "route remove report: {remove_report:?}"
+        );
+    }
+
     #[test]
     fn facade_runs_supplied_compensation_in_reverse_order() {
         let lattice = lattice(Capability::empty());
