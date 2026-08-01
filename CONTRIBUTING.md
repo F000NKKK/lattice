@@ -13,8 +13,7 @@ analysis, and typed execution-report and compensation-boundary contracts for
 the existing route, address, and DNS operations on Linux, Windows, and macOS.
 Large capability domains remain ahead, but the published read, mutation,
 monitoring, planning, and backend-extension APIs are real public surface. The
-most valuable
-contributions right now are:
+most valuable contributions right now are:
 
 - Feedback on the project's vision, scope, and roadmap (see [README.md](README.md))
 - Discussion of API design and architecture for upcoming stages
@@ -40,6 +39,9 @@ Net Lattice follows standard Rust ecosystem conventions:
 - Code must be free of `clippy` warnings.
 - Public APIs must be documented.
 - Changes must include appropriate tests.
+- Every affected crate must retain a standalone crate-local README, and
+  English/Russian project documentation must remain synchronized.
+- Privileged network tests must be isolated, opt-in, and restore changed state.
 - Commit messages should be clear and descriptive.
 
 ## Reporting Issues

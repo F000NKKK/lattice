@@ -66,6 +66,8 @@ Net Lattice призвана закрыть этот пробел, предос�
 - Просмотр интерфейсов
 - Просмотр и изменение конфигурации DNS-резолвера
 - Inspectable планы mutation-операций для маршрутов, адресов и DNS
+- Упорядоченное исполнение mutation-планов с cancellation, snapshots, явной
+  compensation и фазовыми отчётами
 - Таблицы соседей (ARP/NDP)
 - Мониторинг сети и уведомления об изменениях
 - Опциональный runtime-agnostic async stream событий
@@ -76,7 +78,6 @@ Net Lattice призвана закрыть этот пробел, предос�
 - VRF
 - Сетевые пространства имён (namespaces)
 - Интеграция с firewall
-- Транзакционная конфигурация
 - Декларативная настройка сети
 
 ## Не входит в задачи проекта
@@ -144,145 +145,10 @@ let watcher = lattice.watch_filtered(route_events)?;
 Запуск: `cargo run -p net-lattice --example <name>`. Для `async_monitor`
 добавьте `--features async`.
 
-### Просмотр и наблюдение состояния
-
-```rust
-use net_lattice::{Lattice, Result};
-
-fn main() -> Result<()> {
-    let lattice = Lattice::connect()?;
-
-    for interface in lattice.interfaces()? {
-        println!("{interface:?}");
-    }
-
-    for route in lattice.routes()? {
-        println!("{route:?}");
-    }
-
-    let watcher = lattice.watch()?;
-    loop {
-        let event = watcher.recv()?;
-        println!("{event:?}");
-    }
-}
-```
-
-### Асинхронный мониторинг
-
-Включите опциональный async-фасад через `net-lattice = { version = "0.15", features = ["async"] }`. На каждой поддерживаемой платформе он возвращает одинаковый `futures::Stream`:
-
-```rust
-use futures::StreamExt;
-use net_lattice::{EventFilter, Lattice, Result};
-
-async fn monitor() -> Result<()> {
-    let lattice = Lattice::connect()?;
-    let mut events = lattice.watch_async(EventFilter::ALL)?;
-    while let Some(event) = events.next().await {
-        println!("{:?}", event?);
-    }
-    Ok(())
-}
-```
-
-### Назначение адреса
-
-Назначение адреса использует тип запроса, поэтому потребитель не конструирует ID наблюдаемого адреса:
-
-```rust
-use net_lattice::{
-    Error, Ipv4Address, Ipv4Network, Ipv4PrefixLength, Network, NewInterfaceAddress,
-};
-
-let interface = lattice
-    .interfaces()?
-    .into_iter()
-    .next()
-    .ok_or(Error::NotFound)?;
-let request = NewInterfaceAddress::new(
-    interface.id,
-    Network::from(Ipv4Network::new(
-        Ipv4Address::new(192, 0, 2, 10),
-        Ipv4PrefixLength::new(24)?,
-    )),
-);
-let observed = lattice.add_address(request)?;
-lattice.remove_address(observed)?;
-```
-
-### Добавление и удаление маршрута
-
-Изменение маршрута принимает типизированное значение маршрута. Используйте
-безопасный для хоста маршрут и удаляйте только тот маршрут, который приложение
-успешно создало:
-
-```rust
-let route = Route::new(RouteId::new(0), destination)
-    .with_interface_index(interface_index);
-lattice.add_route(route.clone())?;
-lattice.remove_route(route)?;
-```
-
-### Замена конфигурации резолвера
-
-Для замены DNS используется desired-state input, а метод возвращает то, что
-платформа затем наблюдает. Как правило, требуются права администратора.
-
-```rust
-use net_lattice::{IpAddress, Ipv4Address, NewDnsConfig};
-
-let requested = NewDnsConfig::with(
-    vec![IpAddress::from(Ipv4Address::new(1, 1, 1, 1))],
-    vec!["example.test".to_string()],
-);
-let observed = lattice.set_dns_config(requested)?;
-```
-
-### Просмотр плана mutation
-
-Stage 0.14 также предоставляет типизированные `MutationOutcome`,
-`MutationPlanReport` и `RollbackStatus`, которые использует исполнитель Stage
-0.15 для отчёта о частичных отказах и границах компенсации. Сам
-`MutationPlan` остаётся чистыми данными; исполнение явно выполняется на
-границе подключённого `Lattice`, через единый объект `ExecutionOptions`.
-Исполнитель не выводит обратные операции или snapshot автоматически.
-Вспомогательный метод фасада `snapshot_for_mutation` читает наблюдаемый route,
-interface address или DNS view в типизированный `MutationSnapshot`.
-
-В Stage 0.14 планы являются чистыми данными. Они делают существующие
-imperative операции inspectable без их применения; Stage 0.15 добавляет
-явное исполнение плана и отчёт по каждой операции.
-
-```rust
-let plan = MutationPlan::from_operations([
-    Mutation::AddAddress(request),
-    Mutation::SetDnsConfig(requested_dns),
-]);
-
-for operation in plan.operations() {
-    println!("{operation:?}: {:?}", operation.semantics());
-}
-
-let preflight = plan.preflight();
-println!("операции со snapshot: {:?}", preflight.prior_state_indices());
-println!(
-    "операции с риском partial application: {:?}",
-    preflight.partial_application_indices()
-);
-let mut options = net_lattice::ExecutionOptions::default();
-let report = lattice.execute_plan(&plan, &mut options);
-```
-
-`MutationPlan::preflight` не имеет side effects. Он сообщает риски,
-выведенные из metadata операций; `lattice.validate_plan(&plan)` выполняет
-runtime-проверку capabilities до отправки операций. Проверка privileges и
-текущего состояния остаётся обязанностью executor.
-
-`MutationPlanReport::outcomes` остаётся стабильной поверхностью результатов;
-`operation_reports` добавляет фазу, длительность и причину остановки. Валидация,
-захват snapshot, native execution, cancellation и compensation представлены
-раздельными фазами.
+Краткое руководство для приложений находится в
+[`README` крейта `net-lattice`](crates/net-lattice/README.md). Остальные
+руководства из таблицы workspace описывают прямое использование библиотечных
+и backend-крейтов без дублирования этих контрактов здесь.
 
 ## Дорожная карта
 

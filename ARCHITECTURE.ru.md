@@ -57,31 +57,24 @@ Net Lattice, отдельный темп релизов или реальный 
 
 ## Структура Workspace
 
-```
-net-lattice-core          Error, Result, ID types, shared traits
-   │
-   ├── net-lattice-ip        IPv4Address, IPv6Address, Network, Prefix
-   │        (depends on: net-lattice-core)
-   │
-   ├── net-lattice-model     модули: mac, route, interface, neighbor, dns, event, mutation
-   │        (depends on: net-lattice-core, net-lattice-ip)
-   │
-   ├── net-lattice-platform  Generic provider traits, Capability
-   │        (depends on: net-lattice-core — NOT net-lattice-model)
-   │
-   ├── net-lattice-backend-linux    Netlink backend
-   ├── net-lattice-backend-windows  IP Helper API backend
-   ├── net-lattice-backend-darwin   Route socket backend
-   │        (each depends on: net-lattice-platform AND net-lattice-model —
-   │         backends are where the generic contract and the concrete
-   │         model finally meet)
-   │
-   └── net-lattice           Public facade, default backend selection
-            (depends on: net-lattice-model, net-lattice-platform, net-lattice-backend-*)
+```text
+net-lattice-core          Error, Result, ID types
+net-lattice-ip            IPv4/IPv6 addresses, networks, prefixes
+net-lattice-model         mac, route, interface, neighbor, dns, event, mutation
+    зависит от: net-lattice-core, net-lattice-ip
+net-lattice-platform      Generic provider traits, Capability
+    зависит от: net-lattice-core; никогда от net-lattice-model
+net-lattice-async         Runtime-independent event stream adapter
+    зависит от: net-lattice-core, net-lattice-platform
+net-lattice-backend-*     Native Linux, Windows и macOS implementations
+    зависят от: core, ip, model, platform
+net-lattice               Public facade и выбор backend по умолчанию
+    зависит от: core, ip, model, platform, target backend, optional async
 ```
 
-`net-lattice-model` и `net-lattice-platform` — сиблинги под `net-lattice-core`, а не
-цепочка. `net-lattice-platform` не зависит ни от чего, что описывает, что такое
+`net-lattice-core` и `net-lattice-ip` — независимые foundational-крейты.
+`net-lattice-model` и `net-lattice-platform` — sibling-слои, а не цепочка
+зависимостей. `net-lattice-platform` не зависит ни от чего, что описывает, что такое
 маршрут или интерфейс на самом деле — он знает только, что backend производит
 *что-то*, и оставляет решение о том, что это "что-то" есть, тому, кто
 реализует или потребляет trait. `net-lattice-model`, в свою очередь, понятия не

@@ -66,6 +66,8 @@ Implemented:
 - Interface inspection
 - DNS resolver inspection and mutation
 - Inspectable mutation plans for routes, addresses, and DNS
+- Ordered mutation-plan execution with cancellation, snapshots, explicit
+  compensation, and phase-aware reports
 - Neighbor tables (ARP/NDP)
 - Network monitoring and change notifications
 - Optional runtime-agnostic async event stream
@@ -76,7 +78,6 @@ Planned:
 - VRFs
 - Network namespaces
 - Firewall integration
-- Transactional configuration
 - Declarative networking
 
 ## Non-Goals
@@ -143,143 +144,10 @@ elevated operating-system privilege.
 Run an example with `cargo run -p net-lattice --example <name>`. Add
 `--features async` for `async_monitor`.
 
-### Inspecting and watching state
-
-```rust
-use net_lattice::{Lattice, Result};
-
-fn main() -> Result<()> {
-    let lattice = Lattice::connect()?;
-
-    for interface in lattice.interfaces()? {
-        println!("{interface:?}");
-    }
-
-    for route in lattice.routes()? {
-        println!("{route:?}");
-    }
-
-    let watcher = lattice.watch()?;
-    loop {
-        let event = watcher.recv()?;
-        println!("{event:?}");
-    }
-}
-```
-
-### Async monitoring
-
-Enable the optional async facade with `net-lattice = { version = "0.15", features = ["async"] }`. It returns the same `futures::Stream` on each supported platform:
-
-```rust
-use futures::StreamExt;
-use net_lattice::{EventFilter, Lattice, Result};
-
-async fn monitor() -> Result<()> {
-    let lattice = Lattice::connect()?;
-    let mut events = lattice.watch_async(EventFilter::ALL)?;
-    while let Some(event) = events.next().await {
-        println!("{:?}", event?);
-    }
-    Ok(())
-}
-```
-
-### Assigning an address
-
-Address assignment uses a request type, so callers never construct an observed address ID:
-
-```rust
-use net_lattice::{
-    Error, Ipv4Address, Ipv4Network, Ipv4PrefixLength, Network, NewInterfaceAddress,
-};
-
-let interface = lattice
-    .interfaces()?
-    .into_iter()
-    .next()
-    .ok_or(Error::NotFound)?;
-let request = NewInterfaceAddress::new(
-    interface.id,
-    Network::from(Ipv4Network::new(
-        Ipv4Address::new(192, 0, 2, 10),
-        Ipv4PrefixLength::new(24)?,
-    )),
-);
-let observed = lattice.add_address(request)?;
-lattice.remove_address(observed)?;
-```
-
-### Adding and removing a route
-
-Route mutation accepts the typed route value. Use a route that is safe for the
-host and remove only a route that the application successfully created:
-
-```rust
-let route = Route::new(RouteId::new(0), destination)
-    .with_interface_index(interface_index);
-lattice.add_route(route.clone())?;
-lattice.remove_route(route)?;
-```
-
-### Replacing resolver configuration
-
-DNS replacement uses a desired-state input and returns what the platform
-subsequently observes. It generally requires administrator privileges.
-
-```rust
-use net_lattice::{IpAddress, Ipv4Address, NewDnsConfig};
-
-let requested = NewDnsConfig::with(
-    vec![IpAddress::from(Ipv4Address::new(1, 1, 1, 1))],
-    vec!["example.test".to_string()],
-);
-let observed = lattice.set_dns_config(requested)?;
-```
-
-### Inspecting a mutation plan
-
-Plans are pure data in Stage 0.14. They make existing imperative operations
-inspectable without applying them. Stage 0.14 also defines the typed
-`MutationOutcome`, `MutationPlanReport`, and `RollbackStatus` contracts used by
-the Stage 0.15 executor to report partial failure and compensation boundaries.
-`MutationPlan` itself remains data-only; execution is explicit at the connected
-`Lattice` boundary and is configured through one `ExecutionOptions` value.
-The executor never infers inverse operations or snapshots.
-The facade's `snapshot_for_mutation` helper reads the matching observed route,
-interface address, or DNS view into a typed `MutationSnapshot`.
-
-```rust
-let plan = MutationPlan::from_operations([
-    Mutation::AddAddress(request),
-    Mutation::SetDnsConfig(requested_dns),
-]);
-
-for operation in plan.operations() {
-    println!("{operation:?}: {:?}", operation.semantics());
-}
-
-let preflight = plan.preflight();
-println!("snapshot operations: {:?}", preflight.prior_state_indices());
-println!(
-    "partial-application operations: {:?}",
-    preflight.partial_application_indices()
-);
-
-let mut options = net_lattice::ExecutionOptions::default();
-let report = lattice.execute_plan(&plan, &mut options);
-assert_eq!(report.len(), plan.len());
-```
-
-`MutationPlan::preflight` is side-effect free. It reports risks derived from
-the operation metadata; call `lattice.validate_plan(&plan)` for the runtime
-capability portion before execution. Privilege and current-state checks remain
-executor responsibilities.
-
-`MutationPlanReport::outcomes` remains the stable per-operation result surface;
-`operation_reports` adds phase, elapsed duration, and stop-reason diagnostics.
-Validation, snapshot capture, native execution, cancellation, and compensation
-are reported as distinct phases.
+For a compact application-facing walkthrough, use the
+[`net-lattice` crate README](crates/net-lattice/README.md). The other crate
+guides in the workspace table document direct library and backend use without
+duplicating those contracts here.
 
 ## Roadmap
 

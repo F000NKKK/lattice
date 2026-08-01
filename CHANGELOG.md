@@ -40,6 +40,14 @@ No unreleased changes.
 - Add an ignored native compensation scenario that verifies first-failure
   stopping and reverse-order route cleanup through the facade.
 
+### Documentation
+
+- Give every published crate a standalone crate-local README with its purpose,
+  intended audience, usage example, and platform or privilege constraints.
+- Keep the repository README focused on the workspace overview and link to the
+  individual crate guides; synchronize English/Russian capability status and
+  community health documents with the Stage 0.15 executor contract.
+
 ## [0.14.1] - 2026-08-01
 
 ### Added

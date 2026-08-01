@@ -74,8 +74,9 @@ an internal facade component until repeated reuse justifies a new crate.
 
 ## Current release and roadmap
 
-Published stage baseline: `net-lattice 0.15.0`. Current facade workspace
-version: `0.15.1`.
+Published stage baseline: the `net-lattice 0.15` release line. Read the current
+workspace version from `crates/net-lattice/Cargo.toml`; do not duplicate a
+patch version here.
 
 - 0.1–0.14: completed inspection, monitoring, imperative mutation, and
   mutation-plan model stages.

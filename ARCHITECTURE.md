@@ -64,31 +64,24 @@ is a non-breaking workspace refactor, not an early commitment.
 
 ## Workspace Layout
 
-```
-net-lattice-core          Error, Result, ID types, shared traits
-   │
-   ├── net-lattice-ip        IPv4Address, IPv6Address, Network, Prefix
-   │        (depends on: net-lattice-core)
-   │
-   ├── net-lattice-model     modules: mac, route, interface, neighbor, dns, event, mutation
-   │        (depends on: net-lattice-core, net-lattice-ip)
-   │
-   ├── net-lattice-platform  Generic provider traits, Capability
-   │        (depends on: net-lattice-core — NOT net-lattice-model)
-   │
-   ├── net-lattice-backend-linux    Netlink backend
-   ├── net-lattice-backend-windows  IP Helper API backend
-   ├── net-lattice-backend-darwin   Route socket backend
-   │        (each depends on: net-lattice-platform AND net-lattice-model —
-   │         backends are where the generic contract and the concrete
-   │         model finally meet)
-   │
-   └── net-lattice           Public facade, default backend selection
-            (depends on: net-lattice-model, net-lattice-platform, net-lattice-backend-*)
+```text
+net-lattice-core          Error, Result, ID types
+net-lattice-ip            IPv4/IPv6 addresses, networks, prefixes
+net-lattice-model         mac, route, interface, neighbor, dns, event, mutation
+    depends on: net-lattice-core, net-lattice-ip
+net-lattice-platform      Generic provider traits, Capability
+    depends on: net-lattice-core; never net-lattice-model
+net-lattice-async         Runtime-independent event stream adapter
+    depends on: net-lattice-core, net-lattice-platform
+net-lattice-backend-*     Native Linux, Windows, and macOS implementations
+    depend on: core, ip, model, platform
+net-lattice               Public facade and default backend selection
+    depends on: core, ip, model, platform, target backend, optional async
 ```
 
-`net-lattice-model` and `net-lattice-platform` are siblings under `net-lattice-core`,
-not a chain. `net-lattice-platform` depends on nothing that describes what a
+`net-lattice-core` and `net-lattice-ip` are independent foundations.
+`net-lattice-model` and `net-lattice-platform` are sibling layers, not a
+dependency chain. `net-lattice-platform` depends on nothing that describes what a
 route or an interface actually is — it only knows that a backend produces
 *something*, and defers what that something is to whoever implements or
 consumes the trait. `net-lattice-model` in turn has no idea `net-lattice-platform`
