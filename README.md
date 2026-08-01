@@ -227,10 +227,8 @@ inspectable without applying them. Stage 0.14 also defines the typed
 `MutationOutcome`, `MutationPlanReport`, and `RollbackStatus` contracts used by
 the Stage 0.15 executor to report partial failure and compensation boundaries.
 `MutationPlan` itself remains data-only; execution is explicit at the connected
-`Lattice` boundary. Callers that already hold a prior-state snapshot can use
-`Lattice::execute_plan_with_compensation` to supply the compensating operation;
-the executor never infers one. `Lattice::execute_plan_with_snapshot` combines
-the operation-boundary snapshot callback with that explicit compensator.
+`Lattice` boundary and is configured through one `ExecutionOptions` value.
+The executor never infers inverse operations or snapshots.
 The facade's `snapshot_for_mutation` helper reads the matching observed route,
 interface address, or DNS view into a typed `MutationSnapshot`.
 
@@ -251,7 +249,8 @@ println!(
     preflight.partial_application_indices()
 );
 
-let report = lattice.execute_plan(&plan);
+let mut options = net_lattice::ExecutionOptions::default();
+let report = lattice.execute_plan(&plan, &mut options);
 assert_eq!(report.len(), plan.len());
 ```
 

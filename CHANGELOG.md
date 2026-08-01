@@ -11,17 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Stage 0.15 transaction-execution baseline: `Lattice::execute_plan` submits
   ordered mutation plans and returns one `MutationOutcome` per operation.
-- Operation-boundary cancellation and first-failure stopping are exposed via
-  `Lattice::execute_plan_with_cancel`; unapplied operations are reported as
-  `NotAttempted` and rollback is never inferred without prior state.
-- `Lattice::execute_plan_with_compensation` accepts an explicit reverse-order
-  compensator and reports `Completed` or `Failed` rollback status without
-  inventing inverse operations or snapshots.
+- A single public `ExecutionOptions` value configures operation-boundary
+  cancellation, prior-state capture, and explicit reverse-order compensation;
+  the facade no longer grows one method per execution policy.
 - `Lattice::validate_plan` performs side-effect-free runtime capability
   preflight; execution rejects unsupported DNS mutation before submitting any
   operation.
-- `Lattice::execute_plan_with_snapshot` captures caller-defined prior state at
-  operation boundaries and supplies it to reverse-order compensation.
+- `Lattice::execute_plan` captures caller-defined prior state at operation
+  boundaries and supplies it to reverse-order compensation when configured.
 - Public `MutationSnapshot` values cover observed route, interface-address,
   and DNS state through provider-backed reads.
 - Runtime plan validation now checks DNS capability, interface/address/route

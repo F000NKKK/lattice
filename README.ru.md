@@ -228,11 +228,8 @@ Stage 0.14 также предоставляет типизированные `M
 `MutationPlanReport` и `RollbackStatus`, которые использует исполнитель Stage
 0.15 для отчёта о частичных отказах и границах компенсации. Сам
 `MutationPlan` остаётся чистыми данными; исполнение явно выполняется на
-границе подключённого `Lattice`. Если у вызывающего уже есть snapshot
-предыдущего состояния, `Lattice::execute_plan_with_compensation` позволяет
-передать compensator; исполнитель не выводит обратную операцию автоматически.
-`Lattice::execute_plan_with_snapshot` объединяет callback захвата состояния на
-границе операции с этим явным compensator.
+границе подключённого `Lattice`, через единый объект `ExecutionOptions`.
+Исполнитель не выводит обратные операции или snapshot автоматически.
 Вспомогательный метод фасада `snapshot_for_mutation` читает наблюдаемый route,
 interface address или DNS view в типизированный `MutationSnapshot`.
 
@@ -256,6 +253,8 @@ println!(
     "операции с риском partial application: {:?}",
     preflight.partial_application_indices()
 );
+let mut options = net_lattice::ExecutionOptions::default();
+let report = lattice.execute_plan(&plan, &mut options);
 ```
 
 `MutationPlan::preflight` не имеет side effects. Он сообщает риски,
