@@ -5,7 +5,9 @@ public facade and native platform backends.
 
 ## What it provides
 
-- generic inspection and mutation provider traits using associated types;
+- generic inspection and mutation provider traits using associated types,
+  including `InterfaceMutator` for desired administrative-state and MTU
+  patches;
 - runtime `Capability` reporting;
 - synchronous event sender/receiver contracts;
 - optional native Tokio watcher contracts behind the `async` feature.
@@ -29,4 +31,7 @@ fn supports_monitoring<P: CapabilityProvider>(provider: &P) -> bool {
 
 Capabilities report implemented runtime surfaces. They do not guarantee that
 the current process has native privileges or that state cannot change between
-validation and submission.
+validation and submission. In particular,
+`Capability::INTERFACE_ADMIN_STATE` and `Capability::INTERFACE_MTU` gate a
+backend's interface-configuration surface independently; a caller requesting
+both settings must require both flags.

@@ -223,6 +223,15 @@ trait InterfaceProvider {
 
     fn interfaces(&self) -> Result<Vec<Self::Interface>, Error>;
 }
+
+trait InterfaceMutator: InterfaceProvider {
+    type InterfaceConfig;
+
+    fn set_interface_config(
+        &self,
+        config: Self::InterfaceConfig,
+    ) -> Result<Self::Interface, Error>;
+}
 ```
 
 `net-lattice-platform` is satisfied by anything shaped like a route; it has no
@@ -237,7 +246,10 @@ the same reason as before — a monolithic trait covering every domain would
 force every backend to stub out methods for features it doesn't have:
 
 - `RouteProvider` — list/add/remove routes.
-- `InterfaceProvider` — list/configure interfaces.
+- `InterfaceProvider` — list observed interfaces.
+- `InterfaceMutator` — apply a partial desired interface configuration and
+  return the read-after-write observed interface. It is separate from listing
+  because it requires elevated native networking privilege.
 - `NeighborProvider` — list ARP/NDP entries.
 - `DnsProvider` — read/write DNS resolver configuration.
 - `AddressProvider` — list IP addresses assigned to interfaces.

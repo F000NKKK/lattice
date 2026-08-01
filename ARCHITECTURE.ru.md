@@ -216,6 +216,15 @@ trait InterfaceProvider {
 
     fn interfaces(&self) -> Result<Vec<Self::Interface>, Error>;
 }
+
+trait InterfaceMutator: InterfaceProvider {
+    type InterfaceConfig;
+
+    fn set_interface_config(
+        &self,
+        config: Self::InterfaceConfig,
+    ) -> Result<Self::Interface, Error>;
+}
 ```
 
 `net-lattice-platform` удовлетворён чем угодно, что имеет форму маршрута; у него
@@ -232,7 +241,10 @@ Provider-traits, по одному на возможность, а не один
 него нет:
 
 - `RouteProvider` — список/добавление/удаление маршрутов.
-- `InterfaceProvider` — список/настройка интерфейсов.
+- `InterfaceProvider` — список наблюдаемых интерфейсов.
+- `InterfaceMutator` — применение частичной desired-конфигурации интерфейса
+  с возвратом наблюдаемого интерфейса после read-after-write. Он отделён от
+  чтения, поскольку требует повышенных нативных сетевых привилегий.
 - `NeighborProvider` — список записей ARP/NDP.
 - `DnsProvider` — чтение/запись конфигурации DNS-резолвера.
 - `AddressProvider` — список IP-адресов, назначенных интерфейсам.
