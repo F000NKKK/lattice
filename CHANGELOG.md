@@ -33,6 +33,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Document the interface configuration contract, platform capability gates,
   native event mappings, and the shared-runner limitation for destructive
   end-to-end interface-event testing in English and Russian project docs.
+- Clarify the existing native monitoring matrix: neighbor events are delivered
+  by Linux Netlink and macOS PF_ROUTE, while the Windows IP Helper watcher
+  currently covers routes, interfaces, and unicast addresses only.
 
 ## [0.15.2] - 2026-08-01
 

@@ -145,6 +145,13 @@ feature uses and re-exports the `EventStream` implementation from
 
 Event streams are bounded. If a consumer falls behind, the watcher records and delivers `Event::ResyncRequired { .. }` before a subsequent ordinary event instead of retaining an unbounded backlog. Re-read the affected provider state before relying on subsequent events.
 
+Monitoring is domain-specific: Linux Netlink and macOS PF_ROUTE deliver route,
+interface, interface-address, and neighbor changes. Windows IP Helper delivers
+route, interface, and unicast-address changes; it does not currently register
+a native neighbor-change callback. `Capability::MONITORING` therefore means a
+watcher surface is available, not that every event domain is delivered on every
+platform.
+
 ```rust
 let route_events = EventFilter::none().route(route_id);
 let watcher = lattice.watch_filtered(route_events)?;
