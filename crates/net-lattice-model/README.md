@@ -6,6 +6,4 @@ addresses, routes, neighbors, DNS, events, and mutation plans.
 Mutation plans are data only. Execution belongs to the `net-lattice` facade,
 which uses the Stage 0.15 transaction executor and `ExecutionOptions`.
 
-See the [workspace README](../../README.md) and
-[architecture](../../ARCHITECTURE.md).
-
+The published `net-lattice` facade connects these models to native backends.

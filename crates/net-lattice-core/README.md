@@ -6,6 +6,4 @@ model, platform-tagged error codes, and typed identifiers.
 This crate has no operating-system dependency and is used by the IP, model,
 platform, backend, and facade crates.
 
-See the [workspace README](../../README.md) and
-[architecture](../../ARCHITECTURE.md) for the project-wide design.
-
+The published `net-lattice` facade provides the user-facing API.
