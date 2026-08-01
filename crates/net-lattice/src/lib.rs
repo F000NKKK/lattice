@@ -177,6 +177,7 @@ impl<B: LatticeBackend> Lattice<B> {
     /// the connected backend before an executor submits any operation; native
     /// privilege and current-state checks can still fail at execution time.
     pub fn validate_plan(&self, plan: &MutationPlan) -> Result<()> {
+        let mut planned_routes = Vec::new();
         for operation in plan.operations() {
             if executor::requires_dns_capability(operation)
                 && !self.supports(Capability::DNS_MUTATION)
@@ -186,22 +187,30 @@ impl<B: LatticeBackend> Lattice<B> {
 
             match operation {
                 Mutation::AddRoute(route) => {
-                    if self
+                    let exists = self
                         .routes()?
                         .iter()
                         .any(|candidate| Self::same_route(candidate, route))
-                    {
+                        || planned_routes
+                            .iter()
+                            .any(|candidate| Self::same_route(candidate, route));
+                    if exists {
                         return Err(Error::AlreadyExists);
                     }
+                    planned_routes.push(route.clone());
                 }
                 Mutation::RemoveRoute(route) => {
-                    if !self
+                    let exists = self
                         .routes()?
                         .iter()
                         .any(|candidate| Self::same_route(candidate, route))
-                    {
+                        || planned_routes
+                            .iter()
+                            .any(|candidate| Self::same_route(candidate, route));
+                    if !exists {
                         return Err(Error::NotFound);
                     }
+                    planned_routes.retain(|candidate| !Self::same_route(candidate, route));
                 }
                 Mutation::AddAddress(address) => {
                     let interface_index = address.interface_id.value() as u32;
@@ -644,6 +653,10 @@ mod tests {
         Route::new(RouteId::new(1), network()).with_interface_index(1)
     }
 
+    fn planned_route() -> Route {
+        route().with_metric(7)
+    }
+
     impl RouteProvider for TestBackend {
         type Route = Route;
 
@@ -853,7 +866,7 @@ mod tests {
     fn facade_executes_ordered_plan_and_preserves_report_indices() {
         let lattice = lattice(Capability::DNS_MUTATION);
         let plan = MutationPlan::from_operations([
-            Mutation::AddRoute(route()),
+            Mutation::AddRoute(planned_route()),
             Mutation::SetDnsConfig(NewDnsConfig::new()),
         ]);
 
@@ -871,8 +884,8 @@ mod tests {
     fn facade_cancellation_stops_at_an_operation_boundary() {
         let lattice = lattice(Capability::empty());
         let plan = MutationPlan::from_operations([
-            Mutation::AddRoute(route()),
-            Mutation::RemoveRoute(route()),
+            Mutation::AddRoute(planned_route()),
+            Mutation::RemoveRoute(planned_route()),
         ]);
 
         let report = lattice.execute_plan_with_cancel(&plan, |index, _| index == 1);
@@ -915,7 +928,7 @@ mod tests {
         let lattice = lattice(Capability::empty());
         let plan = MutationPlan::from_operations([
             Mutation::SetDnsConfig(NewDnsConfig::new()),
-            Mutation::AddRoute(route()),
+            Mutation::AddRoute(planned_route()),
         ]);
 
         assert!(matches!(
@@ -1059,8 +1072,8 @@ mod tests {
     fn facade_runs_supplied_compensation_in_reverse_order() {
         let lattice = lattice(Capability::empty());
         let plan = MutationPlan::from_operations([
-            Mutation::AddRoute(route()),
-            Mutation::RemoveRoute(route()),
+            Mutation::AddRoute(planned_route()),
+            Mutation::RemoveRoute(planned_route()),
         ]);
         let mut compensated = Vec::new();
 
@@ -1081,8 +1094,8 @@ mod tests {
     fn facade_captures_prior_state_before_each_applied_operation() {
         let lattice = lattice(Capability::empty());
         let plan = MutationPlan::from_operations([
-            Mutation::AddRoute(route()),
-            Mutation::RemoveRoute(route()),
+            Mutation::AddRoute(planned_route()),
+            Mutation::RemoveRoute(planned_route()),
         ]);
         let mut captured = Vec::new();
         let mut restored = Vec::new();
@@ -1109,8 +1122,8 @@ mod tests {
     fn facade_reports_compensation_failure() {
         let lattice = lattice(Capability::empty());
         let plan = MutationPlan::from_operations([
-            Mutation::AddRoute(route()),
-            Mutation::RemoveRoute(route()),
+            Mutation::AddRoute(planned_route()),
+            Mutation::RemoveRoute(planned_route()),
         ]);
 
         let report = lattice.execute_plan_with_compensation(
