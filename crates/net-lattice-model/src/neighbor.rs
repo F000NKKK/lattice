@@ -85,7 +85,7 @@ impl NeighborEntry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use net_lattice_ip::Ipv4Address;
+    use net_lattice_ip::{Ipv4Address, Ipv6Address};
 
     #[test]
     fn new_entry_has_no_mac_and_unknown_state() {
@@ -108,6 +108,23 @@ mod tests {
         )
         .with_mac(mac)
         .with_state(NeighborState::Reachable);
+        assert_eq!(entry.mac, Some(mac));
+        assert_eq!(entry.state, NeighborState::Reachable);
+    }
+
+    #[test]
+    fn ipv6_ndp_entry_preserves_observed_identity_and_state() {
+        let id = NeighborId::new(0x16);
+        let mac = MacAddress::new([0x02, 0x00, 0x00, 0x00, 0x00, 0x16]);
+        let address = IpAddress::from(Ipv6Address::new([0x2001, 0xdb8, 0, 0x16, 0, 0, 0, 1]));
+
+        let entry = NeighborEntry::new(id, 7, address)
+            .with_mac(mac)
+            .with_state(NeighborState::Reachable);
+
+        assert_eq!(entry.id, id);
+        assert_eq!(entry.interface_index, 7);
+        assert_eq!(entry.address, address);
         assert_eq!(entry.mac, Some(mac));
         assert_eq!(entry.state, NeighborState::Reachable);
     }
