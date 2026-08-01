@@ -31,6 +31,7 @@
 /// Async event adapters, enabled by the `async` feature.
 #[cfg(feature = "async")]
 pub use net_lattice_async::EventStream;
+mod executor;
 pub use net_lattice_core::{Error, Id, PlatformErrorCode, Result};
 pub use net_lattice_ip::{
     Ipv4Address, Ipv4Network, Ipv4PrefixLength, Ipv6Address, Ipv6Network, Ipv6PrefixLength,
@@ -177,13 +178,66 @@ impl<B: LatticeBackend> Lattice<B> {
     /// privilege and current-state checks can still fail at execution time.
     pub fn validate_plan(&self, plan: &MutationPlan) -> Result<()> {
         for operation in plan.operations() {
-            if matches!(operation, Mutation::SetDnsConfig(_))
+            if executor::requires_dns_capability(operation)
                 && !self.supports(Capability::DNS_MUTATION)
             {
                 return Err(Error::Unsupported);
             }
+
+            match operation {
+                Mutation::AddRoute(route) => {
+                    if self
+                        .routes()?
+                        .iter()
+                        .any(|candidate| Self::same_route(candidate, route))
+                    {
+                        return Err(Error::AlreadyExists);
+                    }
+                }
+                Mutation::RemoveRoute(route) => {
+                    if !self
+                        .routes()?
+                        .iter()
+                        .any(|candidate| Self::same_route(candidate, route))
+                    {
+                        return Err(Error::NotFound);
+                    }
+                }
+                Mutation::AddAddress(address) => {
+                    let interface_index = address.interface_id.value() as u32;
+                    if !self.interfaces()?.iter().any(|interface| {
+                        interface.id == address.interface_id || interface.index == interface_index
+                    }) {
+                        return Err(Error::NotFound);
+                    }
+                    if self.addresses()?.iter().any(|candidate| {
+                        candidate.interface_index == interface_index
+                            && candidate.address == address.address
+                    }) {
+                        return Err(Error::AlreadyExists);
+                    }
+                }
+                Mutation::RemoveAddress(address) => {
+                    if !self.addresses()?.iter().any(|candidate| {
+                        candidate.id == address.id
+                            || (candidate.interface_index == address.interface_index
+                                && candidate.address == address.address)
+                    }) {
+                        return Err(Error::NotFound);
+                    }
+                }
+                Mutation::SetDnsConfig(_) => {}
+                _ => return Err(Error::Unsupported),
+            }
         }
         Ok(())
+    }
+
+    fn same_route(left: &Route, right: &Route) -> bool {
+        left.destination == right.destination
+            && left.gateway == right.gateway
+            && left.metric == right.metric
+            && left.interface_index == right.interface_index
     }
 
     /// Captures the currently observed state relevant to one mutation.
@@ -293,7 +347,7 @@ impl<B: LatticeBackend> Lattice<B> {
         F: FnMut(usize, &Mutation, S) -> Result<()>,
     {
         if let Err(error) = self.validate_plan(plan) {
-            return Self::unsupported_plan_report(plan, error);
+            return executor::unsupported_plan_report(plan, error);
         }
 
         let mut outcomes = Vec::with_capacity(plan.len());
@@ -384,7 +438,7 @@ impl<B: LatticeBackend> Lattice<B> {
         F: FnMut(usize, &Mutation) -> Result<()>,
     {
         if let Err(error) = self.validate_plan(plan) {
-            return Self::unsupported_plan_report(plan, error);
+            return executor::unsupported_plan_report(plan, error);
         }
 
         let mut outcomes = Vec::with_capacity(plan.len());
@@ -448,18 +502,6 @@ impl<B: LatticeBackend> Lattice<B> {
             RollbackStatus::NotNeeded
         };
         MutationPlanReport::new(outcomes, rollback)
-    }
-
-    fn unsupported_plan_report(plan: &MutationPlan, error: Error) -> MutationPlanReport {
-        let mut outcomes = Vec::with_capacity(plan.len());
-        if !plan.is_empty() {
-            outcomes.push(MutationOutcome::Failed {
-                error,
-                may_have_applied: false,
-            });
-            outcomes.extend((0..plan.len() - 1).map(|_| MutationOutcome::NotAttempted));
-        }
-        MutationPlanReport::new(outcomes, RollbackStatus::NotNeeded)
     }
 
     /// The full set of runtime-dependent [`Capability`] flags the connected
