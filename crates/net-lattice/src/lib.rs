@@ -190,20 +190,58 @@ impl<B: LatticeBackend> Lattice<B> {
     pub fn execute_plan_with_cancel<F>(
         &self,
         plan: &MutationPlan,
-        mut cancelled: F,
+        cancelled: F,
     ) -> MutationPlanReport
     where
         F: FnMut(usize, &Mutation) -> bool,
     {
+        self.execute_plan_internal(
+            plan,
+            cancelled,
+            None::<&mut fn(usize, &Mutation) -> Result<()>>,
+        )
+    }
+
+    /// Executes a plan and invokes `compensate` for each successfully applied
+    /// operation in reverse order after cancellation or failure.
+    ///
+    /// The callback is the explicit prior-state boundary: Net Lattice does not
+    /// invent an inverse operation or capture a snapshot implicitly. Return
+    /// `Ok(())` only after the supplied prior state has been restored. If a
+    /// compensation fails, the report identifies that operation and stops the
+    /// reverse pass.
+    pub fn execute_plan_with_compensation<C, F>(
+        &self,
+        plan: &MutationPlan,
+        cancelled: C,
+        mut compensate: F,
+    ) -> MutationPlanReport
+    where
+        C: FnMut(usize, &Mutation) -> bool,
+        F: FnMut(usize, &Mutation) -> Result<()>,
+    {
+        self.execute_plan_internal(plan, cancelled, Some(&mut compensate))
+    }
+
+    fn execute_plan_internal<C, F>(
+        &self,
+        plan: &MutationPlan,
+        mut cancelled: C,
+        mut compensate: Option<&mut F>,
+    ) -> MutationPlanReport
+    where
+        C: FnMut(usize, &Mutation) -> bool,
+        F: FnMut(usize, &Mutation) -> Result<()>,
+    {
         let mut outcomes = Vec::with_capacity(plan.len());
+        let mut applied_indices = Vec::new();
         let mut stopped = false;
-        let mut applied = false;
         let mut rollback_boundary = false;
 
         for (index, operation) in plan.operations().iter().enumerate() {
             if stopped || cancelled(index, operation) {
                 outcomes.push(MutationOutcome::NotAttempted);
-                rollback_boundary |= applied;
+                rollback_boundary |= !applied_indices.is_empty();
                 stopped = true;
                 continue;
             }
@@ -220,10 +258,11 @@ impl<B: LatticeBackend> Lattice<B> {
             match result {
                 Ok(()) => {
                     outcomes.push(MutationOutcome::Applied);
-                    applied = true;
+                    applied_indices.push(index);
                 }
                 Err(error) => {
-                    rollback_boundary = applied || operation.semantics().may_partially_apply;
+                    rollback_boundary =
+                        !applied_indices.is_empty() || operation.semantics().may_partially_apply;
                     outcomes.push(MutationOutcome::Failed {
                         error,
                         may_have_applied: operation.semantics().may_partially_apply,
@@ -234,7 +273,23 @@ impl<B: LatticeBackend> Lattice<B> {
         }
 
         let rollback = if stopped && rollback_boundary {
-            RollbackStatus::NotAttempted
+            if applied_indices.is_empty() {
+                RollbackStatus::NotAttempted
+            } else if let Some(compensate) = compensate.as_mut() {
+                let mut status = RollbackStatus::Completed;
+                for index in applied_indices.into_iter().rev() {
+                    if let Err(error) = compensate(index, plan.operation(index).expect("index")) {
+                        status = RollbackStatus::Failed {
+                            operation_index: index,
+                            error,
+                        };
+                        break;
+                    }
+                }
+                status
+            } else {
+                RollbackStatus::NotAttempted
+            }
         } else {
             RollbackStatus::NotNeeded
         };
@@ -645,6 +700,51 @@ mod tests {
             })
         ));
         assert!(matches!(report.rollback(), RollbackStatus::NotAttempted));
+    }
+
+    #[test]
+    fn facade_runs_supplied_compensation_in_reverse_order() {
+        let lattice = lattice(Capability::empty());
+        let plan = MutationPlan::from_operations([
+            Mutation::AddRoute(route()),
+            Mutation::RemoveRoute(route()),
+        ]);
+        let mut compensated = Vec::new();
+
+        let report = lattice.execute_plan_with_compensation(
+            &plan,
+            |index, _| index == 1,
+            |index, _| {
+                compensated.push(index);
+                Ok(())
+            },
+        );
+
+        assert_eq!(compensated, vec![0]);
+        assert!(matches!(report.rollback(), RollbackStatus::Completed));
+    }
+
+    #[test]
+    fn facade_reports_compensation_failure() {
+        let lattice = lattice(Capability::empty());
+        let plan = MutationPlan::from_operations([
+            Mutation::AddRoute(route()),
+            Mutation::RemoveRoute(route()),
+        ]);
+
+        let report = lattice.execute_plan_with_compensation(
+            &plan,
+            |index, _| index == 1,
+            |_, _| Err(Error::InvalidState),
+        );
+
+        assert!(matches!(
+            report.rollback(),
+            RollbackStatus::Failed {
+                operation_index: 0,
+                error: Error::InvalidState,
+            }
+        ));
     }
 
     #[test]
