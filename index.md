@@ -74,7 +74,7 @@ an internal facade component until repeated reuse justifies a new crate.
 
 ## Current release and roadmap
 
-Published stage baseline: the `net-lattice 0.15` release line. Read the current
+Published stage baseline: the `net-lattice 0.16` release line. Read the current
 workspace version from `crates/net-lattice/Cargo.toml`; do not duplicate a
 patch version here.
 
@@ -83,18 +83,21 @@ patch version here.
 - 0.15: completed ordered transaction execution, runtime preflight,
   cancellation, typed snapshots, explicit compensation, and phase-aware
   reports.
-- 0.16: planned interface configuration (desired MTU/admin-state).
+- 0.16: completed interface configuration: desired `InterfaceConfig`,
+  capability-gated MTU/admin-state mutation, read-after-write, and executor
+  integration on all built-in backends.
 - 0.17: planned neighbor mutation.
 - 0.18: planned consistent `CurrentState` snapshots.
 - 0.19: planned `DesiredState` and inspectable diff.
 - 0.20: planned declarative apply through the transaction executor.
 - 0.21: planned pre-1.0 compatibility and hardening audit.
 
-The executable Stage 0.16 plan is `.ai/0.16/plan.md` in the working tree.
+The completed Stage 0.16 plan and audit record remain in `.ai/0.16/` in the
+working tree; the next implementation task must create its own task workspace.
 `.ai/`, `.codex/`, this index, and root `AGENTS.md` are intentionally local
 agent context in this checkout and are not release content.
 
-## Stage 0.16 target
+## Stage 0.16 delivered contract
 
 ```text
 observed Interface
@@ -106,9 +109,11 @@ InterfaceMutator ← InterfaceConfig intent
         └── administrative-state capability
 ```
 
-The stage must preserve the Stage 0.15 `ExecutionOptions` API, use explicit
-compensation only, emit existing `Interface::Changed` events, and keep normal
-tests non-privileged and non-destructive.
+The implementation preserves the Stage 0.15 `ExecutionOptions` API and
+explicit-compensation boundary, relies on existing native `Interface::Changed`
+event mappings, and keeps ordinary tests non-privileged and non-destructive.
+Privileged shared-runner tests validate native submission/readback/restoration;
+destructive end-to-end event proof requires an isolated test interface.
 
 ## Useful commands
 
