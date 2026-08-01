@@ -33,7 +33,7 @@ informed as the issue is investigated and resolved.
 
 Net Lattice has completed Stage 0.16 of its [architecture](ARCHITECTURE.md)'s
 Incremental Delivery Plan: route inspection and mutation, interface
-inspection, DNS resolver inspection and mutation, neighbor inspection, and
+inspection and administrative-state/MTU configuration, DNS resolver inspection and mutation, neighbor inspection, and
 interface-address inspection and mutation on Linux
 (`net-lattice-backend-linux`, via Netlink and `/etc/resolv.conf`), Windows
 (`net-lattice-backend-windows`, via the IP Helper API), and macOS
@@ -43,8 +43,8 @@ resynchronization: Linux observes routes, links, neighbors, and addresses via
 Netlink multicast; Windows observes routes, interfaces, and unicast addresses
 via IP Helper; macOS observes routes, interfaces, neighbors, and addresses via
 PF_ROUTE. DNS changes do not currently produce watcher events. The model
-publishes inspectable, data-only mutation plans for the existing route,
-interface-address, and DNS operations, side-effect-free `MutationPreflight`
+publishes inspectable, data-only mutation plans for route, interface-address,
+DNS, and interface-configuration operations, side-effect-free `MutationPreflight`
 analysis, and typed `MutationOutcome`, `MutationPlanReport`, and
 `RollbackStatus` contracts. The executor adds ordered plan submission, runtime
 preflight, operation-boundary cancellation, typed prior-state snapshots,
