@@ -2051,16 +2051,20 @@ mod tests {
                 std::ptr::write(bytes.cast::<libc::ifa_msghdr>(), header);
             }
             let mut offset = header_size;
-            offset += push_sockaddr(
-                unsafe { std::slice::from_raw_parts_mut(bytes, total) },
-                offset,
-                IpAddr::V6(address),
-            );
+            // PF_ROUTE serializes sockaddrs in ascending `ifam_addrs` bit
+            // order. `RTA_NETMASK` (0x4) therefore precedes `RTA_IFA`
+            // (0x20), irrespective of how the two values are written in the
+            // header expression.
             offset += push_netmask(
                 unsafe { std::slice::from_raw_parts_mut(bytes, total) },
                 offset,
                 IpAddr::V6(address),
                 64,
+            );
+            offset += push_sockaddr(
+                unsafe { std::slice::from_raw_parts_mut(bytes, total) },
+                offset,
+                IpAddr::V6(address),
             );
             (storage, offset)
         }
