@@ -10,9 +10,11 @@ roadmap stage. Task-specific plans, evidence, and decisions live under
 2. Identify the active `.ai/<task-name>/` directory.
 3. Read its `plan.md`, `AUDIT.md`, and relevant ADRs.
 4. Load every applicable rule from `rules/`.
-5. Select one primary role from `agents/`; add another role only for a bounded
-   independent review or investigation.
-6. Record results back in the active task workspace.
+5. Follow the root pipeline through `researcher`, `architect`, `implementer`,
+   and `reviewer`. Record an explicit `not applicable` audit decision when a
+   mechanical slice does not need architecture work.
+6. Let the primary agent reconcile every handoff with the plan and record the
+   result in the active task workspace.
 
 ## Contents
 
@@ -37,3 +39,10 @@ Create `.ai/<task-name>/` from the templates. The directory must contain:
 The plan is the authoritative TODO. `AUDIT.md` records what was inspected,
 changed, and verified. ADRs record decisions, alternatives, and consequences;
 they do not replace public rustdoc, architecture, or user documentation.
+
+## Handoff contract
+
+Every role appends an audit entry containing its role, plan checkbox,
+files/symbols inspected, output, commands, unresolved risks, and next role.
+The reviewer must not reuse the implementer's claim as evidence: it inspects
+the diff and verification results independently.

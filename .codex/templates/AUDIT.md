@@ -2,6 +2,10 @@
 
 ## YYYY-MM-DD — <bounded slice>
 
+- Role: <researcher | architect | implementer | reviewer | primary>
+- Plan checkbox: <exact checkbox or identifier>
+- Handoff from/to: <role → role>
+
 ### Inspected
 
 - `<path>` — <symbols or purpose>.
