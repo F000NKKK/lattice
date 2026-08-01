@@ -852,6 +852,8 @@ mod tests {
     }
 
     #[test]
+    /// Contract test: a failing resolver write is reported as potentially
+    /// partially applied without touching the host resolver configuration.
     fn facade_reports_partial_application_boundary_on_failed_dns_operation() {
         let lattice = Lattice {
             backend: TestBackend {
