@@ -2210,19 +2210,17 @@ mod tests {
     ///
     /// Scope: this is **request-construction only** — a byte-layout fixture,
     /// not a live round trip through a `PF_ROUTE` socket, and it is not
-    /// wired into `NeighborProvider` or any new mutator trait. Apple's own
-    /// source additionally documents that `RTM_DELETE` normally depends on a
-    /// preceding `RTM_GET` to fill in `sdl_type`/`sdl_index`
-    /// ("XXX RTM_DELETE relies on a previous RTM_GET to fill the buffer
-    /// appropriately", `arp.c`); this fixture module deliberately does
-    /// **not** implement or claim that two-step GET-before-DELETE sequence.
-    /// The delete fixture below instead mirrors this codebase's own
-    /// self-contained `RTA_DST`-only `build_delete_message` convention for
-    /// routes. Whether a self-contained delete request (without a prior
-    /// `RTM_GET`) is actually accepted by current macOS for `RTF_LLINFO`
-    /// entries is an open question that only real hardware can answer — see
-    /// the 2026-08-02 researcher AUDIT entry — and is explicitly not proven
-    /// by this fixture.
+    /// wired into `NeighborProvider` or any new mutator trait.
+    ///
+    /// Unlike this `RTM_ADD` fixture, `RTM_DELETE` does **not** get a
+    /// self-contained sibling: Apple's own source documents (and this crate
+    /// re-verified directly against the primary source on 2026-08-02, see
+    /// `static_neighbor_get_request`/`static_neighbor_delete_request`'s doc
+    /// comments below) that `arp.c`'s `delete()` performs a mandatory
+    /// `RTM_GET`-then-`RTM_DELETE` sequence and the delete request reuses
+    /// the kernel's own `RTM_GET` reply buffer rather than being rebuilt
+    /// fresh. This fixture module models that two-message shape instead of
+    /// a single self-contained `RTA_DST`-only request.
     fn static_neighbor_add_request(
         destination: IpAddr,
         interface_index: u32,

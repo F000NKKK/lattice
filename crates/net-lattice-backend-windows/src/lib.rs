@@ -2713,27 +2713,29 @@ mod tests {
     }
 
     /// Exercises the complete `NeighborMutator` path against the kernel:
-    /// create a static ARP entry on the loopback adapter using a
+    /// create a static ARP entry on a real (non-loopback) adapter using a
     /// documentation-range (TEST-NET-2, RFC 5737) IPv4 address, confirm it
-    /// reads back as `NeighborState::Permanent`, remove it, confirm it is
-    /// gone, and confirm a second removal correctly reports
-    /// `Error::NotFound` rather than silently succeeding.
+    /// reads back as `NeighborState::Permanent` with the requested MAC,
+    /// remove it, confirm it is gone, and confirm a second removal correctly
+    /// reports `Error::NotFound` rather than silently succeeding.
     ///
-    /// Uses the loopback adapter for isolation from any real on-link host,
-    /// mirroring `add_then_remove_address_round_trips_through_the_kernel`'s
-    /// choice of interface. Unlike Linux's IPv4 ARP case (which needed a
-    /// dedicated `dummy` link because `lo`'s `IFF_LOOPBACK`/no-`header_ops`
-    /// path forces every neighbour entry into `NUD_NOARP`, see
+    /// Does NOT use the loopback adapter. Two elevated CI runs
+    /// (2026-08-02) confirmed `CreateIpNetEntry2` on the loopback interface
+    /// succeeds and the row reads back with `State: NlnsPermanent`, but its
+    /// `PhysicalAddress` never persists (`observed.mac` came back `None`
+    /// against a requested MAC both before and after switching the
+    /// read-after-write from a `GetIpNetTable2` dump to a targeted
+    /// `GetIpNetEntry2` call, ruling out dump staleness as the cause). This
+    /// is the same bug class as Linux's `lo`/`IFF_LOOPBACK` restriction (see
     /// `crates/net-lattice-backend-linux/src/lib.rs`'s `DummyLinkFixture`),
-    /// neither `CreateIpNetEntry2`'s nor `MIB_IPNET_ROW2`'s Microsoft Learn
-    /// documentation describes an equivalent forced-state override tied to
-    /// the loopback interface for the IP Helper neighbor table — it is a
-    /// plain per-interface table write, not a kernel ARP/NDP resolution
-    /// state machine. This has not been confirmed against a live Windows
-    /// host in this environment; if a real elevated run shows the loopback
-    /// adapter rejects or silently downgrades a `NlnsPermanent` row here,
-    /// this test must switch to a non-loopback ARP-capable interface instead
-    /// of loosening its assertions.
+    /// though the exact Windows-internal mechanism is not documented on
+    /// Microsoft Learn — `CreateIpNetEntry2`'s page only documents
+    /// `ERROR_INVALID_PARAMETER` for a *loopback address* in `Address`
+    /// (irrelevant here; the address is a normal TEST-NET-2 host, only the
+    /// *interface* is loopback), fetched 2026-08-02. Selects a real adapter
+    /// the same way `interface_configuration_round_trips_observed_values`
+    /// does (non-loopback, known admin state, nonzero MTU, has an IP
+    /// interface row) rather than reusing the loopback fixture.
     #[test]
     #[ignore = "requires Administrator; run from elevated cmd/PowerShell: cargo test -p net-lattice-backend-windows add_then_remove_static_neighbor_round_trips_through_the_kernel -- --ignored"]
     fn add_then_remove_static_neighbor_round_trips_through_the_kernel() {
@@ -2744,8 +2746,13 @@ mod tests {
             .interfaces()
             .expect("failed to list Windows interfaces")
             .into_iter()
-            .find(|interface| matches!(interface.kind, InterfaceKind::Loopback))
-            .expect("Windows loopback interface was not found")
+            .find(|interface| {
+                !matches!(interface.kind, InterfaceKind::Loopback)
+                    && matches!(interface.admin_state, AdminState::Up | AdminState::Down)
+                    && interface.mtu.is_some_and(|mtu| mtu != 0)
+                    && has_ip_interface_row(interface.index)
+            })
+            .expect("no non-loopback interface with known admin state, nonzero MTU, and an IP-interface row was available")
             .index;
         let address = IpAddress::from(Ipv4Address::new(198, 51, 100, 42));
         let mac = MacAddress::new([0x02, 0x00, 0x00, 0x00, 0x00, 0x2a]);
