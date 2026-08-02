@@ -961,6 +961,27 @@ mod tests {
         message
     }
 
+    /// Builds the `ndmsg` payload `rtnetlink 0.21`'s `NeighbourHandle::del`
+    /// expects (it takes a caller-built `NeighbourMessage` directly, unlike
+    /// `add`). Per `rtnetlink(7)`, `RTM_DELNEIGH` selects by
+    /// family/ifindex/`NDA_DST` and does not require `NDA_LLADDR`, so this
+    /// fixture deliberately omits the link-layer address attribute the ADD
+    /// fixture sets. Deliberately test-local, same rationale as
+    /// `static_neighbour_add_fixture`.
+    fn static_neighbour_del_fixture(interface_index: u32, destination: IpAddr) -> NeighbourMessage {
+        let mut message = NeighbourMessage::default();
+        message.header.family = match destination {
+            IpAddr::V4(_) => rtnetlink::packet_route::AddressFamily::Inet,
+            IpAddr::V6(_) => rtnetlink::packet_route::AddressFamily::Inet6,
+        };
+        message.header.ifindex = interface_index;
+        message.attributes = vec![NeighbourAttribute::Destination(match destination {
+            IpAddr::V4(address) => NeighbourAddress::Inet(address),
+            IpAddr::V6(address) => NeighbourAddress::Inet6(address),
+        })];
+        message
+    }
+
     #[cfg(feature = "async")]
     fn tokio_route_event(watcher: &mut TokioEventReceiver<Event>, id: RouteId) -> bool {
         use std::pin::Pin;
@@ -1419,6 +1440,67 @@ mod tests {
                 NeighbourAttribute::LinkLayerAddress(vec![2, 0, 0, 0, 0, 0x17]),
             ]
         );
+    }
+
+    #[test]
+    fn static_neighbour_del_fixtures_select_by_destination_without_lladdr() {
+        let ipv4 =
+            static_neighbour_del_fixture(7, IpAddr::V4(std::net::Ipv4Addr::new(192, 0, 2, 17)));
+        assert_eq!(
+            ipv4.header.family,
+            rtnetlink::packet_route::AddressFamily::Inet
+        );
+        assert_eq!(ipv4.header.ifindex, 7);
+        assert_eq!(
+            ipv4.attributes,
+            vec![NeighbourAttribute::Destination(NeighbourAddress::Inet(
+                std::net::Ipv4Addr::new(192, 0, 2, 17),
+            ))]
+        );
+        assert!(
+            !ipv4
+                .attributes
+                .iter()
+                .any(|attribute| matches!(attribute, NeighbourAttribute::LinkLayerAddress(_))),
+            "RTM_DELNEIGH selection does not require NDA_LLADDR"
+        );
+
+        let ipv6 = static_neighbour_del_fixture(
+            9,
+            IpAddr::V6("2001:db8:0:17::1".parse().expect("valid IPv6 NDP address")),
+        );
+        assert_eq!(
+            ipv6.header.family,
+            rtnetlink::packet_route::AddressFamily::Inet6
+        );
+        assert_eq!(ipv6.header.ifindex, 9);
+        assert_eq!(
+            ipv6.attributes,
+            vec![NeighbourAttribute::Destination(NeighbourAddress::Inet6(
+                "2001:db8:0:17::1".parse().expect("valid IPv6 NDP address"),
+            ))]
+        );
+        assert!(
+            !ipv6
+                .attributes
+                .iter()
+                .any(|attribute| matches!(attribute, NeighbourAttribute::LinkLayerAddress(_))),
+            "RTM_DELNEIGH selection does not require NDA_LLADDR"
+        );
+    }
+
+    // Pins today's raw errno passthrough only; per-errno semantic mapping (e.g. to a NotFound/PermissionDenied variant) is a separate cross-cutting decision out of scope for this slice.
+    #[test]
+    fn rtnetlink_error_code_passes_through_raw_errno_without_semantic_mapping() {
+        let mut enoent_message = rtnetlink::packet_core::ErrorMessage::default();
+        enoent_message.code = std::num::NonZeroI32::new(-2);
+        let enoent = rtnetlink::Error::NetlinkError(enoent_message);
+        assert_eq!(rtnetlink_error_code(&enoent), PlatformErrorCode::Linux(-2));
+
+        let mut eperm_message = rtnetlink::packet_core::ErrorMessage::default();
+        eperm_message.code = std::num::NonZeroI32::new(-13);
+        let eperm = rtnetlink::Error::NetlinkError(eperm_message);
+        assert_eq!(rtnetlink_error_code(&eperm), PlatformErrorCode::Linux(-13));
     }
 
     #[test]
