@@ -1597,18 +1597,37 @@ const RTM_SEQ_NEIGHBOR_DELETE: libc::c_int = 12;
 /// - `ndp.tproj/ndp.c` (`rtmsg()`, lines 1288-1345):
 ///   <https://raw.githubusercontent.com/apple-oss-distributions/network_cmds/main/ndp.tproj/ndp.c>
 ///
-/// `sdl_type` is deliberately left `0` here: real `arp.c`/`ndp.c` copy
-/// `sdl_type` from a preceding `RTM_GET` reply rather than synthesizing it;
-/// this backend's own `RTM_ADD` does the same simplification a bare `arp -s`
-/// (no prior `RTM_GET`) does — the kernel accepts a zero `sdl_type` on
-/// `RTM_ADD` and fills it in itself.
+/// `sdl_type` must be the real interface link type (`IFT_ETHER`, ...), not a
+/// synthesized `0`: `arp.c`'s `set()` (lines 380-460) always issues a
+/// preliminary `rtmsg(RTM_GET, dst, &sdl_m)` specifically to learn the
+/// kernel's own `sdl_type`/`sdl_index` before ever building the `RTM_ADD`
+/// gateway — it never sends a from-scratch `sdl_type` of `0`. An earlier
+/// version of this function assumed a zero `sdl_type` was accepted and
+/// filled in by the kernel; a live elevated macOS CI run
+/// (`add_then_remove_static_neighbor_round_trips_through_the_kernel`)
+/// confirmed `RTM_ADD` with `sdl_type: 0` is ACKed (`rtm_errno == 0`) but the
+/// resulting entry never appears in a subsequent `RTF_LLINFO` neighbor-table
+/// read, exactly the failure mode a wrong/zero link type would produce.
+/// Callers must pass the interface's real `sdl_type`, obtained via
+/// [`interface_sdl_type`] (which reads it directly from `getifaddrs`'s own
+/// `AF_LINK` entry for that interface — the same mechanism `interfaces()`
+/// already uses via `ift_type_to_kind`/`link_entry_to_interface`, so this
+/// does not require mimicking `arp.c`'s destination-route `RTM_GET` probe;
+/// we already know the target interface, unlike the CLI tool inferring it
+/// from the destination).
 ///
 /// The on-wire `sdl_len` is the *significant* header-plus-MAC length only
 /// (`8 + 6 = 14`), rounded up to the next 4-byte boundary (`16`) — not
 /// `mem::size_of::<libc::sockaddr_dl>()` (`20`, padded to the worst-case
 /// 12-byte `sdl_data`). Same convention as `push_link_gateway`'s doc comment
 /// and `golang.org/x/net/route`'s `LinkAddr` marshaling.
-fn push_mac_gateway(buf: &mut [u8], offset: usize, interface_index: u32, mac: [u8; 6]) -> usize {
+fn push_mac_gateway(
+    buf: &mut [u8],
+    offset: usize,
+    interface_index: u32,
+    sdl_type: libc::c_uchar,
+    mac: [u8; 6],
+) -> usize {
     const HEADER_LEN: usize = 8;
     let sdl_len = HEADER_LEN + mac.len();
     let space = (sdl_len + 3) & !3;
@@ -1616,7 +1635,7 @@ fn push_mac_gateway(buf: &mut [u8], offset: usize, interface_index: u32, mac: [u
         sdl_len: sdl_len as u8,
         sdl_family: libc::AF_LINK as u8,
         sdl_index: interface_index as u16,
-        sdl_type: 0,
+        sdl_type,
         sdl_nlen: 0,
         sdl_alen: mac.len() as u8,
         sdl_slen: 0,
