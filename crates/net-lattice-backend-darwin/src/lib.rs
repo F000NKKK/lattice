@@ -1642,8 +1642,7 @@ fn push_mac_gateway(
         sdl_data: [0; 12],
     };
 
-    sdl.sdl_data[..mac.len()]
-        .copy_from_slice(&mac.map(|byte| byte as libc::c_char));
+    sdl.sdl_data[..mac.len()].copy_from_slice(&mac.map(|byte| byte as libc::c_char));
 
     unsafe {
         std::ptr::copy_nonoverlapping(
@@ -2623,14 +2622,27 @@ mod tests {
 
         let gw_offset = dst_offset + mem::size_of::<libc::sockaddr_in>();
         let sdl = unsafe { &*(buf.as_ptr().add(gw_offset) as *const libc::sockaddr_dl) };
+        let gw_offset = dst_offset + mem::size_of::<libc::sockaddr_in>();
+        let sdl = unsafe { &*(buf.as_ptr().add(gw_offset) as *const libc::sockaddr_dl) };
+
         assert_eq!(sdl.sdl_family, libc::AF_LINK as u8);
         assert_eq!(sdl.sdl_alen, 6);
+
+        assert_eq!(sdl.sdl_len as usize, mem::size_of::<libc::sockaddr_dl>());
+
         assert_eq!(
             &sdl.sdl_data[..6]
                 .iter()
                 .map(|&b| b as u8)
                 .collect::<Vec<_>>(),
             &mac
+        );
+
+        assert_eq!(
+            buf.len(),
+            mem::size_of::<libc::rt_msghdr>()
+                + mem::size_of::<libc::sockaddr_in>()
+                + mem::size_of::<libc::sockaddr_dl>()
         );
     }
 
