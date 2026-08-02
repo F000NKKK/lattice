@@ -1807,8 +1807,8 @@ fn ensure_removable_static_neighbor_state(state: NeighborState) -> Result<()> {
 /// available — `cargo test` cannot even *link* here, only compile). Its
 /// byte-layout construction is proven by this file's deterministic
 /// `static_neighbor_*_request` fixture tests, confirmed against a real
-/// macOS CI run for the request-shape half (see `.ai/0.17/AUDIT.md`
-/// sections 16-17), but the live two-message `RTM_GET`-then-`RTM_DELETE`
+/// macOS CI run for the request-shape half, but the live two-message
+/// `RTM_GET`-then-`RTM_DELETE`
 /// round trip this method performs against a real kernel has not been
 /// exercised anywhere yet. Treat this as unverified until an elevated macOS
 /// CI run (or a maintainer on real hardware) proves otherwise, the same
