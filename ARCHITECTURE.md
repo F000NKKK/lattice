@@ -259,6 +259,13 @@ force every backend to stub out methods for features it doesn't have:
   return the read-after-write observed interface. It is separate from listing
   because it requires elevated native networking privilege.
 - `NeighborProvider` — list ARP/NDP entries.
+- `NeighborMutator` — add and remove static ARP/NDP neighbor entries. Its
+  input, `StaticNeighbor`, is distinct from `NeighborEntry`: it carries
+  neither the synthesized `NeighborId` nor the observed `NeighborState`, and
+  requires a MAC address because this stage only creates static L2 mappings.
+  As of Stage 0.17 Slice B this trait and `Capability::NEIGHBOR_MUTATION` are
+  defined at the model/platform layer only; no backend implements them yet
+  and the facade does not forward to them (see ADR-0001, still `proposed`).
 - `DnsProvider` — read/write DNS resolver configuration.
 - `AddressProvider` — list IP addresses assigned to interfaces.
 - `AddressMutator` — assign and remove IP addresses. Its input is distinct
