@@ -1628,9 +1628,9 @@ fn push_mac_gateway(
     sdl_type: libc::c_uchar,
     mac: [u8; 6],
 ) -> usize {
-    const HEADER_LEN: usize = 8;
-    let sdl_len = HEADER_LEN + mac.len();
+    let sdl_len = mem::size_of::<libc::sockaddr_dl>();
     let space = (sdl_len + 3) & !3;
+
     let mut sdl = libc::sockaddr_dl {
         sdl_len: sdl_len as u8,
         sdl_family: libc::AF_LINK as u8,
@@ -1641,7 +1641,10 @@ fn push_mac_gateway(
         sdl_slen: 0,
         sdl_data: [0; 12],
     };
-    sdl.sdl_data[..mac.len()].copy_from_slice(&mac.map(|b| b as libc::c_char));
+
+    sdl.sdl_data[..mac.len()]
+        .copy_from_slice(&mac.map(|byte| byte as libc::c_char));
+
     unsafe {
         std::ptr::copy_nonoverlapping(
             &sdl as *const _ as *const u8,
@@ -1649,6 +1652,7 @@ fn push_mac_gateway(
             sdl_len,
         );
     }
+
     space
 }
 
