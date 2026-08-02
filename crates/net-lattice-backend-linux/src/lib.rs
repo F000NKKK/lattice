@@ -2125,6 +2125,30 @@ mod tests {
                 .block_on(async { backend.handle.link().set(up).execute().await })
                 .expect("failed to bring the dummy test interface up");
 
+            // `RTM_NEWLINK`'s ACK confirms the kernel accepted the admin-up
+            // request, not that the device has finished transitioning to
+            // `IFF_RUNNING`. Adding a static neighbor immediately afterward
+            // has been observed to intermittently fail on loaded CI runners;
+            // poll for `OperationalState::Up` before handing the interface
+            // back, bounded so a genuine failure to come up still surfaces.
+            let mut attempts = 0;
+            loop {
+                let ready = backend
+                    .interfaces()
+                    .ok()
+                    .into_iter()
+                    .flatten()
+                    .any(|interface| {
+                        interface.id == Id::new(index as u64)
+                            && interface.operational_state == OperationalState::Up
+                    });
+                if ready || attempts >= 50 {
+                    break;
+                }
+                attempts += 1;
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+
             Self { backend, index }
         }
 
