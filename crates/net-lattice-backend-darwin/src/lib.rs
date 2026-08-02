@@ -1704,28 +1704,40 @@ fn static_neighbor_add_request(
 /// a best-effort lookup, not a hard failure path — `static_neighbor_add_request`
 /// callers should treat a `0` result as a signal something is already wrong
 /// with the target interface rather than silently proceeding).
-fn interface_sdl_type(interface_index: u32) -> libc::c_uchar {
+fn interface_sdl_type(interface_index: u32) -> Result<libc::c_uchar> {
     let mut head: *mut libc::ifaddrs = std::ptr::null_mut();
-    unsafe {
-        if libc::getifaddrs(&mut head) != 0 {
-            return 0;
-        }
+
+    if unsafe { libc::getifaddrs(&mut head) } != 0 {
+        return Err(Error::Platform(io_error_code(
+            &io::Error::last_os_error(),
+        )));
+    }
+
+    let result = unsafe {
         let mut cursor = head;
-        let mut result = 0;
+        let mut found = None;
+
         while !cursor.is_null() {
-            let sa = (*cursor).ifa_addr;
+            let entry = &*cursor;
+            let sa = entry.ifa_addr;
+
             if !sa.is_null() && (*sa).sa_family as i32 == libc::AF_LINK {
                 let sdl = &*(sa as *const libc::sockaddr_dl);
+
                 if sdl.sdl_index as u32 == interface_index {
-                    result = sdl.sdl_type;
+                    found = Some(sdl.sdl_type);
                     break;
                 }
             }
-            cursor = (*cursor).ifa_next;
+
+            cursor = entry.ifa_next;
         }
+
         libc::freeifaddrs(head);
-        result
-    }
+        found
+    };
+
+    result.ok_or(Error::NotFound)
 }
 
 /// Builds a self-contained `RTM_GET` static-ARP/NDP lookup request: the
@@ -1908,7 +1920,7 @@ impl NeighborMutator for DarwinBackend {
         let destination = ip_address_to_std(neighbor.address);
         let mac = neighbor.mac.octets();
         let sdl_type = interface_sdl_type(interface_index)?;
-
+        
         self.runtime.block_on(async {
             let message = static_neighbor_add_request(
                 destination,
