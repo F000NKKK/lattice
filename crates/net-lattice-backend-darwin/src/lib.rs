@@ -3104,9 +3104,24 @@ mod tests {
     ///
     /// Tries a handful of candidate host offsets before falling back to
     /// flipping `own`'s lowest host bit, so this terminates even for a
-    /// pathologically narrow subnet (e.g. `/31`, which has no distinct
-    /// non-network/non-broadcast host address at all — the fallback then
-    /// simply returns a different, still in-subnet, address).
+    /// pathologically narrow subnet.
+    ///
+    /// **Callers must not pass `prefix_len > 30`.** At `/31` or `/32` the
+    /// mask leaves zero host bits, so every candidate this function can
+    /// construct — including the fallback — collapses to the network
+    /// address, which equals `own`: this function then silently returns
+    /// `own` itself instead of a distinct address (see
+    /// `pick_in_subnet_probe_address_degenerates_to_own_for_a_slash_32`
+    /// below, which documents this exact degenerate case). The caller,
+    /// `add_then_remove_static_neighbor_round_trips_through_the_kernel`,
+    /// filters candidate interfaces to `prefix_len <= 30` for exactly this
+    /// reason — a macOS `utun*`/VPN interface commonly has a `/32` address,
+    /// and sending a static-ARP `RTM_ADD` for an interface's *own* address
+    /// is the most likely root cause of a real elevated CI failure this
+    /// slice hit (`add_static_neighbor` succeeding at the native `RTM_ADD`
+    /// but the immediate `neighbors()` re-read finding nothing, since the
+    /// kernel has no reason to create an `RTF_LLINFO` ARP cache entry for a
+    /// host resolving to itself).
     fn pick_in_subnet_probe_address(own: std::net::Ipv4Addr, prefix_len: u8) -> std::net::Ipv4Addr {
         let own_u32 = u32::from(own);
         let mask: u32 = if prefix_len == 0 {
@@ -3245,9 +3260,31 @@ mod tests {
                 {
                     return None;
                 }
+                // A `/31` or `/32` address (common on macOS `utun*`
+                // point-to-point/VPN interfaces) has no room for a distinct
+                // in-subnet probe address: `pick_in_subnet_probe_address`
+                // would degenerate to returning `own` itself (its mask
+                // leaves zero host bits, so every candidate collapses to
+                // the network address, which equals `own`). Sending a
+                // static-ARP `RTM_ADD` for an interface's *own* address is
+                // almost certainly the real root cause of the
+                // `add_static_neighbor ... InvalidState` failure a real
+                // elevated macOS CI run hit: the kernel has no reason to
+                // create an `RTF_LLINFO` ARP cache entry for a host
+                // resolving to itself, so the immediate `neighbors()`
+                // re-read correctly finds nothing — not because
+                // `add_static_neighbor`'s own logic is wrong, but because
+                // the test asked it to do something that can never produce
+                // an ARP cache entry. Require room for at least two
+                // distinct, non-network/non-broadcast host addresses.
+                if net.prefix().value() > 30 {
+                    return None;
+                }
                 Some((interface.id, addr.interface_index, net))
             })
-            .expect("expected an up, non-loopback interface with a configured IPv4 address");
+            .expect(
+                "expected an up, non-loopback interface with a configured IPv4 address wider than /30",
+            );
         let (interface_id, interface_index, own) = own_address;
         let address = IpAddress::from(Ipv4Address::from(pick_in_subnet_probe_address(
             own.address().into(),
