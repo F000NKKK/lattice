@@ -11,6 +11,7 @@
 
 use std::ffi::c_void;
 use std::net::IpAddr;
+use std::sync::{LazyLock, Mutex};
 
 use net_lattice_core::{Error, Id, PlatformErrorCode, Result};
 use net_lattice_model::dns::{DnsConfig, NewDnsConfig};
@@ -32,12 +33,13 @@ use net_lattice_platform::{
 use net_lattice_platform::{TokioEventProvider, TokioEventReceiver, TokioEventSender};
 use windows::Win32::Foundation::{ERROR_NOT_FOUND, HANDLE};
 use windows::Win32::NetworkManagement::IpHelper::{
-    CancelMibChangeNotify2, CreateIpForwardEntry2, CreateUnicastIpAddressEntry,
-    DNS_INTERFACE_SETTINGS, DNS_INTERFACE_SETTINGS_VERSION1, DNS_SETTING_NAMESERVER,
-    DNS_SETTING_SEARCHLIST, DNS_SETTINGS, DNS_SETTINGS_VERSION1, DeleteIpForwardEntry2,
-    DeleteUnicastIpAddressEntry, FreeMibTable, GAA_FLAG_SKIP_ANYCAST, GAA_FLAG_SKIP_FRIENDLY_NAME,
-    GAA_FLAG_SKIP_MULTICAST, GAA_FLAG_SKIP_UNICAST, GetAdaptersAddresses, GetIfEntry, GetIfEntry2,
-    GetIfTable2, GetIpForwardTable2, GetIpInterfaceEntry, GetIpNetTable2, GetUnicastIpAddressTable,
+    CancelMibChangeNotify2, ConvertInterfaceLuidToIndex, CreateIpForwardEntry2,
+    CreateUnicastIpAddressEntry, DNS_INTERFACE_SETTINGS, DNS_INTERFACE_SETTINGS_VERSION1,
+    DNS_SETTING_NAMESERVER, DNS_SETTING_SEARCHLIST, DNS_SETTINGS, DNS_SETTINGS_VERSION1,
+    DeleteIpForwardEntry2, DeleteUnicastIpAddressEntry, FreeMibTable, GAA_FLAG_SKIP_ANYCAST,
+    GAA_FLAG_SKIP_FRIENDLY_NAME, GAA_FLAG_SKIP_MULTICAST, GAA_FLAG_SKIP_UNICAST,
+    GetAdaptersAddresses, GetIfEntry, GetIfEntry2, GetIfTable2, GetIpForwardTable2,
+    GetIpInterfaceEntry, GetIpNetTable2, GetUnicastIpAddressEntry, GetUnicastIpAddressTable,
     IP_ADAPTER_ADDRESSES_LH, InitializeIpForwardEntry, InitializeUnicastIpAddressEntry,
     MIB_IF_ADMIN_STATUS_DOWN, MIB_IF_ADMIN_STATUS_UP, MIB_IF_ROW2, MIB_IF_TABLE2, MIB_IFROW,
     MIB_IPFORWARD_ROW2, MIB_IPFORWARD_TABLE2, MIB_IPINTERFACE_ROW, MIB_IPNET_ROW2,
@@ -48,7 +50,7 @@ use windows::Win32::NetworkManagement::IpHelper::{
 };
 use windows::Win32::NetworkManagement::Ndis::{
     IfOperStatusDormant, IfOperStatusDown, IfOperStatusLowerLayerDown, IfOperStatusUp,
-    NET_IF_ADMIN_STATUS_UP,
+    NET_IF_ADMIN_STATUS_UP, NET_LUID_LH,
 };
 use windows::Win32::Networking::WinSock::{
     ADDRESS_FAMILY, AF_INET, AF_INET6, IN_ADDR, IN_ADDR_0, IN_ADDR_0_0, IN6_ADDR, IN6_ADDR_0,
@@ -224,6 +226,55 @@ fn ip_to_sockaddr_inet(addr: IpAddr) -> SOCKADDR_INET {
             }
         }
     }
+}
+
+/// Resolves a change-notification row's interface index through its
+/// `InterfaceLuid`, falling back to the row's own `InterfaceIndex` only if
+/// the LUID cannot be resolved.
+///
+/// `NotifyRouteChange2` and `NotifyUnicastIpAddressChange` both document
+/// that the `MIB_IPFORWARD_ROW2`/`MIB_UNICASTIPADDRESS_ROW` passed to their
+/// callback "contains incomplete data" — only enough to call
+/// `GetIpForwardEntry2`/`GetUnicastIpAddressEntry` and look the complete
+/// entry back up (Microsoft Learn,
+/// `nf-netioapi-notifyroutechange2`/`nf-netioapi-notifyunicastipaddresschange`).
+/// Both lookup functions accept either `InterfaceLuid` or `InterfaceIndex`
+/// as the interface key, but only `InterfaceLuid` is documented as always
+/// populated on the notification row; `InterfaceIndex` may be left at its
+/// zero default. Hashing a zero/stale `InterfaceIndex` into
+/// `synthesize_route_id`/`synthesize_interface_address_id` would then
+/// disagree with the id a full `GetIpForwardTable2`/
+/// `GetUnicastIpAddressTable` read computes for the same entry.
+///
+/// `ConvertInterfaceLuidToIndex` is a lightweight local lookup keyed only on
+/// the interface itself, so — unlike a full `GetIpForwardEntry2`/
+/// `GetUnicastIpAddressEntry` re-query — it stays available even after the
+/// notified route or address entry itself has already been deleted (a
+/// `MibDeleteInstance` notification's route/address no longer exists, but
+/// its owning interface still does).
+fn resolve_notification_interface_index(luid: NET_LUID_LH, fallback: u32) -> u32 {
+    let mut index = 0u32;
+    let status = unsafe { ConvertInterfaceLuidToIndex(&luid, &mut index) };
+    if status.0 == 0 && index != 0 {
+        index
+    } else {
+        fallback
+    }
+}
+
+/// Builds the row an ordinary `GetIpForwardTable2` read would have produced
+/// for the same route, from a possibly-incomplete change-notification row.
+///
+/// `DestinationPrefix` and `NextHop` are themselves part of the lookup key
+/// `GetIpForwardEntry2` requires (needed to disambiguate ECMP-style routes
+/// that share a destination), so they are documented as reliably present
+/// even on a `MibDeleteInstance` notification; only `InterfaceIndex` needs
+/// correcting here. See [`resolve_notification_interface_index`].
+fn corrected_route_notification_row(row: &MIB_IPFORWARD_ROW2) -> MIB_IPFORWARD_ROW2 {
+    let mut corrected = *row;
+    corrected.InterfaceIndex =
+        resolve_notification_interface_index(row.InterfaceLuid, row.InterfaceIndex);
+    corrected
 }
 
 fn row_to_route(row: &MIB_IPFORWARD_ROW2) -> Result<Option<Route>> {
@@ -698,6 +749,89 @@ fn row_to_interface_address(row: &MIB_UNICASTIPADDRESS_ROW) -> Option<InterfaceA
     ))
 }
 
+/// Remembers the last `OnLinkPrefixLength` observed for a
+/// `(resolved interface index, IP address)` pair from a complete row (either
+/// a full `GetUnicastIpAddressTable`/`GetUnicastIpAddressEntry` read, or a
+/// `MibAddInstance`/`MibParameterNotification` notification completed via
+/// [`complete_address_notification_row`]).
+///
+/// Unlike a route's `DestinationPrefix`, an address's `OnLinkPrefixLength`
+/// is *not* part of `GetUnicastIpAddressEntry`'s documented lookup key
+/// (Microsoft Learn `nf-netioapi-getunicastipaddressentry` keys the entry on
+/// `InterfaceLuid`/`InterfaceIndex` + `Address` only), so a
+/// `MibDeleteInstance` notification's row is not guaranteed to carry the
+/// correct prefix length — the entry is already gone by the time the
+/// callback fires, so there is nothing left to re-query. This process-wide
+/// cache is the only way to recover the exact prefix length that was used to
+/// synthesize the id when the address was added, so that a later delete
+/// notification can reproduce the same id.
+static ADDRESS_PREFIX_CACHE: LazyLock<Mutex<std::collections::HashMap<(u32, IpAddr), u8>>> =
+    LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
+
+/// Builds the row a full `GetUnicastIpAddressTable` read would have produced
+/// for the same address, from a possibly-incomplete change-notification row.
+///
+/// See [`resolve_notification_interface_index`] for the `InterfaceIndex`
+/// correction shared with routes. For `OnLinkPrefixLength`, which is not
+/// part of `GetUnicastIpAddressEntry`'s lookup key:
+/// - On `MibAddInstance`/`MibParameterNotification`, the entry still exists,
+///   so re-query it with `GetUnicastIpAddressEntry` for the authoritative
+///   row and record its prefix length in [`ADDRESS_PREFIX_CACHE`] for a
+///   later delete.
+/// - On `MibDeleteInstance`, the entry is already gone (`GetUnicastIpAddressEntry`
+///   would fail not-found), so look up the prefix length this same address
+///   was last observed with, via the cache. If nothing was ever cached for
+///   this address (for example, the process only observed the delete, not a
+///   prior add/table read), fall back to the notification row's own
+///   `OnLinkPrefixLength` as a best-effort value; that is the pre-existing
+///   behavior and may still under some circumstances disagree with a
+///   `Route`/`InterfaceAddress` id computed elsewhere, but there is no more
+///   reliable source once the kernel has already discarded the entry.
+fn complete_address_notification_row(
+    row: &MIB_UNICASTIPADDRESS_ROW,
+    notification: MIB_NOTIFICATION_TYPE,
+) -> MIB_UNICASTIPADDRESS_ROW {
+    let mut corrected = *row;
+    corrected.InterfaceIndex =
+        resolve_notification_interface_index(row.InterfaceLuid, row.InterfaceIndex);
+
+    let Some(ip) = (unsafe { sockaddr_inet_to_ip(&row.Address) }) else {
+        return corrected;
+    };
+    let key = (corrected.InterfaceIndex, ip);
+
+    if notification == MibDeleteInstance {
+        if let Some(prefix_len) = ADDRESS_PREFIX_CACHE
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .remove(&key)
+        {
+            corrected.OnLinkPrefixLength = prefix_len;
+        }
+        return corrected;
+    }
+
+    let mut queried = MIB_UNICASTIPADDRESS_ROW {
+        Address: row.Address,
+        InterfaceLuid: row.InterfaceLuid,
+        InterfaceIndex: corrected.InterfaceIndex,
+        ..Default::default()
+    };
+    let status = unsafe { GetUnicastIpAddressEntry(&mut queried) };
+    if status.0 == 0 {
+        corrected = queried;
+        corrected.InterfaceIndex =
+            resolve_notification_interface_index(corrected.InterfaceLuid, corrected.InterfaceIndex);
+    }
+
+    ADDRESS_PREFIX_CACHE
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .insert(key, corrected.OnLinkPrefixLength);
+
+    corrected
+}
+
 impl AddressProvider for WindowsBackend {
     type InterfaceAddress = InterfaceAddress;
 
@@ -709,7 +843,7 @@ impl AddressProvider for WindowsBackend {
                 return Err(Error::Platform(PlatformErrorCode::Windows(status.0)));
             }
 
-            let addresses = unsafe {
+            let addresses: Vec<InterfaceAddress> = unsafe {
                 let rows = std::slice::from_raw_parts(
                     (*table).Table.as_ptr(),
                     (*table).NumEntries as usize,
@@ -717,6 +851,23 @@ impl AddressProvider for WindowsBackend {
                 rows.iter().filter_map(row_to_interface_address).collect()
             };
             unsafe { FreeMibTable(table.cast()) };
+
+            // A complete table read is authoritative. Feed each entry's
+            // `OnLinkPrefixLength` into `ADDRESS_PREFIX_CACHE` so a later
+            // `MibDeleteInstance` notification for the same address can
+            // reconstruct the same id even if this process never observed a
+            // corresponding add/change notification for it. See
+            // `complete_address_notification_row`.
+            {
+                let mut cache = ADDRESS_PREFIX_CACHE
+                    .lock()
+                    .unwrap_or_else(|poison| poison.into_inner());
+                for address in &addresses {
+                    let (ip, prefix_len) = network_to_std(address.address);
+                    cache.insert((address.interface_index, ip), prefix_len);
+                }
+            }
+
             Ok(addresses)
         })
     }
@@ -1000,7 +1151,8 @@ unsafe extern "system" fn route_change_callback(
         return;
     }
     let state = unsafe { &*(context.cast::<WindowsWatchState>()) };
-    if let Ok(Some(route)) = row_to_route(unsafe { &*row }) {
+    let corrected = corrected_route_notification_row(unsafe { &*row });
+    if let Ok(Some(route)) = row_to_route(&corrected) {
         let event = Event::Route {
             id: route.id,
             kind: change_kind(notification),
@@ -1039,7 +1191,8 @@ unsafe extern "system" fn address_change_callback(
         return;
     }
     let state = unsafe { &*(context.cast::<WindowsWatchState>()) };
-    if let Some(address) = row_to_interface_address(unsafe { &*row }) {
+    let corrected = complete_address_notification_row(unsafe { &*row }, notification);
+    if let Some(address) = row_to_interface_address(&corrected) {
         let event = Event::Address {
             id: address.id,
             kind: change_kind(notification),
@@ -1060,7 +1213,8 @@ unsafe extern "system" fn tokio_route_change_callback(
         return;
     }
     let state = unsafe { &*(context.cast::<WindowsTokioWatchState>()) };
-    if let Ok(Some(route)) = row_to_route(unsafe { &*row }) {
+    let corrected = corrected_route_notification_row(unsafe { &*row });
+    if let Ok(Some(route)) = row_to_route(&corrected) {
         let event = Event::Route {
             id: route.id,
             kind: change_kind(notification),
@@ -1100,7 +1254,8 @@ unsafe extern "system" fn tokio_address_change_callback(
         return;
     }
     let state = unsafe { &*(context.cast::<WindowsTokioWatchState>()) };
-    if let Some(address) = row_to_interface_address(unsafe { &*row }) {
+    let corrected = complete_address_notification_row(unsafe { &*row }, notification);
+    if let Some(address) = row_to_interface_address(&corrected) {
         let event = Event::Address {
             id: address.id,
             kind: change_kind(notification),
