@@ -2283,7 +2283,7 @@ mod tests {
         );
     }
 
-    /// Polls an [`EventStream`] for up to 3 seconds looking for an
+    /// Polls an [`EventStream`] for up to 10 seconds looking for an
     /// `Event::Address` notification matching `id`, mirroring
     /// `facade_async_route_event` but for the address domain.
     #[cfg(feature = "async")]
