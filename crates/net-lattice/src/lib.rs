@@ -803,6 +803,38 @@ mod tests {
         .with_state(NeighborState::Reachable)
     }
 
+    /// A static-neighbor intent whose `(interface_id, address)` does not
+    /// match any entry `TestBackend::neighbors` reports, so `Add` succeeds
+    /// preconditions and `Remove` fails them.
+    fn static_neighbor() -> StaticNeighbor {
+        StaticNeighbor::new(
+            InterfaceId::new(1),
+            IpAddress::from(Ipv4Address::new(192, 0, 2, 9)),
+            MacAddress::new([0x02, 0x00, 0x00, 0x00, 0x00, 0x09]),
+        )
+    }
+
+    /// A static-neighbor intent whose `(interface_id, address)` matches the
+    /// IPv4 entry `TestBackend::neighbors` already reports, so `Add` fails
+    /// preconditions and `Remove` succeeds them.
+    fn existing_static_neighbor() -> StaticNeighbor {
+        StaticNeighbor::new(
+            InterfaceId::new(1),
+            IpAddress::from(Ipv4Address::new(192, 0, 2, 1)),
+            MacAddress::new([0x02, 0x00, 0x00, 0x00, 0x00, 0x01]),
+        )
+    }
+
+    /// The IPv6 counterpart of `existing_static_neighbor`, matching
+    /// `ipv6_neighbor`'s `(interface_id, address)`.
+    fn existing_ipv6_static_neighbor() -> StaticNeighbor {
+        StaticNeighbor::new(
+            InterfaceId::new(7),
+            IpAddress::from(Ipv6Address::new([0x2001, 0xdb8, 0, 0x16, 0, 0, 0, 1])),
+            MacAddress::new([0x02, 0x00, 0x00, 0x00, 0x00, 0x16]),
+        )
+    }
+
     impl RouteProvider for TestBackend {
         type Route = Route;
 
