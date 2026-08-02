@@ -1,8 +1,5 @@
 # File and documentation rules
 
-Ported from `.codex/rules/files.md` (Codex's `apply_patch` mapped to Claude
-Code's `Edit`/`Write` tools).
-
 - Read the applicable `AGENTS.md`, `plan.md`, and `index.md` before editing.
 - Edit with the `Edit`/`Write` tools. Do not write files with shell
   redirection, heredocs, Python scripts, or ad-hoc generators.
