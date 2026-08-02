@@ -280,8 +280,7 @@ force every backend to stub out methods for features it doesn't have:
   broken on real hardware would contradict ADR-0001's own requirement that a
   capability claim rest on proven native behavior. This sandbox cannot link
   a Darwin test binary at all (no macOS SDK/Xcode), so only cross-compiled
-  type-checking has run here; see `.ai/0.17/AUDIT.md` for the exact
-  failures. The `net-lattice` facade does not forward to `NeighborMutator`
+  type-checking has run here. The `net-lattice` facade does not forward to `NeighborMutator`
   on any platform yet (see ADR-0001, still `proposed`).
 - `DnsProvider` — read/write DNS resolver configuration.
 - `AddressProvider` — list IP addresses assigned to interfaces.

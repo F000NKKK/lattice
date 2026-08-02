@@ -45,9 +45,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Capability::NEIGHBOR_MUTATION` yet — this repository's development
   sandbox cannot link a Darwin test binary at all (no macOS SDK/Xcode), so
   only deterministic fixtures and a cross-compiled type/lint/doc check have
-  run here; see `.ai/0.17/AUDIT.md` for the exact CI failures. The
-  `net-lattice` facade does not forward to `NeighborMutator` on any platform
-  yet; facade/executor integration remains a separate follow-up slice
+  run here. The `net-lattice` facade does not forward to `NeighborMutator` on
+  any platform yet; facade/executor integration remains a separate follow-up slice
   (Slice D), and ADR-0001 remains `proposed`.
 - Stage 0.16 interface configuration: `InterfaceConfig` partial desired
   patches and `DesiredAdminState`, explicitly separate from observed
