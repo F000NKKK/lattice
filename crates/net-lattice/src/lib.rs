@@ -1309,6 +1309,25 @@ mod tests {
         }
     }
 
+    /// Removes a submitted native test address if a later assertion exits
+    /// the test before its explicit remove plan succeeds. This is test
+    /// cleanup, not executor rollback, mirroring `RouteRestore`'s shape for
+    /// `InterfaceAddress`.
+    #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+    struct AddressRestore<'a, B: LatticeBackend> {
+        lattice: &'a Lattice<B>,
+        address: Option<InterfaceAddress>,
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+    impl<B: LatticeBackend> Drop for AddressRestore<'_, B> {
+        fn drop(&mut self) {
+            if let Some(address) = self.address.take() {
+                let _ = self.lattice.remove_address(address);
+            }
+        }
+    }
+
     /// Exercises interface configuration through the complete public facade:
     /// capability checks, direct admin-only/MTU-only/combined read-after-write
     /// submissions, transaction-plan dispatch with a public snapshot callback,
@@ -1508,6 +1527,72 @@ mod tests {
         assert!(
             remove_report.is_success(),
             "route remove report: {remove_report:?}"
+        );
+        restore.route = None;
+    }
+
+    /// Exercises the complete facade transaction path against the native
+    /// backend for an IPv6 route. Mirrors
+    /// `native_facade_route_transaction_round_trip` but uses the IPv6
+    /// documentation prefix (RFC 3849, `2001:db8::/32`) instead of the IPv4
+    /// documentation prefix. Intentionally ignored because route mutation
+    /// requires root/CAP_NET_ADMIN/Administrator and changes the host
+    /// routing table.
+    #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+    #[test]
+    #[ignore = "requires native networking privilege; run with \
+                `cargo test -p net-lattice native_facade_ipv6_route_transaction_round_trip -- --ignored`"]
+    fn native_facade_ipv6_route_transaction_round_trip() {
+        #[cfg(target_os = "linux")]
+        let _guard = native_facade_linux_guard();
+
+        let lattice = Lattice::connect().expect("failed to connect native backend");
+        let interface = lattice
+            .interfaces()
+            .expect("failed to list interfaces")
+            .into_iter()
+            .find(|interface| matches!(interface.kind, InterfaceKind::Loopback))
+            .or_else(|| {
+                lattice
+                    .interfaces()
+                    .ok()
+                    .and_then(|mut interfaces| interfaces.pop())
+            })
+            .expect("native backend reported no interfaces");
+        let destination = Network::from(Ipv6Network::new(
+            Ipv6Address::new([0x2001, 0xdb8, 0, 0, 0, 0, 0, 0]),
+            Ipv6PrefixLength::new(32).expect("valid IPv6 prefix"),
+        ));
+        let route = Route::new(RouteId::new(0), destination).with_interface_index(interface.index);
+
+        let add_plan = MutationPlan::from_operations([Mutation::AddRoute(route.clone())]);
+        let mut snapshot = |_, operation: &Mutation| lattice.snapshot_for_mutation(operation);
+        let mut options = ExecutionOptions::default().snapshot(&mut snapshot);
+        let add_report = lattice.execute_plan(&add_plan, &mut options);
+        assert!(
+            add_report.is_success(),
+            "ipv6 route add report: {add_report:?}"
+        );
+        let mut restore = RouteRestore {
+            lattice: &lattice,
+            route: Some(route.clone()),
+        };
+
+        let observed_route = lattice
+            .routes()
+            .expect("failed to read route after adding it")
+            .into_iter()
+            .find(|candidate| {
+                candidate.destination == route.destination
+                    && candidate.interface_index == route.interface_index
+            })
+            .expect("added ipv6 route was not observed");
+        let remove_plan = MutationPlan::from_operations([Mutation::RemoveRoute(observed_route)]);
+        let mut options = ExecutionOptions::default();
+        let remove_report = lattice.execute_plan(&remove_plan, &mut options);
+        assert!(
+            remove_report.is_success(),
+            "ipv6 route remove report: {remove_report:?}"
         );
         restore.route = None;
     }
