@@ -265,15 +265,19 @@ force every backend to stub out methods for features it doesn't have:
   requires a MAC address because this stage only creates static L2 mappings.
   As of Stage 0.17 Slice C, `net-lattice-backend-linux` implements this trait
   (`RTM_NEWNEIGH`/`RTM_DELNEIGH` via `rtnetlink`, `NUD_PERMANENT`, a
-  non-`Permanent`-entry deletion guard) and `net-lattice-backend-windows`
+  non-`Permanent`-entry deletion guard), `net-lattice-backend-windows`
   implements it (`CreateIpNetEntry2`/`DeleteIpNetEntry2` over
   `MIB_IPNET_ROW2`, `NlnsPermanent`, the same non-`Permanent`-entry deletion
-  guard); both advertise `Capability::NEIGHBOR_MUTATION`. The Windows
-  implementation is unverified against a live elevated host in this
-  repository's development environment (only deterministic fixtures and a
-  cross-compiled type check have run; see `.ai/0.17/AUDIT.md`). macOS does
-  not implement it yet, and the `net-lattice` facade does not forward to it
-  on any platform (see ADR-0001, still `proposed`).
+  guard, confirmed on live elevated Windows CI), and `net-lattice-backend-darwin`
+  implements it (`RTM_ADD` and a two-message `RTM_GET`-then-`RTM_DELETE`
+  sequence over `PF_ROUTE`, mirroring Apple's own `arp.c`/`ndp.c`, the same
+  non-`Permanent`-entry deletion guard); all three advertise
+  `Capability::NEIGHBOR_MUTATION`. The macOS implementation is unverified
+  against real hardware or CI in this repository's development environment
+  (this sandbox cannot link a Darwin test binary at all — no macOS SDK/Xcode
+  — so only cross-compiled type-checking has run; see `.ai/0.17/AUDIT.md`).
+  The `net-lattice` facade does not forward to `NeighborMutator` on any
+  platform yet (see ADR-0001, still `proposed`).
 - `DnsProvider` — read/write DNS resolver configuration.
 - `AddressProvider` — list IP addresses assigned to interfaces.
 - `AddressMutator` — assign and remove IP addresses. Its input is distinct

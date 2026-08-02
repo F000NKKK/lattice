@@ -28,12 +28,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   entry, returning `InvalidState`; a missing target returns `NotFound`, and
   native `ERROR_ACCESS_DENIED`/`ERROR_OBJECT_ALREADY_EXISTS`/`ERROR_NOT_SUPPORTED`
   map to `PermissionDenied`/`AlreadyExists`/`Unsupported`. This implementation
-  has not been exercised against a live elevated Windows host in this
-  repository's development environment; only deterministic fixtures and a
-  cross-compiled type/lint/doc check have run (see `.ai/0.17/AUDIT.md`).
-  macOS does not implement `NeighborMutator` yet, and the `net-lattice`
-  facade does not forward to it on any platform; macOS native backend wiring
-  and facade/executor integration remain separate follow-up slices.
+  has been confirmed on a live elevated Windows CI run (see
+  `.ai/0.17/AUDIT.md` sections 14-16).
+- Stage 0.17 macOS native static-neighbor mutation: `net-lattice-backend-darwin`
+  implements `NeighborMutator` over `PF_ROUTE` (`RTM_ADD` for add; a real
+  two-message `RTM_GET`-then-`RTM_DELETE` sequence for remove, reusing the
+  kernel's own `RTM_GET` reply's `sockaddr_dl` gateway, mirroring Apple's own
+  `arp.tproj/arp.c`/`ndp.tproj/ndp.c`) and advertises
+  `Capability::NEIGHBOR_MUTATION`. Removal first re-reads the neighbor table
+  and refuses to delete a present but non-`Permanent` (dynamically learned)
+  entry, returning `InvalidState`; a missing target returns `NotFound`, and
+  native `EEXIST`/`ESRCH`/`ENOENT`/`EPERM`/`EACCES` map to
+  `AlreadyExists`/`NotFound`/`PermissionDenied`. **Unverified on real macOS
+  hardware or CI**: this repository's development sandbox cannot link a
+  Darwin test binary at all (no macOS SDK/Xcode), so only deterministic
+  fixtures and a cross-compiled type/lint/doc check have run (see
+  `.ai/0.17/AUDIT.md`). The `net-lattice` facade does not forward to
+  `NeighborMutator` on any platform yet; facade/executor integration remains
+  a separate follow-up slice (Slice D), and ADR-0001 remains `proposed`
+  pending a real elevated macOS CI run.
 - Stage 0.16 interface configuration: `InterfaceConfig` partial desired
   patches and `DesiredAdminState`, explicitly separate from observed
   `Interface` state.
