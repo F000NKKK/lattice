@@ -3211,7 +3211,7 @@ mod tests {
         // off-subnet address (originally `192.0.2.253`, RFC 5737
         // `TEST-NET-1`) is unrouted on a real interface and `RTM_ADD` fails
         // with `ENETUNREACH` (errno 51), exactly as caught on live elevated
-        // macOS CI (`.ai/0.17/AUDIT.md`). Derive an in-subnet, currently
+        // macOS CI. Derive an in-subnet, currently
         // unassigned host address from the interface's own configured IPv4
         // network instead.
         let own = backend
