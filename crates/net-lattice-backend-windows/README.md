@@ -6,8 +6,8 @@ generic `net-lattice-platform` contracts through native Windows APIs.
 ## What it provides
 
 - interface, address, route, neighbor, and resolver inspection;
-- route, address, and resolver mutation where Windows exposes portable
-  semantics;
+- route, address, resolver, and static ARP/NDP neighbor mutation where
+  Windows exposes portable semantics;
 - interface MTU and administrative-state patches, with a fresh observed
   readback after every successful native submission;
 - native route, interface, and unicast-address notifications with optional
@@ -35,13 +35,21 @@ fn main() -> net_lattice_core::Result<()> {
 ## Privileges and safety
 
 Inspection is normally unprivileged. Mutating host networking, including an
-interface MTU or administrative state, can require an administrator context
-and remains subject to adapter and system policy. Windows applies MTU to its
-applicable IPv4/IPv6 interface rows and administrative state through a
-separate native operation, so a combined patch can be partially applied after
-an error; callers must re-read state and use explicit compensation where
-needed. IP Helper has no native neighbor-table change callback, so this backend
-advertises route/interface/address monitoring capabilities only and rejects
-neighbor or all-domain watcher requests before registration. The facade does
-not synthesize events. Privileged tests run separately and must restore changed
-state.
+interface MTU or administrative state, a route, an address, or a static ARP/NDP
+neighbor entry, can require an administrator context and remains subject to
+adapter and system policy. Windows applies MTU to its applicable IPv4/IPv6
+interface rows and administrative state through a separate native operation,
+so a combined patch can be partially applied after an error; callers must
+re-read state and use explicit compensation where needed. Static-neighbor add
+always re-reads the neighbor table after a successful `CreateIpNetEntry2`
+call so callers observe what the kernel actually holds rather than a
+synthesized guess; static-neighbor remove reads the target first and refuses
+to delete a present entry that is not currently `Permanent`, so a
+dynamically learned ARP/NDP cache entry is never removed as a side effect of
+a static-removal request. IP Helper has no native neighbor-table change
+callback, so this backend advertises route/interface/address monitoring
+capabilities only and rejects neighbor or all-domain watcher requests before
+registration; this is unrelated to (and does not gate) static-neighbor
+mutation, which is a request/response native call rather than an event
+subscription. The facade does not synthesize events. Privileged tests run
+separately and must restore changed state.

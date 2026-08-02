@@ -1138,8 +1138,13 @@ impl NeighborMutator for WindowsBackend {
     /// Submits a static ARP/NDP entry via `CreateIpNetEntry2` with
     /// `State: NlnsPermanent`, then re-reads the neighbor table so the
     /// returned entry reflects what IP Helper actually holds
-    /// (`ReadAfterWrite`, per ADR-0001) rather than a synthesized guess. See
-    /// [`static_neighbor_mutation_error`] for the native error mapping.
+    /// (`ReadAfterWrite`, per ADR-0001) rather than a synthesized guess.
+    /// `ERROR_ACCESS_DENIED` maps to [`Error::PermissionDenied`],
+    /// `ERROR_NOT_FOUND` (missing interface) to [`Error::NotFound`],
+    /// `ERROR_OBJECT_ALREADY_EXISTS` to [`Error::AlreadyExists`], and
+    /// `ERROR_NOT_SUPPORTED` (address family stack absent on the interface)
+    /// to [`Error::Unsupported`]; any other status surfaces as
+    /// `Error::Platform` with the raw code.
     fn add_static_neighbor(&self, neighbor: Self::StaticNeighbor) -> Result<Self::NeighborEntry> {
         let interface_index = neighbor.interface_id.value() as u32;
         let address = ip_address_to_std(neighbor.address);
@@ -2699,6 +2704,91 @@ mod tests {
         // running this test is arbitrary. Reaching here without an error is
         // the assertion.
         let _ = neighbors;
+    }
+
+    /// Exercises the complete `NeighborMutator` path against the kernel:
+    /// create a static ARP entry on the loopback adapter using a
+    /// documentation-range (TEST-NET-2, RFC 5737) IPv4 address, confirm it
+    /// reads back as `NeighborState::Permanent`, remove it, confirm it is
+    /// gone, and confirm a second removal correctly reports
+    /// `Error::NotFound` rather than silently succeeding.
+    ///
+    /// Uses the loopback adapter for isolation from any real on-link host,
+    /// mirroring `add_then_remove_address_round_trips_through_the_kernel`'s
+    /// choice of interface. Unlike Linux's IPv4 ARP case (which needed a
+    /// dedicated `dummy` link because `lo`'s `IFF_LOOPBACK`/no-`header_ops`
+    /// path forces every neighbour entry into `NUD_NOARP`, see
+    /// `crates/net-lattice-backend-linux/src/lib.rs`'s `DummyLinkFixture`),
+    /// neither `CreateIpNetEntry2`'s nor `MIB_IPNET_ROW2`'s Microsoft Learn
+    /// documentation describes an equivalent forced-state override tied to
+    /// the loopback interface for the IP Helper neighbor table — it is a
+    /// plain per-interface table write, not a kernel ARP/NDP resolution
+    /// state machine. This has not been confirmed against a live Windows
+    /// host in this environment; if a real elevated run shows the loopback
+    /// adapter rejects or silently downgrades a `NlnsPermanent` row here,
+    /// this test must switch to a non-loopback ARP-capable interface instead
+    /// of loosening its assertions.
+    #[test]
+    #[ignore = "requires Administrator; run from elevated cmd/PowerShell: cargo test -p net-lattice-backend-windows add_then_remove_static_neighbor_round_trips_through_the_kernel -- --ignored"]
+    fn add_then_remove_static_neighbor_round_trips_through_the_kernel() {
+        let _guard = windows_test_guard();
+
+        let backend = WindowsBackend::new().expect("failed to create Windows backend");
+        let interface_index = backend
+            .interfaces()
+            .expect("failed to list Windows interfaces")
+            .into_iter()
+            .find(|interface| matches!(interface.kind, InterfaceKind::Loopback))
+            .expect("Windows loopback interface was not found")
+            .index;
+        let address = IpAddress::from(Ipv4Address::new(198, 51, 100, 42));
+        let mac = MacAddress::new([0x02, 0x00, 0x00, 0x00, 0x00, 0x2a]);
+        let neighbor = StaticNeighbor::new(Id::new(interface_index as u64), address, mac);
+
+        // Best effort even under `#[ignore]`: if a prior run was
+        // interrupted, don't let a stale entry fail this run's add with
+        // `AlreadyExists`.
+        if let Some(existing) = backend
+            .neighbors()
+            .expect("neighbors() failed before add_static_neighbor")
+            .into_iter()
+            .find(|entry| entry.interface_index == interface_index && entry.address == address)
+            && existing.state == NeighborState::Permanent
+        {
+            let _ = backend.remove_static_neighbor(neighbor);
+        }
+
+        let observed = backend
+            .add_static_neighbor(neighbor)
+            .expect("add_static_neighbor failed - are you running as Administrator?");
+        assert_eq!(observed.interface_index, interface_index);
+        assert_eq!(observed.address, address);
+        assert_eq!(
+            observed.state,
+            NeighborState::Permanent,
+            "static entry must read back as Permanent, got {:?}",
+            observed.state
+        );
+        assert_eq!(observed.mac, Some(mac));
+
+        backend
+            .remove_static_neighbor(neighbor)
+            .expect("remove_static_neighbor failed after successful add_static_neighbor");
+        let absent = !backend
+            .neighbors()
+            .expect("neighbors() failed after remove_static_neighbor")
+            .into_iter()
+            .any(|entry| entry.interface_index == interface_index && entry.address == address);
+        assert!(
+            absent,
+            "removed static neighbor was still present in neighbors() afterward"
+        );
+
+        let second_remove = backend.remove_static_neighbor(neighbor);
+        assert!(
+            matches!(second_remove, Err(Error::NotFound)),
+            "removing an already-absent static neighbor should report NotFound, got {second_remove:?}"
+        );
     }
 
     /// Exercises a real round trip through `GetAdaptersAddresses`, no
