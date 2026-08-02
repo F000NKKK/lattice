@@ -1819,7 +1819,7 @@ fn ensure_removable_static_neighbor_state(state: NeighborState) -> Result<()> {
 /// has never been exercised against a real kernel at all (every real CI run
 /// so far failed before reaching it). Do not trust this implementation
 /// until a real elevated macOS CI run demonstrates the full round trip
-/// green — see `.ai/0.17/AUDIT.md` section 18 for the exact failures.
+/// green.
 impl NeighborMutator for DarwinBackend {
     type StaticNeighbor = StaticNeighbor;
     type NeighborEntry = NeighborEntry;
@@ -2130,9 +2130,9 @@ impl CapabilityProvider for DarwinBackend {
     /// (`PF_ROUTE`-based static ARP/NDP add/delete) but a real elevated
     /// macOS CI run found `add_static_neighbor` itself fails against a real
     /// kernel with an as-yet-undiagnosed `Error::InvalidState` (see that
-    /// impl's doc comment and `.ai/0.17/AUDIT.md` section 18) — advertising
-    /// this capability while it is confirmed broken would violate
-    /// ADR-0001's own principle that a claim requires proven native
+    /// impl's doc comment) — advertising this capability while it is
+    /// confirmed broken would violate ADR-0001's own principle that a claim
+    /// requires proven native
     /// behavior, not just a type-checked implementation. Re-add this bit
     /// once a real elevated macOS CI run demonstrates the full round trip
     /// green. `VRF`/`NAMESPACES` are left unset: BSD/macOS has no direct
