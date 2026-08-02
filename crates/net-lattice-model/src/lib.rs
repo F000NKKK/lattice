@@ -2,8 +2,9 @@
 //!
 //! No operating-system dependency. Stage 0.4 added the `mac` and `interface`
 //! modules; Stage 0.5 added `dns`; Stage 0.6 added `neighbor`; Stage 0.7
-//! added `ifaddr`; Stage 0.8 added `event`; Stage 0.14 added `mutation`; and
-//! Stage 0.16 adds desired interface-configuration intent.
+//! added `ifaddr`; Stage 0.8 added `event`; Stage 0.14 added `mutation`;
+//! Stage 0.16 added desired interface-configuration intent; and Stage 0.17
+//! adds `StaticNeighbor` desired-neighbor intent and its `Mutation` variants.
 
 mod address;
 pub mod dns;
@@ -30,5 +31,5 @@ pub use mutation::{
     MutationPrecondition, MutationPreflight, MutationPrivilege, MutationReversibility,
     MutationSemantics, MutationSnapshot, MutationStopReason, RollbackStatus,
 };
-pub use neighbor::{NeighborEntry, NeighborId, NeighborState};
+pub use neighbor::{NeighborEntry, NeighborId, NeighborState, StaticNeighbor};
 pub use route::Route;

@@ -11,6 +11,7 @@ use crate::dns::DnsConfig;
 use crate::dns::NewDnsConfig;
 use crate::ifaddr::{InterfaceAddress, NewInterfaceAddress};
 use crate::interface::{Interface, InterfaceConfig};
+use crate::neighbor::{NeighborEntry, StaticNeighbor};
 use crate::route::Route;
 use net_lattice_core::Error;
 
@@ -39,6 +40,14 @@ pub enum Mutation {
     /// writes, so callers must treat a failure as potentially partially
     /// applied and re-read the observed interface state.
     SetInterfaceConfig(InterfaceConfig),
+    /// Adds a static ARP/NDP neighbor entry.
+    AddStaticNeighbor(StaticNeighbor),
+    /// Removes a static ARP/NDP neighbor entry.
+    ///
+    /// The backend must confirm the target is presently a `Permanent`
+    /// (static) entry before removal; a non-permanent matching entry is
+    /// rejected rather than silently deleting dynamically learned state.
+    RemoveStaticNeighbor(StaticNeighbor),
 }
 
 /// Observed state captured immediately before a mutation is submitted.
@@ -58,6 +67,8 @@ pub enum MutationSnapshot {
     /// The interface observed before a configuration patch, if it was still
     /// present when the snapshot was captured.
     Interface(Option<Interface>),
+    /// The matching observed neighbor entry, if one was observed.
+    Neighbor(Option<NeighborEntry>),
 }
 
 /// The broad effect an operation requests.
@@ -70,6 +81,8 @@ pub enum MutationKind {
     RemoveAddress,
     SetDnsConfig,
     SetInterfaceConfig,
+    AddStaticNeighbor,
+    RemoveStaticNeighbor,
 }
 
 /// State that must hold for an operation to be meaningful.
@@ -203,6 +216,24 @@ impl Mutation {
                 confirmation: MutationConfirmation::ReadAfterWrite,
                 reversibility: MutationReversibility::RequiresPriorState,
                 may_partially_apply: true,
+            },
+            Self::AddStaticNeighbor(_) => MutationSemantics {
+                kind: MutationKind::AddStaticNeighbor,
+                precondition: MutationPrecondition::Absent,
+                idempotency: MutationIdempotency::Strict,
+                privilege: MutationPrivilege::Elevated,
+                confirmation: MutationConfirmation::ReadAfterWrite,
+                reversibility: MutationReversibility::RequiresPriorState,
+                may_partially_apply: false,
+            },
+            Self::RemoveStaticNeighbor(_) => MutationSemantics {
+                kind: MutationKind::RemoveStaticNeighbor,
+                precondition: MutationPrecondition::Present,
+                idempotency: MutationIdempotency::Strict,
+                privilege: MutationPrivilege::Elevated,
+                confirmation: MutationConfirmation::NativeAcknowledgement,
+                reversibility: MutationReversibility::RequiresPriorState,
+                may_partially_apply: false,
             },
         }
     }
@@ -534,7 +565,8 @@ impl IntoIterator for MutationPlan {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{DesiredAdminState, InterfaceConfig, InterfaceId, IpAddress, Network};
+    use crate::neighbor::StaticNeighbor;
+    use crate::{DesiredAdminState, InterfaceConfig, InterfaceId, IpAddress, MacAddress, Network};
     use net_lattice_ip::{Ipv4Address, Ipv4Network, Ipv4PrefixLength};
 
     fn network() -> Network {
@@ -739,5 +771,68 @@ mod tests {
         let preflight = plan.preflight();
         assert_eq!(preflight.prior_state_indices(), &[0]);
         assert_eq!(preflight.partial_application_indices(), &[0]);
+    }
+
+    fn static_neighbor() -> StaticNeighbor {
+        StaticNeighbor::new(
+            InterfaceId::new(4),
+            IpAddress::from(Ipv4Address::new(192, 168, 1, 9)),
+            MacAddress::new([0x02, 0x00, 0x00, 0x00, 0x00, 0x09]),
+        )
+    }
+
+    #[test]
+    fn add_static_neighbor_requires_absent_target_and_read_after_write() {
+        let operation = Mutation::AddStaticNeighbor(static_neighbor());
+        let semantics = operation.semantics();
+
+        assert_eq!(semantics.kind, MutationKind::AddStaticNeighbor);
+        assert_eq!(semantics.precondition, MutationPrecondition::Absent);
+        assert_eq!(semantics.idempotency, MutationIdempotency::Strict);
+        assert_eq!(semantics.privilege, MutationPrivilege::Elevated);
+        assert_eq!(semantics.confirmation, MutationConfirmation::ReadAfterWrite);
+        assert_eq!(
+            semantics.reversibility,
+            MutationReversibility::RequiresPriorState
+        );
+        assert!(!semantics.may_partially_apply);
+    }
+
+    #[test]
+    fn remove_static_neighbor_requires_present_target_and_native_acknowledgement() {
+        let operation = Mutation::RemoveStaticNeighbor(static_neighbor());
+        let semantics = operation.semantics();
+
+        assert_eq!(semantics.kind, MutationKind::RemoveStaticNeighbor);
+        assert_eq!(semantics.precondition, MutationPrecondition::Present);
+        assert_eq!(semantics.idempotency, MutationIdempotency::Strict);
+        assert_eq!(semantics.privilege, MutationPrivilege::Elevated);
+        assert_eq!(
+            semantics.confirmation,
+            MutationConfirmation::NativeAcknowledgement
+        );
+        assert_eq!(
+            semantics.reversibility,
+            MutationReversibility::RequiresPriorState
+        );
+        assert!(!semantics.may_partially_apply);
+    }
+
+    #[test]
+    fn neighbor_snapshot_variant_holds_the_matched_observed_entry() {
+        let snapshot = MutationSnapshot::Neighbor(None);
+        assert!(matches!(snapshot, MutationSnapshot::Neighbor(None)));
+    }
+
+    #[test]
+    fn static_neighbor_operations_require_prior_state_for_compensation() {
+        let plan = MutationPlan::from_operations([
+            Mutation::AddStaticNeighbor(static_neighbor()),
+            Mutation::RemoveStaticNeighbor(static_neighbor()),
+        ]);
+        let preflight = plan.preflight();
+
+        assert_eq!(preflight.prior_state_indices(), &[0, 1]);
+        assert!(preflight.partial_application_indices().is_empty());
     }
 }

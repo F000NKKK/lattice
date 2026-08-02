@@ -82,6 +82,46 @@ impl NeighborEntry {
     }
 }
 
+/// Intent to add or remove a static ARP/NDP neighbor entry.
+///
+/// This is intentionally distinct from [`NeighborEntry`]: a static neighbor
+/// request carries neither a [`NeighborId`] (that identifier is synthesized
+/// from an OS-observed interface index and address, and no native API
+/// accepts it back as input) nor a [`NeighborState`] (state is reported by
+/// the OS, not chosen by the caller). Identity is `(interface_id, address)`.
+/// `mac` is required, not optional, because this stage only creates static
+/// L2 mappings; a caller cannot request an incomplete or dynamically
+/// resolved entry through this type.
+///
+/// `#[non_exhaustive]`: platform-specific static-neighbor fields (for
+/// example a router flag or IPv6 lifetime) may be added later without
+/// breaking callers who construct a `StaticNeighbor` via
+/// [`StaticNeighbor::new`] rather than a struct literal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub struct StaticNeighbor {
+    /// The interface this static entry applies to.
+    pub interface_id: crate::interface::InterfaceId,
+    /// The IP address resolved by this static entry.
+    pub address: IpAddress,
+    /// The link-layer address the static entry maps to.
+    pub mac: MacAddress,
+}
+
+impl StaticNeighbor {
+    pub fn new(
+        interface_id: crate::interface::InterfaceId,
+        address: IpAddress,
+        mac: MacAddress,
+    ) -> Self {
+        Self {
+            interface_id,
+            address,
+            mac,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -127,5 +167,35 @@ mod tests {
         assert_eq!(entry.address, address);
         assert_eq!(entry.mac, Some(mac));
         assert_eq!(entry.state, NeighborState::Reachable);
+    }
+
+    #[test]
+    fn static_neighbor_requires_a_mac_and_carries_no_id_or_state() {
+        let mac = MacAddress::new([0x02, 0x00, 0x00, 0x00, 0x00, 0x02]);
+        let address = IpAddress::from(Ipv4Address::new(192, 168, 1, 2));
+        let neighbor = StaticNeighbor::new(crate::interface::InterfaceId::new(3), address, mac);
+
+        assert_eq!(neighbor.interface_id, crate::interface::InterfaceId::new(3));
+        assert_eq!(neighbor.address, address);
+        assert_eq!(neighbor.mac, mac);
+    }
+
+    #[test]
+    fn static_neighbor_identity_is_interface_and_address() {
+        let mac = MacAddress::new([0x02, 0x00, 0x00, 0x00, 0x00, 0x03]);
+        let address = IpAddress::from(Ipv6Address::new([0x2001, 0xdb8, 0, 0, 0, 0, 0, 2]));
+        let a = StaticNeighbor::new(crate::interface::InterfaceId::new(1), address, mac);
+        let b = StaticNeighbor::new(
+            crate::interface::InterfaceId::new(1),
+            address,
+            MacAddress::new([0x02, 0x00, 0x00, 0x00, 0x00, 0x04]),
+        );
+
+        // Same identity, different mac: not equal because mac is part of the
+        // desired intent (a replacement request), but interface_id/address
+        // match.
+        assert_ne!(a, b);
+        assert_eq!(a.interface_id, b.interface_id);
+        assert_eq!(a.address, b.address);
     }
 }

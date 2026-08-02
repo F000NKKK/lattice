@@ -8,6 +8,8 @@ models data and contracts; it never inspects or mutates the host system.
 - observed interfaces, addresses, routes, neighbors, and DNS configuration;
 - partial desired `InterfaceConfig` patches, with a distinct
   `DesiredAdminState` so observed `AdminState::Unknown` is never requested;
+- desired static-neighbor intent (`StaticNeighbor`) for ARP/NDP entries,
+  distinct from the observed `NeighborEntry` and requiring an explicit MAC;
 - typed object identifiers and filtered change events;
 - mutation descriptions, semantics, snapshots, plans, and execution reports;
 - explicit separation between inspectable plan data and runtime execution.
