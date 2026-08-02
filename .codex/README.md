@@ -9,12 +9,29 @@ roadmap stage. Task-specific plans, evidence, and decisions live under
 1. Read root `AGENTS.md` and `index.md`.
 2. Identify the active `.ai/<task-name>/` directory.
 3. Read its `plan.md`, `AUDIT.md`, and relevant ADRs.
-4. Load every applicable rule from `rules/`.
-5. Follow the root pipeline through `researcher`, `architect`, `implementer`,
-   and `reviewer`. Record an explicit `not applicable` audit decision when a
-   mechanical slice does not need architecture work.
+4. Load all five rule files in `rules/` (`audit.md`, `ci.md`, `files.md`,
+   `git.md`, `research.md`). Codex has no glob/conditional or per-role rule
+   loading in `config.toml` — unlike role scoping, there is no mechanism to
+   load only "applicable" rules automatically, so read the full set every
+   session and apply judgment about which constraints bind the current
+   slice.
+5. When acting as `researcher`, `architect`, `implementer`, or `reviewer`
+   (`agents/*.md`), that file narrows which of the already-loaded rules are
+   load-bearing for the role — it is a reading-priority convention, not an
+   enforced restriction. Record an explicit `not applicable` audit decision
+   when a mechanical slice does not need architecture work.
 6. Let the primary agent reconcile every handoff with the plan and record the
    result in the active task workspace.
+
+`config.toml` currently sets no `approval_policy` or `sandbox_mode`, so
+nothing in `rules/git.md` (no `reset --hard`, no force-push, no
+amend/rebase) is mechanically enforced for Codex the way the equivalent
+Claude Code rules are via `permissions.deny` in `.claude/settings.json` —
+these remain instructions the agent must follow deliberately, not a tool-
+level block. Tightening this would mean setting `approval_policy`/
+`sandbox_mode`, which changes how much Codex can do without asking; that is
+a deliberate behavior change and should be a separate, explicit decision
+rather than bundled into a rules-loading fix.
 
 ## Contents
 
