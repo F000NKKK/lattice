@@ -1906,7 +1906,18 @@ impl NeighborMutator for DarwinBackend {
         let mac = neighbor.mac.octets();
         let sdl_type = interface_sdl_type(interface_index);
 
-        self.runtime.block_on(async {
+        // TEMPORARY diagnostic instrumentation (2026-08-02, AUDIT.md section
+        // 20/21): two consecutive live elevated-CI hypotheses
+        // (readback-visibility, zero `sdl_type`) have both failed to explain
+        // a reproducible `InvalidState` here, and this sandbox cannot
+        // reproduce the failure to investigate further. Remove this block
+        // once the real cause is confirmed on a live host — do not let this
+        // linger as permanent stderr noise on every call.
+        eprintln!(
+            "[net-lattice-backend-darwin diagnostic] add_static_neighbor: destination={destination:?} interface_index={interface_index} sdl_type={sdl_type} mac={mac:02x?}"
+        );
+
+        let reply = self.runtime.block_on(async {
             let message = static_neighbor_add_request(
                 destination,
                 interface_index,
@@ -1914,11 +1925,24 @@ impl NeighborMutator for DarwinBackend {
                 mac,
                 RTM_SEQ_NEIGHBOR_ADD,
             );
-            send_route_request(self.fd, &message, RTM_SEQ_NEIGHBOR_ADD)
+            send_route_message(self.fd, &message, RTM_SEQ_NEIGHBOR_ADD)
         })?;
+        let reply_hdr = unsafe { &*(reply.as_ptr() as *const libc::rt_msghdr) };
+        eprintln!(
+            "[net-lattice-backend-darwin diagnostic] RTM_ADD reply: rtm_errno={} rtm_flags={:#x} rtm_addrs={:#x} rtm_msglen={}",
+            reply_hdr.rtm_errno, reply_hdr.rtm_flags, reply_hdr.rtm_addrs, reply_hdr.rtm_msglen
+        );
 
-        self.neighbors()?
-            .into_iter()
+        let dump = self.neighbors()?;
+        eprintln!(
+            "[net-lattice-backend-darwin diagnostic] post-add neighbors() dump ({} entries): {:?}",
+            dump.len(),
+            dump.iter()
+                .map(|entry| (entry.interface_index, entry.address, entry.state, entry.mac))
+                .collect::<Vec<_>>()
+        );
+
+        dump.into_iter()
             .find(|entry| {
                 entry.interface_index == interface_index && entry.address == neighbor.address
             })
