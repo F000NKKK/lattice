@@ -10,6 +10,18 @@
       "Bash(git status *)",
       "Bash(git log *)",
       "Bash(npx tsc *)"
+    ],
+    "deny": [
+      "Bash(git reset --hard*)",
+      "Bash(git clean*)",
+      "Bash(git checkout .*)",
+      "Bash(git checkout -- *)",
+      "Bash(git push --force*)",
+      "Bash(git push -f*)",
+      "Bash(git commit --amend*)",
+      "Bash(git rebase*)",
+      "Bash(git add -f*)",
+      "Bash(git add --force*)"
     ]
   }
 }
