@@ -469,7 +469,16 @@ fn build_add_message(route: &Route) -> Result<Vec<u8>> {
         (None, None) => return Err(Error::InvalidState),
     }
 
-    if prefix_len == 32 || prefix_len == 128 {
+    // A prefix is a host route only at its own family's full width: /32 for
+    // IPv4, /128 for IPv6. Checking `prefix_len == 32 || prefix_len == 128`
+    // without the family would misclassify a legitimate IPv6 network route
+    // narrower than /128 but exactly /32 (e.g. the RFC 3849 documentation
+    // prefix `2001:db8::/32`) as a host route, dropping its actual netmask.
+    let is_host = match destination {
+        IpAddr::V4(_) => prefix_len == 32,
+        IpAddr::V6(_) => prefix_len == 128,
+    };
+    if is_host {
         hdr.rtm_flags |= RTF_HOST;
     } else {
         hdr.rtm_addrs |= RTA_NETMASK;
@@ -507,7 +516,16 @@ fn build_delete_message(route: &Route) -> Result<Vec<u8>> {
         offset += push_sockaddr(&mut buf, offset, gateway);
     }
 
-    if prefix_len == 32 || prefix_len == 128 {
+    // A prefix is a host route only at its own family's full width: /32 for
+    // IPv4, /128 for IPv6. Checking `prefix_len == 32 || prefix_len == 128`
+    // without the family would misclassify a legitimate IPv6 network route
+    // narrower than /128 but exactly /32 (e.g. the RFC 3849 documentation
+    // prefix `2001:db8::/32`) as a host route, dropping its actual netmask.
+    let is_host = match destination {
+        IpAddr::V4(_) => prefix_len == 32,
+        IpAddr::V6(_) => prefix_len == 128,
+    };
+    if is_host {
         hdr.rtm_flags |= RTF_HOST;
     } else {
         hdr.rtm_addrs |= RTA_NETMASK;

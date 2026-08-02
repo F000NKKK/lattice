@@ -1876,13 +1876,23 @@ mod tests {
         }
 
         let requested = NewInterfaceAddress::new(interface.id, network);
+        // `validate_plan` does not inspect `broadcast`, so a bad interface
+        // id (the technique the IPv4/route counterpart test uses) would be
+        // rejected during whole-plan validation before either operation
+        // executes, unlike `AddRoute`'s lazily-checked `interface_index`.
+        // An IPv6 address with an explicit (IPv4-typed) broadcast is instead
+        // rejected by every backend's `add_address` at execution time
+        // (`Error::InvalidState`), giving the same
+        // passes-validation-fails-at-execution shape the compensation path
+        // under test requires.
         let failed_request = NewInterfaceAddress::new(
-            InterfaceId::new(u64::MAX),
+            interface.id,
             Network::from(Ipv6Network::new(
                 Ipv6Address::new([0x2001, 0xdb8, 7, 0, 0, 0, 0, 9]),
                 Ipv6PrefixLength::new(64).expect("valid IPv6 prefix"),
             )),
-        );
+        )
+        .with_broadcast(Ipv4Address::new(255, 255, 255, 255));
         let plan = MutationPlan::from_operations([
             Mutation::AddAddress(requested.clone()),
             Mutation::AddAddress(failed_request),
@@ -1958,7 +1968,7 @@ mod tests {
         let _guard = native_facade_linux_guard();
 
         let lattice = Lattice::connect().expect("failed to connect native backend");
-        assert!(lattice.supports(Capability::MONITORING));
+        assert!(lattice.supports(Capability::ROUTE_MONITORING));
         let interface = lattice
             .interfaces()
             .expect("failed to list interfaces")
@@ -2017,7 +2027,22 @@ mod tests {
             .watch_async(EventFilter::none().route(watched_id))
             .expect("failed to subscribe to selected async route events");
 
-        let remove_plan = MutationPlan::from_operations([Mutation::RemoveRoute(route.clone())]);
+        // Re-read the observed route rather than reusing the locally
+        // constructed `route`: `validate_plan`'s `same_route` match compares
+        // `metric`, and the kernel may assign a nonzero default metric to an
+        // IPv6 route that the locally constructed value (metric `None`)
+        // does not carry, which would otherwise make removal fail validation
+        // with `NotFound`.
+        let observed_route = lattice
+            .routes()
+            .expect("failed to read routes before removal")
+            .into_iter()
+            .find(|candidate| {
+                candidate.destination == route.destination
+                    && candidate.interface_index == route.interface_index
+            })
+            .expect("added ipv6 route was not observed before removal");
+        let remove_plan = MutationPlan::from_operations([Mutation::RemoveRoute(observed_route)]);
         let mut remove_options = ExecutionOptions::default();
         let remove_report = lattice.execute_plan(&remove_plan, &mut remove_options);
         assert!(
