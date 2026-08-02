@@ -1930,6 +1930,67 @@ mod tests {
         );
     }
 
+    /// Exercises the complete route-mutation path against the real kernel
+    /// for an IPv6 destination: create a route on `lo`, read the canonical
+    /// observed record, then remove that exact record. Uses RFC 3849
+    /// `2001:db8::/32` (the IPv6 documentation prefix), the IPv6 counterpart
+    /// of the IPv4 route test's RFC 5737 `203.0.113.0/24`, distinct from
+    /// the other IPv6 subnets used by the other ignored tests in this
+    /// module so concurrent kernel state never overlaps.
+    #[test]
+    #[ignore = "requires CAP_NET_ADMIN; run with `sudo -E cargo test -p net-lattice-backend-linux add_then_remove_ipv6_route_round_trips_through_the_kernel -- --ignored`"]
+    fn add_then_remove_ipv6_route_round_trips_through_the_kernel() {
+        let _guard = kernel_test_guard();
+        let backend = LinuxBackend::new().expect("failed to open a Netlink connection");
+        let interface_index = loopback_interface_index(&backend);
+
+        let destination = Network::from(net_lattice_ip::Ipv6Network::new(
+            net_lattice_ip::Ipv6Address::new([0x2001, 0xdb8, 1, 0, 0, 0, 0, 0]),
+            net_lattice_ip::Ipv6PrefixLength::new(64).unwrap(),
+        ));
+        let route = Route::new(RouteId::new(0), destination).with_interface_index(interface_index);
+
+        // Recover from an interrupted prior run before attempting the add.
+        let _ = backend.remove_route(route.clone());
+
+        let add_result = backend.add_route(route.clone());
+        if matches!(
+            add_result,
+            Err(Error::PermissionDenied) | Err(Error::Platform(_))
+        ) {
+            // Best effort even under #[ignore]: if it's run without the
+            // capability after all, fail loudly rather than silently
+            // passing on a no-op.
+            add_result.expect("add_route failed - are you running with CAP_NET_ADMIN?");
+        }
+
+        let routes = backend
+            .routes()
+            .expect("routes() failed after add_route succeeded");
+        let found = routes
+            .iter()
+            .any(|r| r.destination == destination && r.interface_index == Some(interface_index));
+
+        // Clean up before asserting, so a failed assertion doesn't leave
+        // the test route behind on the machine that ran this.
+        let _ = backend.remove_route(route);
+
+        assert!(
+            found,
+            "added IPv6 route was not present in routes() afterward"
+        );
+
+        let routes_after_removal = backend
+            .routes()
+            .expect("routes() failed after remove_route");
+        assert!(
+            !routes_after_removal
+                .iter()
+                .any(|r| r.destination == destination && r.interface_index == Some(interface_index)),
+            "removed IPv6 route was still present in routes() afterward"
+        );
+    }
+
     /// Exercises the complete address-mutation path against the real
     /// kernel: create an IPv4 address on `lo`, read the canonical observed
     /// record, then remove that exact record. TEST-NET-1 is reserved for
@@ -1985,6 +2046,66 @@ mod tests {
         assert!(
             absent,
             "removed address was still present in addresses() afterward"
+        );
+    }
+
+    /// Exercises the complete address-mutation path against the real
+    /// kernel for an IPv6 address: create an address on `lo`, read the
+    /// canonical observed record, then remove that exact record. Uses RFC
+    /// 3849 `2001:db8::/32`, the IPv6 counterpart of the IPv4 address
+    /// test's TEST-NET-1 `192.0.2.0/24`, on a subnet distinct from the
+    /// other IPv6 subnets used by the other ignored tests in this module.
+    #[test]
+    #[ignore = "requires CAP_NET_ADMIN; run with `sudo -E cargo test -p net-lattice-backend-linux add_then_remove_ipv6_address_round_trips_through_the_kernel -- --ignored`"]
+    fn add_then_remove_ipv6_address_round_trips_through_the_kernel() {
+        let _guard = kernel_test_guard();
+        let backend = LinuxBackend::new().expect("failed to open a Netlink connection");
+        let interface_index = loopback_interface_index(&backend);
+        let network = Network::from(net_lattice_ip::Ipv6Network::new(
+            net_lattice_ip::Ipv6Address::new([0x2001, 0xdb8, 2, 0, 0, 0, 0, 9]),
+            net_lattice_ip::Ipv6PrefixLength::new(64).unwrap(),
+        ));
+        let requested = NewInterfaceAddress::new(Id::new(interface_index as u64), network);
+
+        // A prior interrupted ignored-test run must not turn this run into a
+        // false duplicate. The address range is test-only and cleanup is
+        // deliberately best-effort before the actual assertion path.
+        if let Some(existing) = backend
+            .addresses()
+            .expect("addresses() failed before add_address")
+            .into_iter()
+            .find(|address| {
+                address.interface_index == interface_index && address.address == network
+            })
+        {
+            let _ = backend.remove_address(existing);
+        }
+
+        let observed = backend
+            .add_address(requested)
+            .expect("add_address failed - are you running with CAP_NET_ADMIN?");
+        let present = backend
+            .addresses()
+            .expect("addresses() failed after add_address")
+            .into_iter()
+            .any(|address| address.id == observed.id);
+
+        backend
+            .remove_address(observed.clone())
+            .expect("remove_address failed after successful add_address");
+        let absent = !backend
+            .addresses()
+            .expect("addresses() failed after remove_address")
+            .into_iter()
+            .any(|address| address.id == observed.id);
+
+        assert!(
+            present,
+            "added IPv6 address was not present in addresses() afterward"
+        );
+        assert!(
+            absent,
+            "removed IPv6 address was still present in addresses() afterward"
         );
     }
 
