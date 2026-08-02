@@ -1949,7 +1949,7 @@ mod tests {
     #[test]
     fn static_neighbour_rows_preserve_ipv4_arp_and_ipv6_ndp_create_delete_inputs() {
         let ipv4 = IpAddr::V4(std::net::Ipv4Addr::new(192, 0, 2, 17));
-        let ipv4_create = static_neighbour_create_row(7, ipv4, [0, 1, 2, 3, 4, 5]);
+        let ipv4_create = static_neighbor_create_row(7, ipv4, [0, 1, 2, 3, 4, 5]);
         assert_eq!(ipv4_create.InterfaceIndex, 7);
         assert_eq!(unsafe { ipv4_create.Address.si_family }, AF_INET);
         assert_eq!(
@@ -1960,7 +1960,7 @@ mod tests {
         assert_eq!(&ipv4_create.PhysicalAddress[..6], &[0, 1, 2, 3, 4, 5]);
         assert_eq!(ipv4_create.State, NlnsPermanent);
 
-        let ipv4_delete = neighbour_delete_row(7, ipv4);
+        let ipv4_delete = static_neighbor_delete_row(7, ipv4);
         assert_eq!(ipv4_delete.InterfaceIndex, 7);
         assert_eq!(unsafe { ipv4_delete.Address.si_family }, AF_INET);
         assert_eq!(
@@ -1970,7 +1970,7 @@ mod tests {
         assert_eq!(ipv4_delete.PhysicalAddressLength, 0);
 
         let ipv6 = IpAddr::V6("2001:db8:0:17::1".parse().expect("valid IPv6 NDP address"));
-        let ipv6_create = static_neighbour_create_row(9, ipv6, [2, 0, 0, 0, 0, 0x17]);
+        let ipv6_create = static_neighbor_create_row(9, ipv6, [2, 0, 0, 0, 0, 0x17]);
         assert_eq!(ipv6_create.InterfaceIndex, 9);
         assert_eq!(unsafe { ipv6_create.Address.si_family }, AF_INET6);
         assert_eq!(
@@ -1981,7 +1981,7 @@ mod tests {
         assert_eq!(&ipv6_create.PhysicalAddress[..6], &[2, 0, 0, 0, 0, 0x17]);
         assert_eq!(ipv6_create.State, NlnsPermanent);
 
-        let ipv6_delete = neighbour_delete_row(9, ipv6);
+        let ipv6_delete = static_neighbor_delete_row(9, ipv6);
         assert_eq!(ipv6_delete.InterfaceIndex, 9);
         assert_eq!(unsafe { ipv6_delete.Address.si_family }, AF_INET6);
         assert_eq!(
@@ -1994,19 +1994,19 @@ mod tests {
     #[test]
     fn static_neighbor_status_maps_documented_create_delete_errors() {
         assert!(matches!(
-            map_static_neighbor_status(ERROR_ACCESS_DENIED),
+            static_neighbor_mutation_error(ERROR_ACCESS_DENIED),
             Error::PermissionDenied
         ));
         assert!(matches!(
-            map_static_neighbor_status(ERROR_NOT_FOUND),
+            static_neighbor_mutation_error(ERROR_NOT_FOUND),
             Error::NotFound
         ));
         assert!(matches!(
-            map_static_neighbor_status(ERROR_OBJECT_ALREADY_EXISTS),
+            static_neighbor_mutation_error(ERROR_OBJECT_ALREADY_EXISTS),
             Error::AlreadyExists
         ));
         assert!(matches!(
-            map_static_neighbor_status(ERROR_NOT_SUPPORTED),
+            static_neighbor_mutation_error(ERROR_NOT_SUPPORTED),
             Error::Unsupported
         ));
     }
@@ -2014,7 +2014,7 @@ mod tests {
     #[test]
     fn static_neighbor_status_falls_back_to_platform_code_for_unmapped_status() {
         let unmapped = WIN32_ERROR(87); // ERROR_INVALID_PARAMETER: not a dedicated Error variant here.
-        match map_static_neighbor_status(unmapped) {
+        match static_neighbor_mutation_error(unmapped) {
             Error::Platform(PlatformErrorCode::Windows(code)) => assert_eq!(code, 87),
             other => panic!("expected Error::Platform(Windows(87)), got {other:?}"),
         }
@@ -2445,6 +2445,7 @@ mod tests {
         assert!(capabilities.contains(Capability::DNS_MUTATION));
         assert!(capabilities.contains(Capability::INTERFACE_ADMIN_STATE));
         assert!(capabilities.contains(Capability::INTERFACE_MTU));
+        assert!(capabilities.contains(Capability::NEIGHBOR_MUTATION));
     }
 
     #[test]
