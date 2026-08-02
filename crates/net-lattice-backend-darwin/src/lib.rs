@@ -1634,8 +1634,7 @@ fn push_mac_gateway(
         sdl_data: [0; 12],
     };
 
-    sdl.sdl_data[..mac.len()]
-        .copy_from_slice(&mac.map(|byte| byte as libc::c_char));
+    sdl.sdl_data[..mac.len()].copy_from_slice(&mac.map(|byte| byte as libc::c_char));
 
     unsafe {
         std::ptr::copy_nonoverlapping(
@@ -1701,9 +1700,7 @@ fn interface_sdl_type(interface_index: u32) -> Result<libc::c_uchar> {
     let mut head: *mut libc::ifaddrs = std::ptr::null_mut();
 
     if unsafe { libc::getifaddrs(&mut head) } != 0 {
-        return Err(Error::Platform(io_error_code(
-            &io::Error::last_os_error(),
-        )));
+        return Err(Error::Platform(io_error_code(&io::Error::last_os_error())));
     }
 
     let result = unsafe {
@@ -2620,10 +2617,7 @@ mod tests {
         let sdl = unsafe { &*(buf.as_ptr().add(gw_offset) as *const libc::sockaddr_dl) };
         assert_eq!(sdl.sdl_family, libc::AF_LINK as u8);
         assert_eq!(sdl.sdl_alen, 6);
-        assert_eq!(
-            sdl.sdl_len as usize,
-            mem::size_of::<libc::sockaddr_dl>()
-        );
+        assert_eq!(sdl.sdl_len as usize, mem::size_of::<libc::sockaddr_dl>());
         assert_eq!(
             &sdl.sdl_data[..6]
                 .iter()
