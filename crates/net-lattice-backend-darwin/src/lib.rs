@@ -2241,21 +2241,82 @@ mod tests {
         buf
     }
 
-    /// Test-local, self-contained `RTM_DELETE` static-ARP/NDP request
-    /// buffer: `RTA_DST` only, matching this backend's `build_delete_message`
-    /// convention for routes. See `static_neighbor_add_request`'s doc
-    /// comment for the primary-source citations and the explicit
-    /// GET-before-DELETE caveat this fixture does not resolve.
-    fn static_neighbor_delete_request(destination: IpAddr, interface_index: u32) -> Vec<u8> {
+    /// Test-local, self-contained `RTM_GET` static-ARP/NDP lookup request:
+    /// the first half of Apple's documented two-message delete sequence
+    /// (see `static_neighbor_delete_request`'s doc comment immediately
+    /// below). `rtm_addrs` carries only `RTA_DST` — this matches `arp.c`'s
+    /// `delete()` calling `rtmsg(RTM_GET, dst, NULL)`: the `sdl` argument is
+    /// `NULL`, so `rtmsg()`'s `NEXTADDR(RTA_GATEWAY, sdl)` macro appends
+    /// nothing to the *request* body, even though the kernel's *reply* to
+    /// this same message fills a gateway sockaddr back in (see
+    /// `network_cmds` `main` branch, `arp.tproj/arp.c`, `rtmsg()` lines
+    /// 781-875 and `delete()` lines 526-562, re-fetched and confirmed
+    /// unchanged on 2026-08-02:
+    /// <https://raw.githubusercontent.com/apple-oss-distributions/network_cmds/main/arp.tproj/arp.c>).
+    fn static_neighbor_get_request(destination: IpAddr, interface_index: u32) -> Vec<u8> {
+        let mut buf = vec![0u8; RTM_MAXSIZE];
+        let hdr = unsafe { &mut *(buf.as_mut_ptr() as *mut libc::rt_msghdr) };
+        hdr.rtm_version = RTM_VERSION;
+        hdr.rtm_type = libc::RTM_GET as u8;
+        hdr.rtm_addrs = RTA_DST;
+        hdr.rtm_index = interface_index as u16;
+        let mut offset = mem::size_of::<libc::rt_msghdr>();
+        offset += push_sockaddr(&mut buf, offset, destination);
+        hdr.rtm_msglen = offset as u16;
+        buf.truncate(offset);
+        buf
+    }
+
+    /// Test-local `RTM_DELETE` static-ARP/NDP request buffer modeling the
+    /// second half of Apple's documented two-message delete sequence.
+    ///
+    /// Apple's own `arp.tproj/arp.c` `delete()` (lines 526-562, re-fetched
+    /// and confirmed unchanged on 2026-08-02 against
+    /// <https://raw.githubusercontent.com/apple-oss-distributions/network_cmds/main/arp.tproj/arp.c>)
+    /// does **not** send a self-contained `RTA_DST`-only `RTM_DELETE`. It
+    /// first calls `rtmsg(RTM_GET, dst, NULL)` (`static_neighbor_get_request`
+    /// above), which — inside `rtmsg()` — overwrites that function's
+    /// `static struct { rt_msghdr; char[512]; } m_rtmsg` reply buffer with
+    /// whatever the *kernel* wrote back: a real `sockaddr_dl` gateway
+    /// (`sdl_type`/`sdl_index` naming the owning interface, and typically
+    /// the neighbor's current link-layer address) describing the matched
+    /// `RTF_LLINFO` entry. `delete()` then calls
+    /// `rtmsg(RTM_DELETE, dst, NULL)`; inside `rtmsg()`, `cmd == RTM_DELETE`
+    /// jumps straight to the `doit:` label — the source's own comment reads
+    /// "XXX RTM_DELETE relies on a previous RTM_GET to fill the buffer
+    /// appropriately" — reusing that same static buffer's body untouched
+    /// except for `rtm_type`/`rtm_seq`. The wire `RTM_DELETE` request Apple's
+    /// tool actually sends therefore carries `RTA_DST | RTA_GATEWAY`, with
+    /// the gateway being the kernel-populated `sockaddr_dl` from the prior
+    /// `RTM_GET` reply, not a freshly built or `RTA_DST`-only request.
+    ///
+    /// This fixture models that reuse deterministically: instead of a live
+    /// kernel reply, it reuses `push_mac_gateway` — the same `sockaddr_dl`
+    /// gateway builder `static_neighbor_add_request` already uses — as a
+    /// stand-in for "the interface/link-layer fields a prior `RTM_GET`
+    /// reply would have supplied," rather than duplicating a second gateway
+    /// builder. It is a **fixture-only**, deterministic byte-layout proof of
+    /// Apple's documented two-message shape — not a live `PF_ROUTE` round
+    /// trip, and not proof that this crate's own (not-yet-implemented)
+    /// `NeighborMutator::remove_static_neighbor` performs the real preceding
+    /// `RTM_GET` against a live kernel. See `.ai/0.17/AUDIT.md` for the
+    /// outstanding isolated privileged round-trip gate this fixture does not
+    /// close.
+    fn static_neighbor_delete_request(
+        destination: IpAddr,
+        interface_index: u32,
+        mac: [u8; 6],
+    ) -> Vec<u8> {
         let mut buf = vec![0u8; RTM_MAXSIZE];
         let hdr = unsafe { &mut *(buf.as_mut_ptr() as *mut libc::rt_msghdr) };
         hdr.rtm_version = RTM_VERSION;
         hdr.rtm_type = RTM_DELETE;
         hdr.rtm_flags = RTF_HOST | RTF_STATIC;
-        hdr.rtm_addrs = RTA_DST;
+        hdr.rtm_addrs = RTA_DST | RTA_GATEWAY;
         hdr.rtm_index = interface_index as u16;
         let mut offset = mem::size_of::<libc::rt_msghdr>();
         offset += push_sockaddr(&mut buf, offset, destination);
+        offset += push_mac_gateway(&mut buf, offset, interface_index, mac);
         hdr.rtm_msglen = offset as u16;
         buf.truncate(offset);
         buf
