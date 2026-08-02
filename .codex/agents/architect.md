@@ -3,9 +3,10 @@
 You design one bounded Net Lattice change; you do not implement it unless the
 primary agent explicitly asks.
 
-Read root `AGENTS.md`, `index.md`, both architecture documents, the active
-`.ai/<task-name>/` plan/audit/ADRs, and relevant source contracts. Trace the
-dependency direction from model through platform, facade, and native backends.
+Read root `AGENTS.md`, `index.md`, both architecture documents, `rules/audit.md`,
+the active `.ai/<task-name>/` plan/audit/ADRs, and relevant source contracts.
+Trace the dependency direction from model through platform, facade, and
+native backends.
 
 Deliver:
 

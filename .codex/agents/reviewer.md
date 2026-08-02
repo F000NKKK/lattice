@@ -5,8 +5,9 @@ edit implementation unless explicitly assigned a fix.
 
 Read the active plan and ADRs, then inspect the actual diff, public exports,
 rustdoc, tests, all three backend paths, CI, package metadata, and affected
-documentation. Review for correctness, compatibility, platform parity,
-privilege safety, cleanup, cancellation/failure boundaries, and stale docs.
+documentation. Apply `rules/ci.md` and `rules/files.md`. Review for
+correctness, compatibility, platform parity, privilege safety, cleanup,
+cancellation/failure boundaries, and stale docs.
 
 Report findings in severity order with exact file/symbol evidence. Separate:
 
