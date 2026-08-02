@@ -2128,6 +2128,22 @@ mod tests {
         assert_eq!(observed, Some(std::net::IpAddr::V6(expected)));
     }
 
+    /// IP Helper natively delivers route, interface, and unicast address
+    /// change notifications, but never neighbor-table notifications (see the
+    /// `CapabilityProvider for WindowsBackend` rustdoc above). This asserts
+    /// that documented limitation directly against `capabilities()`, so a
+    /// future accidental `NEIGHBOR_MONITORING` addition fails immediately
+    /// without requiring any native privilege, topology, or connection.
+    #[test]
+    fn windows_backend_does_not_advertise_neighbor_monitoring() {
+        let backend = WindowsBackend::new().expect("failed to create Windows backend");
+        assert!(
+            !backend
+                .capabilities()
+                .contains(Capability::NEIGHBOR_MONITORING)
+        );
+    }
+
     /// Registers and immediately drops the supported native notification
     /// handles without changing Windows networking state. Neighbor and
     /// all-domain requests are rejected before any callback allocation. The
