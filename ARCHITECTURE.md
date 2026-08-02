@@ -268,16 +268,21 @@ force every backend to stub out methods for features it doesn't have:
   non-`Permanent`-entry deletion guard), `net-lattice-backend-windows`
   implements it (`CreateIpNetEntry2`/`DeleteIpNetEntry2` over
   `MIB_IPNET_ROW2`, `NlnsPermanent`, the same non-`Permanent`-entry deletion
-  guard, confirmed on live elevated Windows CI), and `net-lattice-backend-darwin`
-  implements it (`RTM_ADD` and a two-message `RTM_GET`-then-`RTM_DELETE`
-  sequence over `PF_ROUTE`, mirroring Apple's own `arp.c`/`ndp.c`, the same
-  non-`Permanent`-entry deletion guard); all three advertise
-  `Capability::NEIGHBOR_MUTATION`. The macOS implementation is unverified
-  against real hardware or CI in this repository's development environment
-  (this sandbox cannot link a Darwin test binary at all — no macOS SDK/Xcode
-  — so only cross-compiled type-checking has run).
-  The `net-lattice` facade does not forward to `NeighborMutator` on any
-  platform yet (see ADR-0001, still `proposed`).
+  guard, confirmed on live elevated Windows CI); both advertise
+  `Capability::NEIGHBOR_MUTATION`. `net-lattice-backend-darwin` also
+  implements the trait (`RTM_ADD` and a two-message `RTM_GET`-then-
+  `RTM_DELETE` sequence over `PF_ROUTE`, mirroring Apple's own
+  `arp.c`/`ndp.c`, the same non-`Permanent`-entry deletion guard), but a real
+  elevated macOS CI run found `add_static_neighbor` itself fails against a
+  real kernel with an as-yet-undiagnosed `InvalidState` error, so
+  `DarwinBackend::capabilities()` deliberately does **not** advertise
+  `Capability::NEIGHBOR_MUTATION` yet — advertising an operation confirmed
+  broken on real hardware would contradict ADR-0001's own requirement that a
+  capability claim rest on proven native behavior. This sandbox cannot link
+  a Darwin test binary at all (no macOS SDK/Xcode), so only cross-compiled
+  type-checking has run here; see `.ai/0.17/AUDIT.md` for the exact
+  failures. The `net-lattice` facade does not forward to `NeighborMutator`
+  on any platform yet (see ADR-0001, still `proposed`).
 - `DnsProvider` — read/write DNS resolver configuration.
 - `AddressProvider` — list IP addresses assigned to interfaces.
 - `AddressMutator` — assign and remove IP addresses. Its input is distinct

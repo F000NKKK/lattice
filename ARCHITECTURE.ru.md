@@ -262,17 +262,23 @@ Provider-traits, по одному на возможность, а не один
   `net-lattice-backend-windows` реализует его через
   `CreateIpNetEntry2`/`DeleteIpNetEntry2` над `MIB_IPNET_ROW2` (`NlnsPermanent`,
   та же защита от удаления не-`Permanent` записи, подтверждено на реальном
-  elevated Windows CI), а `net-lattice-backend-darwin` реализует его через
-  `RTM_ADD` и последовательность из двух сообщений `RTM_GET`-затем-
-  `RTM_DELETE` поверх `PF_ROUTE`, повторяя собственный подход Apple из
-  `arp.c`/`ndp.c` (та же защита от удаления не-`Permanent` записи); все три
-  заявляют `Capability::NEIGHBOR_MUTATION`. Реализация для macOS не
-  проверена ни на реальном оборудовании, ни в CI в среде разработки этого
-  репозитория (в этой песочнице невозможно даже слинковать тестовый бинарник
-  под Darwin — нет macOS SDK/Xcode, — поэтому выполнена только
-  кросс-компилируемая проверка типов). facade
-  `net-lattice` не выполняет прямую передачу вызовов `NeighborMutator` ни на
-  одной платформе (см. ADR-0001, статус всё ещё `proposed`).
+  elevated Windows CI); оба заявляют `Capability::NEIGHBOR_MUTATION`.
+  `net-lattice-backend-darwin` также реализует этот трейт через `RTM_ADD` и
+  последовательность из двух сообщений `RTM_GET`-затем-`RTM_DELETE` поверх
+  `PF_ROUTE`, повторяя собственный подход Apple из `arp.c`/`ndp.c` (та же
+  защита от удаления не-`Permanent` записи), но реальный запуск на elevated
+  macOS CI показал, что сам `add_static_neighbor` завершается ошибкой
+  `InvalidState` с ещё не диагностированной причиной — поэтому
+  `DarwinBackend::capabilities()` намеренно **не** заявляет
+  `Capability::NEIGHBOR_MUTATION`: заявлять о поддержке операции,
+  подтверждённо не работающей на реальном железе, противоречило бы
+  собственному требованию ADR-0001 о том, что заявка о capability должна
+  опираться на доказанное нативное поведение. В этой песочнице невозможно
+  даже слинковать тестовый бинарник под Darwin — нет macOS SDK/Xcode, —
+  поэтому выполнена только кросс-компилируемая проверка типов; точные сбои
+  см. в `.ai/0.17/AUDIT.md`. facade `net-lattice` не выполняет прямую
+  передачу вызовов `NeighborMutator` ни на одной платформе (см. ADR-0001,
+  статус всё ещё `proposed`).
 - `DnsProvider` — чтение/запись конфигурации DNS-резолвера.
 - `AddressProvider` — список IP-адресов, назначенных интерфейсам.
 - `AddressMutator` — назначение и удаление IP-адресов. Его входной тип

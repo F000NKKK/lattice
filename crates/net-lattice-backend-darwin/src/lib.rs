@@ -1801,19 +1801,25 @@ fn ensure_removable_static_neighbor_state(state: NeighborState) -> Result<()> {
 /// `NeighborMutator` over `PF_ROUTE`, implementing ADR-0001's static-neighbor
 /// contract for macOS.
 ///
-/// **Verification status:** this implementation type-checks
-/// (`cargo check`/`clippy --target x86_64-apple-darwin`) but has never
-/// executed on real macOS hardware in this sandbox (no macOS SDK/Xcode
-/// available — `cargo test` cannot even *link* here, only compile). Its
-/// byte-layout construction is proven by this file's deterministic
-/// `static_neighbor_*_request` fixture tests, confirmed against a real
-/// macOS CI run for the request-shape half, but the live two-message
-/// `RTM_GET`-then-`RTM_DELETE`
-/// round trip this method performs against a real kernel has not been
-/// exercised anywhere yet. Treat this as unverified until an elevated macOS
-/// CI run (or a maintainer on real hardware) proves otherwise, the same
-/// caveat class Windows carried before its own elevated CI run in this
-/// stage (see AUDIT.md sections 14-16).
+/// **Verification status: confirmed broken against a real kernel, root
+/// cause not yet identified.** This implementation type-checks (`cargo
+/// check`/`clippy --target x86_64-apple-darwin`) and its request byte-layout
+/// construction is proven by this file's deterministic
+/// `static_neighbor_*_request` fixture tests (confirmed against a real
+/// macOS CI run for the request-shape half). But a real elevated macOS CI
+/// run of the ignored round-trip test found `add_static_neighbor` itself
+/// fails: `RTM_ADD`'s reply reports `rtm_errno == 0` (no native error), yet
+/// the immediate `neighbors()` re-read that follows does not find the added
+/// entry, returning `Error::InvalidState`. The root cause is not yet
+/// diagnosed — this needs interactive macOS host access, not another guess
+/// from a sandbox that cannot even link a Darwin test binary. Accordingly,
+/// `DarwinBackend::capabilities()` does **not** advertise
+/// `Capability::NEIGHBOR_MUTATION` yet, and the live two-message
+/// `RTM_GET`-then-`RTM_DELETE` round trip `remove_static_neighbor` performs
+/// has never been exercised against a real kernel at all (every real CI run
+/// so far failed before reaching it). Do not trust this implementation
+/// until a real elevated macOS CI run demonstrates the full round trip
+/// green — see `.ai/0.17/AUDIT.md` section 18 for the exact failures.
 impl NeighborMutator for DarwinBackend {
     type StaticNeighbor = StaticNeighbor;
     type NeighborEntry = NeighborEntry;
@@ -2119,19 +2125,24 @@ impl CapabilityProvider for DarwinBackend {
     /// provider this backend implements already handles both address
     /// families. PF_ROUTE delivers every currently modeled event domain, so
     /// this backend truthfully advertises aggregate `MONITORING` through its
-    /// dedicated reader. `NEIGHBOR_MUTATION` reflects `impl NeighborMutator
-    /// for DarwinBackend`'s `PF_ROUTE`-based static ARP/NDP add/delete —
-    /// **unverified on real macOS hardware**, see that impl's doc comment for
-    /// the exact verification-status caveat. `VRF`/`NAMESPACES` are left
-    /// unset: BSD/macOS has no direct equivalent and Net Lattice does not
-    /// implement either domain.
+    /// dedicated reader. `NEIGHBOR_MUTATION` is deliberately **not**
+    /// advertised yet: `impl NeighborMutator for DarwinBackend` exists
+    /// (`PF_ROUTE`-based static ARP/NDP add/delete) but a real elevated
+    /// macOS CI run found `add_static_neighbor` itself fails against a real
+    /// kernel with an as-yet-undiagnosed `Error::InvalidState` (see that
+    /// impl's doc comment and `.ai/0.17/AUDIT.md` section 18) — advertising
+    /// this capability while it is confirmed broken would violate
+    /// ADR-0001's own principle that a claim requires proven native
+    /// behavior, not just a type-checked implementation. Re-add this bit
+    /// once a real elevated macOS CI run demonstrates the full round trip
+    /// green. `VRF`/`NAMESPACES` are left unset: BSD/macOS has no direct
+    /// equivalent and Net Lattice does not implement either domain.
     fn capabilities(&self) -> Capability {
         Capability::IPV6
             | Capability::MONITORING
             | Capability::DNS_MUTATION
             | Capability::INTERFACE_ADMIN_STATE
             | Capability::INTERFACE_MTU
-            | Capability::NEIGHBOR_MUTATION
     }
 }
 
