@@ -2061,9 +2061,16 @@ mod tests {
         // elsewhere in this module: Windows IP Helper route-change
         // notification delivery has been observed to lag noticeably behind
         // 3s under CI load, unlike Linux Netlink/macOS PF_ROUTE.
+        //
+        // Diagnostic: record every poll outcome, matching the address
+        // event test's equivalent logging, so a future failure here shows
+        // real evidence instead of only "it didn't match".
+        let mut observed_log = Vec::new();
         let selected_observed = (0..40).any(|_| {
+            let outcome = selected_watcher.recv_timeout(Duration::from_millis(250));
+            observed_log.push(format!("{outcome:?}"));
             matches!(
-                selected_watcher.recv_timeout(Duration::from_millis(250)),
+                outcome,
                 Ok(Some(Event::Route { id, kind: ChangeKind::Removed })) if id == watched_id
             )
         });
@@ -2073,7 +2080,8 @@ mod tests {
 
         assert!(
             selected_observed,
-            "object route filter did not report ipv6 removal"
+            "object route filter did not report ipv6 removal; watched_id={watched_id:?}, \
+             poll outcomes={observed_log:?}"
         );
         #[cfg(feature = "async")]
         assert!(
@@ -2253,9 +2261,20 @@ mod tests {
 
         // Widened from the usual 3s (12 * 250ms) polling window; see the
         // matching comment on the route event test's `selected_observed`.
+        //
+        // Diagnostic: record every poll outcome (event, timeout, or error),
+        // not just whether a match was found, so a failure here shows what
+        // (if anything) the selected watcher actually observed instead of
+        // only "it didn't match" — this is the second remaining flaky
+        // symptom after fixing cross-test concurrency and Windows
+        // registration-readiness, and needs real evidence rather than
+        // another blind guess.
+        let mut observed_log = Vec::new();
         let selected_observed = (0..40).any(|_| {
+            let outcome = selected_watcher.recv_timeout(Duration::from_millis(250));
+            observed_log.push(format!("{outcome:?}"));
             matches!(
-                selected_watcher.recv_timeout(Duration::from_millis(250)),
+                outcome,
                 Ok(Some(Event::Address { id, kind: ChangeKind::Removed })) if id == watched_id
             )
         });
@@ -2265,7 +2284,8 @@ mod tests {
 
         assert!(
             selected_observed,
-            "object address filter did not report ipv6 removal"
+            "object address filter did not report ipv6 removal; watched_id={watched_id:?}, \
+             poll outcomes={observed_log:?}"
         );
         #[cfg(feature = "async")]
         assert!(
