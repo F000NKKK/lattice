@@ -729,12 +729,31 @@ impl InterfaceMutator for WindowsBackend {
 
 /// Placeholder identity scheme, same rationale as `synthesize_route_id`: an
 /// interface address has no kernel-assigned numeric ID, so this hashes its
-/// interface and network together.
-fn synthesize_interface_address_id(interface_index: u32, network: &Network) -> InterfaceAddressId {
+/// interface and address together.
+///
+/// Deliberately hashes only `interface_index` and the address itself, not
+/// the full `Network` (which also carries `OnLinkPrefixLength`).
+/// `OnLinkPrefixLength` is documented as unreliable on a
+/// `MibDeleteInstance` notification row (see
+/// `complete_address_notification_row`'s doc comment for the exact
+/// Microsoft Learn citation: `Address`/`InterfaceLuid`/`InterfaceIndex` are
+/// the only fields Windows guarantees on any notification, not
+/// `OnLinkPrefixLength`). Hashing the prefix length would make a delete
+/// notification's id disagree with the id computed when the same address
+/// was added (or read from a full table dump) whenever the delete row's
+/// `OnLinkPrefixLength` differs even slightly from what was observed at add
+/// time — there is no documented way to recover the correct value once the
+/// entry is gone. Since a given `(interface, address)` pair does not
+/// meaningfully have more than one prefix length at once in practice
+/// (rebinding goes through remove+re-add, not two simultaneous entries
+/// differing only by prefix), excluding it from the identity avoids
+/// depending on an explicitly non-guaranteed field rather than trying to
+/// work around its unreliability after the fact.
+fn synthesize_interface_address_id(interface_index: u32, address: IpAddr) -> InterfaceAddressId {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     interface_index.hash(&mut hasher);
-    network.hash(&mut hasher);
+    address.hash(&mut hasher);
     InterfaceAddressId::new(hasher.finish())
 }
 
@@ -754,7 +773,7 @@ fn row_to_interface_address(row: &MIB_UNICASTIPADDRESS_ROW) -> Option<InterfaceA
     };
 
     Some(InterfaceAddress::new(
-        synthesize_interface_address_id(row.InterfaceIndex, &network),
+        synthesize_interface_address_id(row.InterfaceIndex, address_addr),
         row.InterfaceIndex,
         network,
     ))
