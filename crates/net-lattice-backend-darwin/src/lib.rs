@@ -3175,19 +3175,27 @@ mod tests {
     /// `192.0.2.253` (RFC 5737 `TEST-NET-1`) and a real elevated macOS CI run
     /// caught that `RTM_ADD` for a static-ARP host route fails with
     /// `ENETUNREACH` (errno 51) unless the destination is reachable via the
-    /// target interface.
+    /// target interface. The interface itself is also selected by actually
+    /// having a non-loopback, up IPv4 address rather than by admin
+    /// state/kind alone: a second real elevated CI run caught that an
+    /// interface chosen that way can have no IPv4 address at all on a real
+    /// runner (link-local-only Wi-Fi, `awdl0`, `utun*`, ...), panicking this
+    /// test before it ever called `add_static_neighbor`.
     ///
-    /// **Verification status:** the `ENETUNREACH` failure above is the one
-    /// and only execution of this test (or any of this file's new
-    /// `NeighborMutator` code) on real macOS hardware so far, and it failed.
-    /// The in-subnet-destination fix above has *not* itself been executed
-    /// anywhere yet — this sandbox cannot link a Darwin test binary at all
-    /// (no macOS SDK/Xcode). See `impl NeighborMutator for DarwinBackend`'s
-    /// doc comment for the full caveat. This stage's
-    /// track record (four consecutive elevated-CI-only bugs across
-    /// Linux/Windows/macOS despite clean type-checks, this one included)
-    /// means this should be assumed to have at least one more undiscovered
-    /// bug until the next elevated macOS CI run proves otherwise.
+    /// **Verification status:** the two failures above are the only
+    /// executions of this test (or any of this file's new `NeighborMutator`
+    /// code) on real macOS hardware so far, and both failed before
+    /// `add_static_neighbor` ever ran — `remove_static_neighbor`'s live
+    /// `RTM_GET`/`RTM_DELETE` path, `extract_gateway_bytes`, and the
+    /// permanent-state guard remain completely unexercised against a real
+    /// kernel. Both fixes above have *not* themselves been executed anywhere
+    /// yet — this sandbox cannot link a Darwin test binary at all (no macOS
+    /// SDK/Xcode). See `impl NeighborMutator for DarwinBackend`'s doc
+    /// comment for the full caveat. This stage's track record (repeated
+    /// elevated-CI-only bugs across Linux/Windows/macOS despite clean
+    /// type-checks, this test included twice) means this should be assumed
+    /// to have at least one more undiscovered bug until the next elevated
+    /// macOS CI run proves otherwise.
     #[test]
     #[ignore = "requires root; run with `sudo -E cargo test -p net-lattice-backend-darwin add_then_remove_static_neighbor_round_trips_through_the_kernel -- --ignored`"]
     fn add_then_remove_static_neighbor_round_trips_through_the_kernel() {
