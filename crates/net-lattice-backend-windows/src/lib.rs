@@ -11,7 +11,6 @@
 
 use std::ffi::c_void;
 use std::net::IpAddr;
-use std::sync::{LazyLock, Mutex};
 
 use net_lattice_core::{Error, Id, PlatformErrorCode, Result};
 use net_lattice_model::dns::{DnsConfig, NewDnsConfig};
@@ -262,116 +261,27 @@ fn resolve_notification_interface_index(luid: NET_LUID_LH, fallback: u32) -> u32
     }
 }
 
-/// Remembers the last known interface index for a route's
-/// `(destination network, gateway)` identity, as observed from a complete
-/// row (either a full `GetIpForwardTable2` read, or an
-/// `MibAddInstance`/`MibParameterNotification` notification whose
-/// `InterfaceIndex` was itself resolved via
-/// [`resolve_notification_interface_index`]).
-///
-/// # Why this exists (second iteration on this bug)
-///
-/// A first attempt at this fix assumed that a `MibDeleteInstance`
-/// notification row's `InterfaceLuid` — and therefore
-/// `resolve_notification_interface_index`'s `ConvertInterfaceLuidToIndex`
-/// call on it — remained reliable even though `InterfaceIndex` itself might
-/// not be. Real elevated Windows CI evidence (see this crate's task audit
-/// trail) shows that assumption does not hold: after that fix,
-/// `MibDeleteInstance` events for both routes and addresses still failed to
-/// match their originally-observed id, with the *pre-removal* readback bug
-/// (a separate, now-confirmed-fixed defect) no longer present. That is
-/// consistent with `InterfaceLuid` itself — not just `InterfaceIndex` — being
-/// unreliable on a delete notification row, since IP Helper's own
-/// documentation for `NotifyRouteChange2`/`NotifyUnicastIpAddressChange`
-/// only promises the row carries "enough to call
-/// `GetIpForwardEntry2`/`GetUnicastIpAddressEntry`" — a guarantee that
-/// applies to the lookup-key fields (`DestinationPrefix`/`NextHop` for
-/// routes, `Address` for addresses), not to every field on the row.
-///
-/// This cache therefore keys purely on the delete-reliable identity
-/// (`DestinationPrefix`/`NextHop`, i.e. `(Network, Option<IpAddress>)`) and
-/// maps to the interface index a complete observation of the same route
-/// last carried, so `MibDeleteInstance` can recover it without trusting
-/// anything about the delete row's own `InterfaceLuid`/`InterfaceIndex`.
-///
-/// # Known simplification
-///
-/// If the *same* `(destination, gateway)` pair legitimately exists on two
-/// different interfaces at once (unusual, but not impossible in general —
-/// e.g. policy routing or overlapping VRFs, neither of which this stage
-/// implements), this cache can only remember one interface index per key,
-/// the same simplification already accepted for `ADDRESS_IDENTITY_CACHE`. Not
-/// expected to occur in this stage's isolated `2001:db8:N::` test topology.
-type RouteInterfaceCacheKey = (Network, Option<IpAddress>);
-static ROUTE_INTERFACE_CACHE: LazyLock<
-    Mutex<std::collections::HashMap<RouteInterfaceCacheKey, u32>>,
-> = LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
-
 /// Builds the row an ordinary `GetIpForwardTable2` read would have produced
 /// for the same route, from a possibly-incomplete change-notification row.
 ///
-/// `DestinationPrefix` and `NextHop` are themselves part of the lookup key
-/// `GetIpForwardEntry2` requires (needed to disambiguate ECMP-style routes
-/// that share a destination), so they are documented as reliably present
-/// even on a `MibDeleteInstance` notification.
-///
-/// `InterfaceIndex`/`InterfaceLuid`, by contrast, are **not** part of that
-/// lookup key and real elevated Windows CI evidence shows they cannot be
-/// trusted (directly, or via `ConvertInterfaceLuidToIndex`) on a
-/// `MibDeleteInstance` row — see [`ROUTE_INTERFACE_CACHE`] for the full
-/// rationale. On add/change notifications the LUID resolution is still used
-/// (those rows are more complete and the resolved index is what gets cached
-/// for a later delete to recover); on delete, the row's own
-/// `InterfaceLuid`/`InterfaceIndex` are not consulted at all — only the
-/// cache, keyed by the reliable `(destination, gateway)` identity, with the
-/// notification row's own (possibly wrong) `InterfaceIndex` as a
-/// last-resort fallback only if nothing was ever cached for this route.
-fn corrected_route_notification_row(
-    row: &MIB_IPFORWARD_ROW2,
-    notification: MIB_NOTIFICATION_TYPE,
-) -> MIB_IPFORWARD_ROW2 {
+/// Per Microsoft's documented remarks for `NotifyRouteChange2`
+/// (`nf-netioapi-notifyroutechange2`), an application "should allocate a
+/// `MIB_IPFORWARD_ROW2` structure and initialize it with the
+/// `DestinationPrefix`, `NextHop`, `InterfaceLuid` and `InterfaceIndex`
+/// members" from the notification row — those four fields are the
+/// documented-reliable subset, present on every notification including
+/// `MibDeleteInstance` (the row is "incomplete" only with respect to
+/// everything else, e.g. `Metric`, `Protocol`, `Age`). `InterfaceIndex` can
+/// still be resolved through `InterfaceLuid` for extra safety (a `Luid`
+/// never changes for a given adapter, unlike `InterfaceIndex`, which
+/// Microsoft documents as non-persistent across adapter disable/enable), but
+/// no caching is needed: both fields are already reliable on any
+/// notification kind, per the same documented guarantee that applies to
+/// `DestinationPrefix`/`NextHop`.
+fn corrected_route_notification_row(row: &MIB_IPFORWARD_ROW2) -> MIB_IPFORWARD_ROW2 {
     let mut corrected = *row;
-
-    let destination_addr = unsafe { sockaddr_inet_to_ip(&row.DestinationPrefix.Prefix) };
-    let key = destination_addr.and_then(|addr| {
-        let network = match addr {
-            IpAddr::V4(addr) => net_lattice_ip::Ipv4PrefixLength::new(
-                row.DestinationPrefix.PrefixLength,
-            )
-            .map(|prefix| Network::from(net_lattice_ip::Ipv4Network::new(addr.into(), prefix))),
-            IpAddr::V6(addr) => net_lattice_ip::Ipv6PrefixLength::new(
-                row.DestinationPrefix.PrefixLength,
-            )
-            .map(|prefix| Network::from(net_lattice_ip::Ipv6Network::new(addr.into(), prefix))),
-        }?;
-        let gateway = unsafe { sockaddr_inet_to_ip(&row.NextHop) }.map(std_ip_to_ip_address);
-        Some((network, gateway))
-    });
-
-    if notification == MibDeleteInstance {
-        if let Some(key) = key
-            && let Some(interface_index) = ROUTE_INTERFACE_CACHE
-                .lock()
-                .unwrap_or_else(|poison| poison.into_inner())
-                .remove(&key)
-        {
-            corrected.InterfaceIndex = interface_index;
-        }
-        // If nothing was cached for this route, `corrected.InterfaceIndex`
-        // is left as whatever the delete row itself carried — a best-effort
-        // fallback with the same acknowledged reliability gap as
-        // `complete_address_notification_row`'s equivalent fallback.
-        return corrected;
-    }
-
     corrected.InterfaceIndex =
         resolve_notification_interface_index(row.InterfaceLuid, row.InterfaceIndex);
-    if let Some(key) = key {
-        ROUTE_INTERFACE_CACHE
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner())
-            .insert(key, corrected.InterfaceIndex);
-    }
     corrected
 }
 
@@ -451,23 +361,6 @@ impl RouteProvider for WindowsBackend {
                 }
             }
             free_table(table_v6);
-
-            // A complete table read is authoritative. Feed each route's
-            // interface index into `ROUTE_INTERFACE_CACHE` so a later
-            // `MibDeleteInstance` notification for the same
-            // `(destination, gateway)` can reconstruct the same id even if
-            // this process never observed a corresponding add/change
-            // notification for it. See `corrected_route_notification_row`.
-            {
-                let mut cache = ROUTE_INTERFACE_CACHE
-                    .lock()
-                    .unwrap_or_else(|poison| poison.into_inner());
-                for route in &routes {
-                    if let Some(interface_index) = route.interface_index {
-                        cache.insert((route.destination, route.gateway), interface_index);
-                    }
-                }
-            }
 
             Ok(routes)
         })
@@ -864,102 +757,38 @@ fn row_to_interface_address(row: &MIB_UNICASTIPADDRESS_ROW) -> Option<InterfaceA
     ))
 }
 
-/// Remembers the last known `(interface index, OnLinkPrefixLength)`
-/// observed for an IP address, keyed *only* on the address itself, from a
-/// complete row (either a full
-/// `GetUnicastIpAddressTable`/`GetUnicastIpAddressEntry` read, or a
-/// `MibAddInstance`/`MibParameterNotification` notification completed via
-/// [`complete_address_notification_row`]).
-///
-/// # Why keyed only on the address (second iteration on this bug)
-///
-/// A first attempt at this fix kept `interface_index` in the cache key
-/// (`(u32, IpAddr)`), on the assumption that a `MibDeleteInstance`
-/// notification's `InterfaceLuid` — and hence
-/// [`resolve_notification_interface_index`]'s `ConvertInterfaceLuidToIndex`
-/// result — remained trustworthy even when the row's raw `InterfaceIndex`
-/// did not. Real elevated Windows CI evidence (recorded in this crate's
-/// task audit trail) refutes that: after that fix, the *pre-removal*
-/// readback bug was confirmed fixed, but the delete-notification id match
-/// still failed identically for both routes and addresses — consistent with
-/// `InterfaceLuid` itself, not just `InterfaceIndex`, being unreliable on a
-/// delete row. Keying this cache by `(interface_index, ip)` would then look
-/// up under whatever bogus resolved index the delete row produces, missing
-/// the entry cached under the correct index from the add.
-///
-/// `Address` is, by contrast, documented as part of
-/// `GetUnicastIpAddressEntry`'s lookup key (Microsoft Learn
-/// `nf-netioapi-getunicastipaddressentry`: keyed on `InterfaceLuid`/
-/// `InterfaceIndex` + `Address`), so it is the one field this cache can
-/// still trust to be intact on a delete row. Keying by `IpAddr` alone means
-/// this cache also recovers `interface_index` for the delete path, not just
-/// `OnLinkPrefixLength` — the delete row's own `InterfaceLuid`/
-/// `InterfaceIndex` are not consulted at all once a cache entry exists.
-///
-/// # Known simplification
-///
-/// If the same IP address is legitimately assigned to two different
-/// interfaces at once (unusual but not impossible in general — e.g. the
-/// same link-local address on multiple interfaces), this cache can only
-/// remember one `(interface_index, prefix_len)` pair per address. Not
-/// expected to occur in this stage's isolated `2001:db8:N::` test topology.
-static ADDRESS_IDENTITY_CACHE: LazyLock<Mutex<std::collections::HashMap<IpAddr, (u32, u8)>>> =
-    LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
-
 /// Builds the row a full `GetUnicastIpAddressTable` read would have produced
 /// for the same address, from a possibly-incomplete change-notification row.
 ///
-/// See [`ADDRESS_IDENTITY_CACHE`] for why both `InterfaceIndex` and
-/// `OnLinkPrefixLength` — not just the latter — are recovered from the
-/// cache on delete rather than from the delete row's own fields (including
-/// via [`resolve_notification_interface_index`], which this function no
-/// longer calls on the `MibDeleteInstance` path at all):
-/// - On `MibAddInstance`/`MibParameterNotification`, the entry still exists,
-///   so re-query it with `GetUnicastIpAddressEntry` for the authoritative
-///   row (after resolving `InterfaceIndex` from `InterfaceLuid`, which is
-///   still trustworthy on these more-complete notification kinds) and
-///   record its `(interface_index, prefix_len)` in
-///   [`ADDRESS_IDENTITY_CACHE`] for a later delete.
-/// - On `MibDeleteInstance`, the entry is already gone
-///   (`GetUnicastIpAddressEntry` would fail not-found) and the row's own
-///   `InterfaceLuid`/`InterfaceIndex` are not assumed reliable, so look up
-///   the `(interface_index, prefix_len)` this same address was last
-///   observed with, via the cache, keyed only on `Address`. If nothing was
-///   ever cached for this address (for example, the process only observed
-///   the delete, not a prior add/table read), fall back to the notification
-///   row's own `InterfaceIndex`/`OnLinkPrefixLength` as a last-resort
-///   best-effort value; this is a narrower, explicitly acknowledged gap,
-///   not a claim of correctness, since there is no more reliable source
-///   once the kernel has already discarded the entry.
+/// Per Microsoft's documented remarks for `NotifyUnicastIpAddressChange`
+/// (`nf-netioapi-notifyunicastipaddresschange`), an application "should
+/// allocate a `MIB_UNICASTIPADDRESS_ROW` structure and initialize it with
+/// the `Address`, `InterfaceLuid` and `InterfaceIndex` members" from the
+/// notification row and pass it to `GetUnicastIpAddressEntry` for complete
+/// information — those three fields are documented-reliable on every
+/// notification, including `MibDeleteInstance`. `OnLinkPrefixLength` is
+/// notably absent from that list, so it is *not* guaranteed reliable on the
+/// row itself:
+/// - On `MibAddInstance`/`MibParameterNotification` the entry still exists,
+///   so re-querying with `GetUnicastIpAddressEntry` (using the reliable
+///   `Address`/`InterfaceLuid`/`InterfaceIndex` as the lookup key) recovers
+///   the authoritative `OnLinkPrefixLength` — this is exactly the pattern
+///   Microsoft's docs describe.
+/// - On `MibDeleteInstance` the entry is already gone, so
+///   `GetUnicastIpAddressEntry` would fail not-found; there is no
+///   documented way to recover the deleted entry's prefix length, so the
+///   notification row's own `OnLinkPrefixLength` is used as-is.
 fn complete_address_notification_row(
     row: &MIB_UNICASTIPADDRESS_ROW,
     notification: MIB_NOTIFICATION_TYPE,
 ) -> MIB_UNICASTIPADDRESS_ROW {
     let mut corrected = *row;
-
-    let Some(ip) = (unsafe { sockaddr_inet_to_ip(&row.Address) }) else {
-        corrected.InterfaceIndex =
-            resolve_notification_interface_index(row.InterfaceLuid, row.InterfaceIndex);
-        return corrected;
-    };
-
-    if notification == MibDeleteInstance {
-        if let Some((interface_index, prefix_len)) = ADDRESS_IDENTITY_CACHE
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner())
-            .remove(&ip)
-        {
-            corrected.InterfaceIndex = interface_index;
-            corrected.OnLinkPrefixLength = prefix_len;
-        }
-        // If nothing was cached for this address, `corrected` is left as
-        // whatever the delete row itself carried — the acknowledged
-        // best-effort fallback documented above.
-        return corrected;
-    }
-
     corrected.InterfaceIndex =
         resolve_notification_interface_index(row.InterfaceLuid, row.InterfaceIndex);
+
+    if notification == MibDeleteInstance {
+        return corrected;
+    }
 
     let mut queried = MIB_UNICASTIPADDRESS_ROW {
         Address: row.Address,
@@ -973,11 +802,6 @@ fn complete_address_notification_row(
         corrected.InterfaceIndex =
             resolve_notification_interface_index(corrected.InterfaceLuid, corrected.InterfaceIndex);
     }
-
-    ADDRESS_IDENTITY_CACHE
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner())
-        .insert(ip, (corrected.InterfaceIndex, corrected.OnLinkPrefixLength));
 
     corrected
 }
@@ -1001,24 +825,6 @@ impl AddressProvider for WindowsBackend {
                 rows.iter().filter_map(row_to_interface_address).collect()
             };
             unsafe { FreeMibTable(table.cast()) };
-
-            // A complete table read is authoritative. Feed each entry's
-            // `(interface_index, prefix_len)` into `ADDRESS_IDENTITY_CACHE`,
-            // keyed only on the address, so a later `MibDeleteInstance`
-            // notification for the same address can reconstruct the same id
-            // (interface index included) even if this process never
-            // observed a corresponding add/change notification for it, and
-            // without trusting the delete row's own `InterfaceLuid`/
-            // `InterfaceIndex`. See `complete_address_notification_row`.
-            {
-                let mut cache = ADDRESS_IDENTITY_CACHE
-                    .lock()
-                    .unwrap_or_else(|poison| poison.into_inner());
-                for address in &addresses {
-                    let (ip, prefix_len) = network_to_std(address.address);
-                    cache.insert(ip, (address.interface_index, prefix_len));
-                }
-            }
 
             Ok(addresses)
         })
@@ -1303,7 +1109,7 @@ unsafe extern "system" fn route_change_callback(
         return;
     }
     let state = unsafe { &*(context.cast::<WindowsWatchState>()) };
-    let corrected = corrected_route_notification_row(unsafe { &*row }, notification);
+    let corrected = corrected_route_notification_row(unsafe { &*row });
     if let Ok(Some(route)) = row_to_route(&corrected) {
         let event = Event::Route {
             id: route.id,
@@ -1365,7 +1171,7 @@ unsafe extern "system" fn tokio_route_change_callback(
         return;
     }
     let state = unsafe { &*(context.cast::<WindowsTokioWatchState>()) };
-    let corrected = corrected_route_notification_row(unsafe { &*row }, notification);
+    let corrected = corrected_route_notification_row(unsafe { &*row });
     if let Ok(Some(route)) = row_to_route(&corrected) {
         let event = Event::Route {
             id: route.id,
