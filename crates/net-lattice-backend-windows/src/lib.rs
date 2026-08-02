@@ -2068,6 +2068,67 @@ mod tests {
         );
     }
 
+    /// IPv6 counterpart of `add_then_remove_address_round_trips_through_the_kernel`:
+    /// create an RFC 3849 documentation-prefix address on the loopback
+    /// adapter, read its canonical row, then delete that observed row.
+    #[test]
+    #[ignore = "requires Administrator; run from elevated cmd/PowerShell: cargo test -p net-lattice-backend-windows add_then_remove_ipv6_address_round_trips_through_the_kernel -- --ignored"]
+    fn add_then_remove_ipv6_address_round_trips_through_the_kernel() {
+        let backend = WindowsBackend::new().expect("failed to create Windows backend");
+        let interface_index = backend
+            .interfaces()
+            .expect("failed to list Windows interfaces")
+            .into_iter()
+            .find(|interface| matches!(interface.kind, InterfaceKind::Loopback))
+            .expect("Windows loopback interface was not found")
+            .index;
+        let network = Network::from(net_lattice_ip::Ipv6Network::new(
+            net_lattice_ip::Ipv6Address::new([0x2001, 0xdb8, 0xd, 0, 0, 0, 0, 9]),
+            net_lattice_ip::Ipv6PrefixLength::new(64).expect("valid IPv6 prefix"),
+        ));
+
+        if let Some(existing) = backend
+            .addresses()
+            .expect("addresses() failed before add_address")
+            .into_iter()
+            .find(|address| {
+                address.interface_index == interface_index && address.address == network
+            })
+        {
+            let _ = backend.remove_address(existing);
+        }
+
+        let observed = backend
+            .add_address(NewInterfaceAddress::new(
+                Id::new(interface_index as u64),
+                network,
+            ))
+            .expect("add_address failed - are you running as Administrator?");
+        let present = backend
+            .addresses()
+            .expect("addresses() failed after add_address")
+            .into_iter()
+            .any(|address| address.id == observed.id);
+
+        backend
+            .remove_address(observed.clone())
+            .expect("remove_address failed after successful add_address");
+        let absent = !backend
+            .addresses()
+            .expect("addresses() failed after remove_address")
+            .into_iter()
+            .any(|address| address.id == observed.id);
+
+        assert!(
+            present,
+            "added IPv6 address was not present in addresses() afterward"
+        );
+        assert!(
+            absent,
+            "removed IPv6 address was still present in addresses() afterward"
+        );
+    }
+
     /// Exercises a real round trip through `GetIpNetTable2`, no privilege
     /// required: reading the neighbor cache is readable by any user.
     #[test]
@@ -2244,6 +2305,60 @@ mod tests {
                 .iter()
                 .any(|r| r.destination == destination && r.interface_index == Some(interface_index)),
             "removed route was still present in routes() afterward"
+        );
+    }
+
+    /// IPv6 counterpart of `add_then_remove_route_round_trips_through_the_kernel`:
+    /// uses an RFC 3849 documentation-only prefix (`2001:db8:c::/64`) on `lo`
+    /// so it can't collide with or disrupt real routing, and removes what it
+    /// added regardless of assertion outcome.
+    #[test]
+    #[ignore = "requires Administrator; run manually from elevated cmd/PowerShell on Windows"]
+    fn add_then_remove_ipv6_route_round_trips_through_the_kernel() {
+        let backend = WindowsBackend::new().expect("failed to create Windows backend");
+        let interface_index = 1u32;
+
+        let destination = Network::from(net_lattice_ip::Ipv6Network::new(
+            net_lattice_ip::Ipv6Address::new([0x2001, 0xdb8, 0xc, 0, 0, 0, 0, 0]),
+            net_lattice_ip::Ipv6PrefixLength::new(64).expect("valid IPv6 prefix"),
+        ));
+        let route = Route::new(RouteId::new(0), destination).with_interface_index(interface_index);
+
+        let add_result = backend.add_route(route.clone());
+        if matches!(
+            add_result,
+            Err(Error::PermissionDenied) | Err(Error::Platform(_))
+        ) {
+            // Best effort even under #[ignore]: if it's run without the
+            // capability after all, fail loudly rather than silently
+            // passing on a no-op.
+            add_result.expect("add_route failed - are you running as Administrator?");
+        }
+
+        let routes = backend
+            .routes()
+            .expect("routes() failed after add_route succeeded");
+        let found = routes
+            .iter()
+            .any(|r| r.destination == destination && r.interface_index == Some(interface_index));
+
+        // Clean up before asserting, so a failed assertion doesn't leave
+        // the test route behind on the machine that ran this.
+        let _ = backend.remove_route(route);
+
+        assert!(
+            found,
+            "added IPv6 route was not present in routes() afterward"
+        );
+
+        let routes_after_removal = backend
+            .routes()
+            .expect("routes() failed after remove_route");
+        assert!(
+            !routes_after_removal
+                .iter()
+                .any(|r| r.destination == destination && r.interface_index == Some(interface_index)),
+            "removed IPv6 route was still present in routes() afterward"
         );
     }
 

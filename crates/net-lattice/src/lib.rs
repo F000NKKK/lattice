@@ -2209,11 +2209,24 @@ mod tests {
         // building the remove plan: `remove_address` and `RemoveAddress`
         // validation match by id (or interface_index + address), and the
         // locally constructed `requested` value carries no id at all.
-        let observed_address = lattice
-            .addresses()
-            .expect("failed to read addresses before removal")
-            .into_iter()
-            .find(|address| address.id == watched_id)
+        //
+        // Retry rather than reading once: a newly added IPv6 address
+        // remains Tentative while the OS runs Duplicate Address Detection
+        // and may briefly be absent from a fresh table read even though the
+        // add notification (and `add_report.is_success()` above) already
+        // fired, most visibly on Windows.
+        let observed_address = (0..12)
+            .find_map(|_| {
+                let found = lattice
+                    .addresses()
+                    .expect("failed to read addresses before removal")
+                    .into_iter()
+                    .find(|address| address.id == watched_id);
+                if found.is_none() {
+                    std::thread::sleep(Duration::from_millis(250));
+                }
+                found
+            })
             .expect("added ipv6 address was not observed before removal");
         restore.address = Some(observed_address.clone());
 
