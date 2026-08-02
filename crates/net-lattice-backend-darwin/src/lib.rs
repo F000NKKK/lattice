@@ -3223,17 +3223,29 @@ mod tests {
     /// state/kind alone: a second real elevated CI run caught that an
     /// interface chosen that way can have no IPv4 address at all on a real
     /// runner (link-local-only Wi-Fi, `awdl0`, `utun*`, ...), panicking this
-    /// test before it ever called `add_static_neighbor`.
+    /// test before it ever called `add_static_neighbor`. A **third** real
+    /// elevated CI run then hit `add_static_neighbor` itself returning
+    /// `Error::InvalidState`; code review (not host access) traced this to
+    /// the interface-selection filter still accepting a `/32` address, which
+    /// `pick_in_subnet_probe_address` cannot produce a distinct destination
+    /// for (see that function's doc comment and
+    /// `pick_in_subnet_probe_address_degenerates_to_own_for_a_slash_32`) —
+    /// the test was therefore silently arp-adding an interface's *own*
+    /// address, which the kernel has no reason to create an `RTF_LLINFO`
+    /// cache entry for. The selection now requires `prefix().value() <= 30`.
     ///
-    /// **Verification status:** the two failures above are the only
+    /// **Verification status:** the three failures above are the only
     /// executions of this test (or any of this file's new `NeighborMutator`
-    /// code) on real macOS hardware so far, and both failed before
-    /// `add_static_neighbor` ever ran — `remove_static_neighbor`'s live
+    /// code) on real macOS hardware so far. `remove_static_neighbor`'s live
     /// `RTM_GET`/`RTM_DELETE` path, `extract_gateway_bytes`, and the
     /// permanent-state guard remain completely unexercised against a real
-    /// kernel. Both fixes above have *not* themselves been executed anywhere
-    /// yet — this sandbox cannot link a Darwin test binary at all (no macOS
-    /// SDK/Xcode). See `impl NeighborMutator for DarwinBackend`'s doc
+    /// kernel — no run has gotten past `add_static_neighbor` yet. The `/32`
+    /// fix above has *not* itself been executed anywhere — this sandbox
+    /// cannot link a Darwin test binary at all (no macOS SDK/Xcode), and it
+    /// is a diagnosis from code review, not a confirmed root cause; treat it
+    /// as the most likely explanation, not a proven one, until the next
+    /// elevated run either passes or shows a different failure. See `impl
+    /// NeighborMutator for DarwinBackend`'s doc
     /// comment for the full caveat. This stage's track record (repeated
     /// elevated-CI-only bugs across Linux/Windows/macOS despite clean
     /// type-checks, this test included twice) means this should be assumed
