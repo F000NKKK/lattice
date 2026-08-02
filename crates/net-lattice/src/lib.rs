@@ -102,6 +102,7 @@ pub trait LatticeBackend:
     + InterfaceMutator<Interface = Interface, InterfaceConfig = InterfaceConfig>
     + DnsMutator<NewDnsConfig = NewDnsConfig, DnsConfig = DnsConfig>
     + NeighborProvider<NeighborEntry = NeighborEntry>
+    + NeighborMutator<StaticNeighbor = StaticNeighbor, NeighborEntry = NeighborEntry>
     + AddressProvider<InterfaceAddress = InterfaceAddress>
     + AddressMutator<NewInterfaceAddress = NewInterfaceAddress, InterfaceAddress = InterfaceAddress>
     + EventProvider<Event = Event, EventFilter = EventFilter>
@@ -115,6 +116,7 @@ impl<B> LatticeBackend for B where
         + InterfaceMutator<Interface = Interface, InterfaceConfig = InterfaceConfig>
         + DnsMutator<NewDnsConfig = NewDnsConfig, DnsConfig = DnsConfig>
         + NeighborProvider<NeighborEntry = NeighborEntry>
+        + NeighborMutator<StaticNeighbor = StaticNeighbor, NeighborEntry = NeighborEntry>
         + AddressProvider<InterfaceAddress = InterfaceAddress>
         + AddressMutator<
             NewInterfaceAddress = NewInterfaceAddress,
@@ -178,6 +180,25 @@ impl<B: LatticeBackend> Lattice<B> {
         self.backend.neighbors()
     }
 
+    /// Adds a static ARP/NDP entry and returns the resulting observed entry
+    /// read back from the OS (`ReadAfterWrite`, per ADR-0001). Requires
+    /// [`Capability::NEIGHBOR_MUTATION`]; use [`Self::execute_plan`] with
+    /// [`Mutation::AddStaticNeighbor`] for capability/precondition checks and
+    /// compensation support.
+    pub fn add_static_neighbor(&self, neighbor: StaticNeighbor) -> Result<NeighborEntry> {
+        self.backend.add_static_neighbor(neighbor)
+    }
+
+    /// Removes a static ARP/NDP entry. Requires
+    /// [`Capability::NEIGHBOR_MUTATION`]; the backend refuses to remove a
+    /// present but non-`Permanent` (dynamically learned) entry with
+    /// [`Error::InvalidState`]. Prefer [`Self::execute_plan`] with
+    /// [`Mutation::RemoveStaticNeighbor`] for capability/precondition checks
+    /// and compensation support.
+    pub fn remove_static_neighbor(&self, neighbor: StaticNeighbor) -> Result<()> {
+        self.backend.remove_static_neighbor(neighbor)
+    }
+
     pub fn addresses(&self) -> Result<Vec<InterfaceAddress>> {
         self.backend.addresses()
     }
@@ -203,9 +224,16 @@ impl<B: LatticeBackend> Lattice<B> {
         let mut removed_routes = Vec::new();
         let mut planned_addresses = Vec::new();
         let mut removed_addresses = Vec::new();
+        let mut planned_neighbors = Vec::new();
+        let mut removed_neighbors = Vec::new();
         for operation in plan.operations() {
             if executor::requires_dns_capability(operation)
                 && !self.supports(Capability::DNS_MUTATION)
+            {
+                return Err(Error::Unsupported);
+            }
+            if executor::requires_neighbor_capability(operation)
+                && !self.supports(Capability::NEIGHBOR_MUTATION)
             {
                 return Err(Error::Unsupported);
             }
@@ -284,6 +312,43 @@ impl<B: LatticeBackend> Lattice<B> {
                     planned_addresses.retain(|candidate| candidate != &key);
                     removed_addresses.push(key);
                 }
+                Mutation::AddStaticNeighbor(neighbor) => {
+                    let interface_index = neighbor.interface_id.value() as u32;
+                    if !self.interfaces()?.iter().any(|interface| {
+                        interface.id == neighbor.interface_id || interface.index == interface_index
+                    }) {
+                        return Err(Error::NotFound);
+                    }
+                    let key = (interface_index, neighbor.address);
+                    let exists_in_system =
+                        self.neighbors()?.iter().any(|candidate| {
+                            candidate.interface_index == interface_index
+                                && candidate.address == neighbor.address
+                        }) && !removed_neighbors.iter().any(|candidate| candidate == &key);
+                    if exists_in_system
+                        || planned_neighbors.iter().any(|candidate| candidate == &key)
+                    {
+                        return Err(Error::AlreadyExists);
+                    }
+                    planned_neighbors.push(key);
+                    removed_neighbors.retain(|candidate| candidate != &key);
+                }
+                Mutation::RemoveStaticNeighbor(neighbor) => {
+                    let interface_index = neighbor.interface_id.value() as u32;
+                    let key = (interface_index, neighbor.address);
+                    let exists_in_system =
+                        self.neighbors()?.iter().any(|candidate| {
+                            candidate.interface_index == interface_index
+                                && candidate.address == neighbor.address
+                        }) && !removed_neighbors.iter().any(|candidate| candidate == &key);
+                    if !exists_in_system
+                        && !planned_neighbors.iter().any(|candidate| candidate == &key)
+                    {
+                        return Err(Error::NotFound);
+                    }
+                    planned_neighbors.retain(|candidate| candidate != &key);
+                    removed_neighbors.push(key);
+                }
                 Mutation::SetDnsConfig(_) => {}
                 Mutation::SetInterfaceConfig(config) => self.validate_interface_config(config)?,
                 _ => return Err(Error::Unsupported),
@@ -342,6 +407,22 @@ impl<B: LatticeBackend> Lattice<B> {
             }
             Mutation::RemoveAddress(address) => {
                 Ok(MutationSnapshot::InterfaceAddress(Some(address.clone())))
+            }
+            Mutation::AddStaticNeighbor(neighbor) => {
+                let interface_index = neighbor.interface_id.value() as u32;
+                let observed = self.neighbors()?.into_iter().find(|candidate| {
+                    candidate.interface_index == interface_index
+                        && candidate.address == neighbor.address
+                });
+                Ok(MutationSnapshot::Neighbor(observed))
+            }
+            Mutation::RemoveStaticNeighbor(neighbor) => {
+                let interface_index = neighbor.interface_id.value() as u32;
+                let observed = self.neighbors()?.into_iter().find(|candidate| {
+                    candidate.interface_index == interface_index
+                        && candidate.address == neighbor.address
+                });
+                Ok(MutationSnapshot::Neighbor(observed))
             }
             Mutation::SetDnsConfig(_) => Ok(MutationSnapshot::Dns(self.dns_config()?)),
             Mutation::SetInterfaceConfig(config) => Ok(MutationSnapshot::Interface(
@@ -431,6 +512,12 @@ impl<B: LatticeBackend> Lattice<B> {
                 Mutation::RemoveRoute(route) => self.remove_route(route.clone()),
                 Mutation::AddAddress(address) => self.add_address(address.clone()).map(|_| ()),
                 Mutation::RemoveAddress(address) => self.remove_address(address.clone()),
+                Mutation::AddStaticNeighbor(neighbor) => {
+                    self.add_static_neighbor(neighbor.clone()).map(|_| ())
+                }
+                Mutation::RemoveStaticNeighbor(neighbor) => {
+                    self.remove_static_neighbor(neighbor.clone())
+                }
                 Mutation::SetDnsConfig(config) => self.set_dns_config(config.clone()).map(|_| ()),
                 Mutation::SetInterfaceConfig(config) => {
                     self.set_interface_config(config.clone()).map(|_| ())
@@ -812,6 +899,36 @@ mod tests {
                 ),
                 ipv6_neighbor(),
             ])
+        }
+    }
+
+    impl NeighborMutator for TestBackend {
+        type StaticNeighbor = StaticNeighbor;
+        type NeighborEntry = NeighborEntry;
+
+        fn add_static_neighbor(
+            &self,
+            neighbor: Self::StaticNeighbor,
+        ) -> Result<Self::NeighborEntry> {
+            if self.fail_mutations {
+                Err(Error::InvalidState)
+            } else {
+                Ok(NeighborEntry::new(
+                    NeighborId::new(1),
+                    neighbor.interface_id.value() as u32,
+                    neighbor.address,
+                )
+                .with_mac(neighbor.mac)
+                .with_state(NeighborState::Permanent))
+            }
+        }
+
+        fn remove_static_neighbor(&self, _neighbor: Self::StaticNeighbor) -> Result<()> {
+            if self.fail_mutations {
+                Err(Error::InvalidState)
+            } else {
+                Ok(())
+            }
         }
     }
 

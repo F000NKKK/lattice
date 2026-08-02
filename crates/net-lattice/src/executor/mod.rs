@@ -65,6 +65,15 @@ pub(crate) fn requires_dns_capability(operation: &Mutation) -> bool {
     matches!(operation, Mutation::SetDnsConfig(_))
 }
 
+/// Returns whether an operation requires the static-neighbor mutation
+/// capability, per ADR-0001.
+pub(crate) fn requires_neighbor_capability(operation: &Mutation) -> bool {
+    matches!(
+        operation,
+        Mutation::AddStaticNeighbor(_) | Mutation::RemoveStaticNeighbor(_)
+    )
+}
+
 /// Builds the complete report for a plan rejected before native submission.
 pub(crate) fn unsupported_plan_report(plan: &MutationPlan, error: Error) -> MutationPlanReport {
     let mut outcomes = Vec::with_capacity(plan.len());
