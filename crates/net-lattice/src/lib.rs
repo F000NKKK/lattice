@@ -1933,6 +1933,154 @@ mod tests {
         );
     }
 
+    /// New pattern: no facade-level filtered-event/async-watcher test exists
+    /// for any IP family before this test. Mirrors the backend-level
+    /// `watch_observes_route_changes`/`watch_observes_ipv6_route_changes`
+    /// shape through the public facade instead: `lattice.watch()` for the
+    /// unfiltered add notification, `lattice.watch_filtered(EventFilter::
+    /// none().route(id))` for the selected removal notification, and, with
+    /// the `async` feature, `lattice.watch_async` polled the same way the
+    /// backend crate's `tokio_route_event` helper polls its
+    /// `TokioEventReceiver`. Obtains the watched id from the notification
+    /// itself rather than assuming it, matching the backend-level test's
+    /// approach. Uses `2001:db8:9::/64`, distinct from every other IPv6
+    /// subnet already reserved by the other ignored facade tests in this
+    /// module (plain `2001:db8::/32`, `2001:db8:3::9/64`, `2001:db8:4::/64`,
+    /// `2001:db8:5::/64`, `2001:db8:6::9/64`, `2001:db8:7::9/64`).
+    #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+    #[test]
+    #[ignore = "requires native networking privilege; run with \
+                `cargo test -p net-lattice native_facade_ipv6_route_event_and_watcher -- --ignored`"]
+    fn native_facade_ipv6_route_event_and_watcher() {
+        use std::time::Duration;
+
+        #[cfg(target_os = "linux")]
+        let _guard = native_facade_linux_guard();
+
+        let lattice = Lattice::connect().expect("failed to connect native backend");
+        assert!(lattice.supports(Capability::MONITORING));
+        let interface = lattice
+            .interfaces()
+            .expect("failed to list interfaces")
+            .into_iter()
+            .find(|interface| matches!(interface.kind, InterfaceKind::Loopback))
+            .or_else(|| {
+                lattice
+                    .interfaces()
+                    .ok()
+                    .and_then(|mut interfaces| interfaces.pop())
+            })
+            .expect("native backend reported no interfaces");
+        let destination = Network::from(Ipv6Network::new(
+            Ipv6Address::new([0x2001, 0xdb8, 9, 0, 0, 0, 0, 0]),
+            Ipv6PrefixLength::new(64).expect("valid IPv6 prefix"),
+        ));
+        let route = Route::new(RouteId::new(0), destination).with_interface_index(interface.index);
+
+        let watcher = lattice.watch().expect("failed to subscribe to events");
+        #[cfg(feature = "async")]
+        let mut async_watcher = lattice
+            .watch_async(EventFilter::none().routes())
+            .expect("failed to subscribe to async events");
+
+        // Recover from an interrupted prior run before attempting the add.
+        let _ = lattice.remove_route(route.clone());
+        let add_plan = MutationPlan::from_operations([Mutation::AddRoute(route.clone())]);
+        let mut snapshot = |_, operation: &Mutation| lattice.snapshot_for_mutation(operation);
+        let mut options = ExecutionOptions::default().snapshot(&mut snapshot);
+        let add_report = lattice.execute_plan(&add_plan, &mut options);
+        assert!(
+            add_report.is_success(),
+            "ipv6 route add report: {add_report:?}"
+        );
+        let mut restore = RouteRestore {
+            lattice: &lattice,
+            route: Some(route.clone()),
+        };
+
+        // Obtain the identity from the notification itself, matching the
+        // backend-level test's approach.
+        let watched_id = (0..12)
+            .find_map(|_| match watcher.recv_timeout(Duration::from_millis(250)) {
+                Ok(Some(Event::Route { id, .. })) => Some(id),
+                _ => None,
+            })
+            .expect("watch() did not report the ipv6 route addition");
+        #[cfg(feature = "async")]
+        let async_observed = facade_async_route_event(&mut async_watcher, watched_id);
+
+        let selected_watcher = lattice
+            .watch_filtered(EventFilter::none().route(watched_id))
+            .expect("failed to subscribe to selected route events");
+        #[cfg(feature = "async")]
+        let mut selected_async_watcher = lattice
+            .watch_async(EventFilter::none().route(watched_id))
+            .expect("failed to subscribe to selected async route events");
+
+        let remove_plan = MutationPlan::from_operations([Mutation::RemoveRoute(route.clone())]);
+        let mut remove_options = ExecutionOptions::default();
+        let remove_report = lattice.execute_plan(&remove_plan, &mut remove_options);
+        assert!(
+            remove_report.is_success(),
+            "ipv6 route remove report: {remove_report:?}"
+        );
+        restore.route = None;
+
+        let selected_observed = (0..12).any(|_| {
+            matches!(
+                selected_watcher.recv_timeout(Duration::from_millis(250)),
+                Ok(Some(Event::Route { id, kind: ChangeKind::Removed })) if id == watched_id
+            )
+        });
+        #[cfg(feature = "async")]
+        let selected_async_observed =
+            facade_async_route_event(&mut selected_async_watcher, watched_id);
+
+        assert!(
+            selected_observed,
+            "object route filter did not report ipv6 removal"
+        );
+        #[cfg(feature = "async")]
+        assert!(
+            async_observed,
+            "watch_async() did not report the ipv6 route mutation"
+        );
+        #[cfg(feature = "async")]
+        assert!(
+            selected_async_observed,
+            "async object route filter did not report ipv6 removal"
+        );
+    }
+
+    /// Polls an [`EventStream`] for up to 3 seconds looking for a
+    /// `Event::Route` notification matching `id`, mirroring the backend
+    /// crate's `tokio_route_event` helper but for the facade's
+    /// runtime-agnostic `EventStream` instead of a native
+    /// `TokioEventReceiver`.
+    #[cfg(feature = "async")]
+    #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+    fn facade_async_route_event(watcher: &mut EventStream<Event>, id: RouteId) -> bool {
+        use futures::Stream;
+        use std::pin::Pin;
+        use std::task::{Context, Poll, Waker};
+        use std::time::Duration;
+
+        let waker = Waker::noop();
+        let mut context = Context::from_waker(waker);
+        for _ in 0..12 {
+            match Pin::new(&mut *watcher).poll_next(&mut context) {
+                Poll::Ready(Some(Ok(Event::Route { id: event_id, .. }))) if event_id == id => {
+                    return true;
+                }
+                Poll::Ready(Some(_)) | Poll::Pending => {
+                    std::thread::sleep(Duration::from_millis(250))
+                }
+                Poll::Ready(None) => return false,
+            }
+        }
+        false
+    }
+
     #[test]
     fn facade_runs_supplied_compensation_in_reverse_order() {
         let lattice = lattice(Capability::empty());
