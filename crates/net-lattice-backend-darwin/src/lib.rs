@@ -770,13 +770,29 @@ impl RouteProvider for DarwinBackend {
 /// (this call) rather than just `rtm_type`, since other processes' routing
 /// changes arrive on the same socket interleaved with our own reply.
 fn send_route_request(fd: i32, message: &[u8], expected_seq: libc::c_int) -> Result<()> {
+    send_route_message(fd, message, expected_seq).map(|_| ())
+}
+
+/// Same request/reply handshake as [`send_route_request`], but returns the
+/// kernel's full reply buffer (truncated to the bytes actually received)
+/// instead of discarding it.
+///
+/// `RTM_GET` needs this: unlike `RTM_ADD`/`RTM_DELETE`, whose reply is only
+/// consulted for `rtm_errno` (per `route(4)`, every `PF_ROUTE` write is
+/// echoed back to every open routing socket, `rtm_pid`/`rtm_seq` tagged, with
+/// the outcome recorded in `rtm_errno`), a `RTM_GET` reply's *body* is the
+/// whole point: it carries the kernel's current `sockaddr_dl` gateway for the
+/// matched entry, which `remove_static_neighbor` needs to build the
+/// following `RTM_DELETE` (see `static_neighbor_delete_request`'s doc
+/// comment for why).
+fn send_route_message(fd: i32, message: &[u8], expected_seq: libc::c_int) -> Result<Vec<u8>> {
     let n = unsafe { libc::send(fd, message.as_ptr() as *const _, message.len(), 0) };
     if n < 0 {
         return Err(route_socket_error(&io::Error::last_os_error()));
     }
 
     let pid = unsafe { libc::getpid() };
-    let mut buf = [0u8; RTM_MAXSIZE];
+    let mut buf = vec![0u8; RTM_MAXSIZE];
     loop {
         let n = unsafe { libc::recv(fd, buf.as_mut_ptr() as *mut _, buf.len(), 0) };
         if n < 0 {
@@ -791,13 +807,13 @@ fn send_route_request(fd: i32, message: &[u8], expected_seq: libc::c_int) -> Res
             // socket — not the answer to what we just sent.
             continue;
         }
-        return if hdr.rtm_errno == 0 {
-            Ok(())
-        } else {
-            Err(route_socket_error(&io::Error::from_raw_os_error(
+        if hdr.rtm_errno != 0 {
+            return Err(route_socket_error(&io::Error::from_raw_os_error(
                 hdr.rtm_errno,
-            )))
-        };
+            )));
+        }
+        buf.truncate(n as usize);
+        return Ok(buf);
     }
 }
 
@@ -1561,25 +1577,337 @@ impl NeighborProvider for DarwinBackend {
     }
 }
 
-/// Stub `NeighborMutator` implementation. Static ARP/NDP add/delete request
-/// encoding over `PF_ROUTE` (`RTF_LLINFO | RTF_STATIC`) is not yet proven on
-/// this backend — the feasibility gate in ADR-0001 (deterministic byte-level
-/// fixtures plus an isolated privileged round trip) is still open (Stage
-/// 0.17 Slice C). `DarwinBackend::capabilities` never advertises
-/// `Capability::NEIGHBOR_MUTATION`, so the `net-lattice` facade's preflight
-/// rejects any plan requiring it before this method is ever reached; both
-/// methods return [`Error::Unsupported`] defensively for a caller that
-/// bypasses the facade and invokes the trait directly.
+// `rtm_seq` values this backend tags its own static-neighbor `RTM_ADD` /
+// `RTM_GET` / `RTM_DELETE` requests with. Distinct from `RTM_SEQ_ADD` /
+// `RTM_SEQ_DELETE` (plain route mutation) so a reply to one kind of request
+// is never mistaken for a reply to the other on the same shared `fd`.
+const RTM_SEQ_NEIGHBOR_ADD: libc::c_int = 10;
+const RTM_SEQ_NEIGHBOR_GET: libc::c_int = 11;
+const RTM_SEQ_NEIGHBOR_DELETE: libc::c_int = 12;
+
+/// Builds an `AF_LINK sockaddr_dl` gateway carrying `mac` as `LLADDR`, the
+/// gateway shape a static-ARP/NDP `RTM_ADD` request uses (unlike
+/// `push_link_gateway`, which names an interface with no hardware address,
+/// for on-link routes).
+///
+/// Mirrors Apple's own shipped `/usr/sbin/arp` and `/usr/sbin/ndp` source
+/// (`network_cmds`, `main` branch, accessed 2026-08-02):
+/// - `arp.tproj/arp.c` (`rtmsg()`, lines 781-865):
+///   <https://raw.githubusercontent.com/apple-oss-distributions/network_cmds/main/arp.tproj/arp.c>
+/// - `ndp.tproj/ndp.c` (`rtmsg()`, lines 1288-1345):
+///   <https://raw.githubusercontent.com/apple-oss-distributions/network_cmds/main/ndp.tproj/ndp.c>
+///
+/// `sdl_type` is deliberately left `0` here: real `arp.c`/`ndp.c` copy
+/// `sdl_type` from a preceding `RTM_GET` reply rather than synthesizing it;
+/// this backend's own `RTM_ADD` does the same simplification a bare `arp -s`
+/// (no prior `RTM_GET`) does — the kernel accepts a zero `sdl_type` on
+/// `RTM_ADD` and fills it in itself.
+///
+/// The on-wire `sdl_len` is the *significant* header-plus-MAC length only
+/// (`8 + 6 = 14`), rounded up to the next 4-byte boundary (`16`) — not
+/// `mem::size_of::<libc::sockaddr_dl>()` (`20`, padded to the worst-case
+/// 12-byte `sdl_data`). Same convention as `push_link_gateway`'s doc comment
+/// and `golang.org/x/net/route`'s `LinkAddr` marshaling.
+fn push_mac_gateway(buf: &mut [u8], offset: usize, interface_index: u32, mac: [u8; 6]) -> usize {
+    const HEADER_LEN: usize = 8;
+    let sdl_len = HEADER_LEN + mac.len();
+    let space = (sdl_len + 3) & !3;
+    let mut sdl = libc::sockaddr_dl {
+        sdl_len: sdl_len as u8,
+        sdl_family: libc::AF_LINK as u8,
+        sdl_index: interface_index as u16,
+        sdl_type: 0,
+        sdl_nlen: 0,
+        sdl_alen: mac.len() as u8,
+        sdl_slen: 0,
+        sdl_data: [0; 12],
+    };
+    sdl.sdl_data[..mac.len()].copy_from_slice(&mac.map(|b| b as libc::c_char));
+    unsafe {
+        std::ptr::copy_nonoverlapping(
+            &sdl as *const _ as *const u8,
+            buf.as_mut_ptr().add(offset),
+            sdl_len,
+        );
+    }
+    space
+}
+
+/// Builds a static-ARP/NDP `RTM_ADD` request for a single IPv4 or IPv6
+/// destination, tagged with `seq` so [`send_route_request`] can match this
+/// request's own reply.
+///
+/// Mirrors `arp.tproj/arp.c` (`rtmsg()`, lines 781-865; `set()`, 380-460) and
+/// `ndp.tproj/ndp.c` (`rtmsg()`, lines 1288-1345) — both cited in full in
+/// `push_mac_gateway`'s doc comment. Both set `rtm_flags |= RTF_HOST |
+/// RTF_STATIC` and `rtm_addrs |= RTA_DST | RTA_GATEWAY` for a plain
+/// (non-proxy) static entry, then append sockaddrs in strict `RTA_DST` ->
+/// `RTA_GATEWAY` order: an IPv4 destination as `struct sockaddr_inarp`
+/// (`arp.c`) or an IPv6 destination as `struct sockaddr_in6` (`ndp.c`),
+/// followed by a from-scratch `AF_LINK sockaddr_dl` gateway carrying the MAC
+/// via `LLADDR`. This backend has no `sockaddr_inarp` model type (its
+/// `sin_other`/`sin_tos` tail is only used by ARP's proxy/"publish" case,
+/// irrelevant to a plain static add); it reuses this file's `push_sockaddr`
+/// `sockaddr_in`/`sockaddr_in6` shape for the destination, matching what
+/// `build_add_message` already does for IPv4 route destinations.
+fn static_neighbor_add_request(
+    destination: IpAddr,
+    interface_index: u32,
+    mac: [u8; 6],
+    seq: libc::c_int,
+) -> Vec<u8> {
+    let mut buf = vec![0u8; RTM_MAXSIZE];
+    let hdr = unsafe { &mut *(buf.as_mut_ptr() as *mut libc::rt_msghdr) };
+    hdr.rtm_version = RTM_VERSION;
+    hdr.rtm_type = RTM_ADD;
+    hdr.rtm_flags = RTF_HOST | RTF_STATIC;
+    hdr.rtm_addrs = RTA_DST | RTA_GATEWAY;
+    hdr.rtm_index = interface_index as u16;
+    hdr.rtm_pid = unsafe { libc::getpid() };
+    hdr.rtm_seq = seq;
+    let mut offset = mem::size_of::<libc::rt_msghdr>();
+    offset += push_sockaddr(&mut buf, offset, destination);
+    offset += push_mac_gateway(&mut buf, offset, interface_index, mac);
+    hdr.rtm_msglen = offset as u16;
+    buf.truncate(offset);
+    buf
+}
+
+/// Builds a self-contained `RTM_GET` static-ARP/NDP lookup request: the
+/// first half of Apple's documented two-message delete sequence (see
+/// `static_neighbor_delete_request`'s doc comment). `rtm_addrs` carries only
+/// `RTA_DST` — this matches `arp.c`'s `delete()` calling `rtmsg(RTM_GET, dst,
+/// NULL)`: the `sdl` argument is `NULL`, so `rtmsg()`'s `NEXTADDR(RTA_GATEWAY,
+/// sdl)` macro appends nothing to the *request* body, even though the
+/// kernel's *reply* to this same message fills a gateway sockaddr back in
+/// (`network_cmds` `main` branch, `arp.tproj/arp.c`, `rtmsg()` lines 781-875
+/// and `delete()` lines 526-562, re-fetched and confirmed unchanged on
+/// 2026-08-02:
+/// <https://raw.githubusercontent.com/apple-oss-distributions/network_cmds/main/arp.tproj/arp.c>).
+fn static_neighbor_get_request(
+    destination: IpAddr,
+    interface_index: u32,
+    seq: libc::c_int,
+) -> Vec<u8> {
+    let mut buf = vec![0u8; RTM_MAXSIZE];
+    let hdr = unsafe { &mut *(buf.as_mut_ptr() as *mut libc::rt_msghdr) };
+    hdr.rtm_version = RTM_VERSION;
+    hdr.rtm_type = libc::RTM_GET as u8;
+    hdr.rtm_addrs = RTA_DST;
+    hdr.rtm_index = interface_index as u16;
+    hdr.rtm_pid = unsafe { libc::getpid() };
+    hdr.rtm_seq = seq;
+    let mut offset = mem::size_of::<libc::rt_msghdr>();
+    offset += push_sockaddr(&mut buf, offset, destination);
+    hdr.rtm_msglen = offset as u16;
+    buf.truncate(offset);
+    buf
+}
+
+/// Extracts the raw, already 4-byte-aligned `RTA_GATEWAY` sockaddr bytes out
+/// of a `PF_ROUTE` reply message — used to carry a kernel-populated
+/// `sockaddr_dl` from an `RTM_GET` reply verbatim into the following
+/// `RTM_DELETE` request (see `static_neighbor_delete_request`'s doc comment).
+/// Returns `None` if the reply carries no `RTA_GATEWAY` entry (e.g. no
+/// matching `RTF_LLINFO` record, or a malformed/truncated reply).
+unsafe fn extract_gateway_bytes(hdr: &libc::rt_msghdr) -> Option<Vec<u8>> {
+    let mut ptr = unsafe { (hdr as *const libc::rt_msghdr).add(1) as *const u8 };
+    let mut remaining = (hdr.rtm_msglen as usize).checked_sub(mem::size_of::<libc::rt_msghdr>())?;
+    let mut bit: libc::c_int = 1;
+    while bit <= hdr.rtm_addrs && remaining >= 1 {
+        if hdr.rtm_addrs & bit == 0 {
+            bit <<= 1;
+            continue;
+        }
+        let sa_len = unsafe { *ptr } as usize;
+        let aligned_len = if sa_len == 0 { 4 } else { (sa_len + 3) & !3 };
+        if aligned_len > remaining {
+            break;
+        }
+        if bit == RTA_GATEWAY {
+            return Some(unsafe { std::slice::from_raw_parts(ptr, aligned_len) }.to_vec());
+        }
+        ptr = unsafe { ptr.add(aligned_len) };
+        remaining -= aligned_len;
+        bit <<= 1;
+    }
+    None
+}
+
+/// Builds the second half of Apple's documented two-message static-ARP/NDP
+/// delete sequence: an `RTM_DELETE` carrying `RTA_DST | RTA_GATEWAY`, where
+/// `gateway` is the raw, already 4-byte-aligned `sockaddr_dl` bytes a prior
+/// `RTM_GET` reply returned for this destination (see
+/// [`extract_gateway_bytes`] and [`static_neighbor_get_request`]).
+///
+/// Apple's own `arp.tproj/arp.c` `delete()` (lines 526-562, re-fetched and
+/// confirmed unchanged on 2026-08-02 against
+/// <https://raw.githubusercontent.com/apple-oss-distributions/network_cmds/main/arp.tproj/arp.c>)
+/// does **not** send a self-contained `RTA_DST`-only `RTM_DELETE`. It first
+/// calls `rtmsg(RTM_GET, dst, NULL)` (`static_neighbor_get_request`), which —
+/// inside `rtmsg()` — overwrites that function's `static struct { rt_msghdr;
+/// char[512]; } m_rtmsg` reply buffer with whatever the *kernel* wrote back:
+/// a real `sockaddr_dl` gateway (`sdl_type`/`sdl_index` naming the owning
+/// interface, and typically the neighbor's current link-layer address)
+/// describing the matched `RTF_LLINFO` entry. `delete()` then calls
+/// `rtmsg(RTM_DELETE, dst, NULL)`; inside `rtmsg()`, `cmd == RTM_DELETE`
+/// jumps straight to the `doit:` label — the source's own comment reads "XXX
+/// RTM_DELETE relies on a previous RTM_GET to fill the buffer appropriately"
+/// — reusing that same static buffer's body untouched except for
+/// `rtm_type`/`rtm_seq`. The wire `RTM_DELETE` request Apple's tool actually
+/// sends therefore carries `RTA_DST | RTA_GATEWAY`, with the gateway being
+/// the kernel-populated `sockaddr_dl` from the prior `RTM_GET` reply, not a
+/// freshly built or `RTA_DST`-only request. `remove_static_neighbor` mirrors
+/// this exactly: `gateway` here is the real bytes `extract_gateway_bytes`
+/// read out of this backend's own `RTM_GET` reply, not a synthesized value.
+fn static_neighbor_delete_request(
+    destination: IpAddr,
+    interface_index: u32,
+    gateway: &[u8],
+    seq: libc::c_int,
+) -> Vec<u8> {
+    let mut buf = vec![0u8; RTM_MAXSIZE];
+    let hdr = unsafe { &mut *(buf.as_mut_ptr() as *mut libc::rt_msghdr) };
+    hdr.rtm_version = RTM_VERSION;
+    hdr.rtm_type = RTM_DELETE;
+    hdr.rtm_flags = RTF_HOST | RTF_STATIC;
+    hdr.rtm_addrs = RTA_DST | RTA_GATEWAY;
+    hdr.rtm_index = interface_index as u16;
+    hdr.rtm_pid = unsafe { libc::getpid() };
+    hdr.rtm_seq = seq;
+    let mut offset = mem::size_of::<libc::rt_msghdr>();
+    offset += push_sockaddr(&mut buf, offset, destination);
+    buf[offset..offset + gateway.len()].copy_from_slice(gateway);
+    offset += gateway.len();
+    hdr.rtm_msglen = offset as u16;
+    buf.truncate(offset);
+    buf
+}
+
+/// Guards `remove_static_neighbor` against deleting a present but
+/// dynamically learned (non-permanent) ARP/NDP cache entry: this is the
+/// safety property ADR-0001 exists for. Only a currently `Permanent` entry
+/// may proceed to the native `RTM_GET`/`RTM_DELETE` sequence. Ported 1:1 from
+/// `net-lattice-backend-linux`'s and `net-lattice-backend-windows`'s
+/// identically-named guard.
+fn ensure_removable_static_neighbor_state(state: NeighborState) -> Result<()> {
+    if state == NeighborState::Permanent {
+        Ok(())
+    } else {
+        Err(Error::InvalidState)
+    }
+}
+
+/// `NeighborMutator` over `PF_ROUTE`, implementing ADR-0001's static-neighbor
+/// contract for macOS.
+///
+/// **Verification status:** this implementation type-checks
+/// (`cargo check`/`clippy --target x86_64-apple-darwin`) but has never
+/// executed on real macOS hardware in this sandbox (no macOS SDK/Xcode
+/// available — `cargo test` cannot even *link* here, only compile). Its
+/// byte-layout construction is proven by this file's deterministic
+/// `static_neighbor_*_request` fixture tests, confirmed against a real
+/// macOS CI run for the request-shape half (see `.ai/0.17/AUDIT.md`
+/// sections 16-17), but the live two-message `RTM_GET`-then-`RTM_DELETE`
+/// round trip this method performs against a real kernel has not been
+/// exercised anywhere yet. Treat this as unverified until an elevated macOS
+/// CI run (or a maintainer on real hardware) proves otherwise, the same
+/// caveat class Windows carried before its own elevated CI run in this
+/// stage (see AUDIT.md sections 14-16).
 impl NeighborMutator for DarwinBackend {
     type StaticNeighbor = StaticNeighbor;
     type NeighborEntry = NeighborEntry;
 
-    fn add_static_neighbor(&self, _neighbor: Self::StaticNeighbor) -> Result<Self::NeighborEntry> {
-        Err(Error::Unsupported)
+    /// Submits a static-ARP/NDP `RTM_ADD` (`static_neighbor_add_request`)
+    /// carrying `RTF_HOST | RTF_STATIC` and an `AF_LINK` gateway naming
+    /// `neighbor.mac`, waits for the kernel's own reply
+    /// (`send_route_request`, which maps a non-zero `rtm_errno` the same way
+    /// `RouteProvider::add_route` already does — `EEXIST` ->
+    /// [`Error::AlreadyExists`], `EPERM`/`EACCES` ->
+    /// [`Error::PermissionDenied`], see `route_socket_error`), then re-reads
+    /// the neighbor table via [`NeighborProvider::neighbors`] for a genuine
+    /// read-after-write (`ReadAfterWrite` per ADR-0001) rather than trusting
+    /// the ack alone — the same shape as `LinuxBackend`'s and
+    /// `WindowsBackend`'s `add_static_neighbor`.
+    fn add_static_neighbor(&self, neighbor: Self::StaticNeighbor) -> Result<Self::NeighborEntry> {
+        let interface_index =
+            u32::try_from(neighbor.interface_id.value()).map_err(|_| Error::NotFound)?;
+        let destination = ip_address_to_std(neighbor.address);
+        let mac = neighbor.mac.octets();
+
+        self.runtime.block_on(async {
+            let message = static_neighbor_add_request(
+                destination,
+                interface_index,
+                mac,
+                RTM_SEQ_NEIGHBOR_ADD,
+            );
+            send_route_request(self.fd, &message, RTM_SEQ_NEIGHBOR_ADD)
+        })?;
+
+        self.neighbors()?
+            .into_iter()
+            .find(|entry| {
+                entry.interface_index == interface_index && entry.address == neighbor.address
+            })
+            .ok_or(Error::InvalidState)
     }
 
-    fn remove_static_neighbor(&self, _neighbor: Self::StaticNeighbor) -> Result<()> {
-        Err(Error::Unsupported)
+    /// Deletes a static entry, but only after confirming through
+    /// [`NeighborProvider::neighbors`] that a matching `(interface_id,
+    /// address)` entry currently exists and is `NeighborState::Permanent`
+    /// (`ensure_removable_static_neighbor_state`) — the safety property
+    /// ADR-0001 exists for: a present but dynamically learned (non-permanent)
+    /// ARP/NDP cache entry is never deleted by this call. A missing target
+    /// returns [`Error::NotFound`]; a present but non-permanent target
+    /// returns [`Error::InvalidState`].
+    ///
+    /// Deletion itself is the real, live version of Apple's own
+    /// `arp.c`/`ndp.c` two-message `delete()` sequence (see
+    /// `static_neighbor_delete_request`'s doc comment for the primary-source
+    /// citation): this sends `static_neighbor_get_request` first, reads the
+    /// kernel's actual reply, extracts its `sockaddr_dl` gateway
+    /// (`extract_gateway_bytes`), and only then sends
+    /// `static_neighbor_delete_request` carrying that real gateway — not a
+    /// synthesized one — exactly mirroring Apple's own buffer-reuse
+    /// contract ("XXX RTM_DELETE relies on a previous RTM_GET to fill the
+    /// buffer appropriately"). A `RTM_GET` reply with no `RTA_GATEWAY`
+    /// (nothing currently resolved for this destination) is treated as
+    /// [`Error::NotFound`], since the local `neighbors()` read already
+    /// confirmed presence immediately before this call — if the kernel's own
+    /// `RTM_GET` reply disagrees, the record has raced away underneath this
+    /// call rather than ever having had a genuine link-layer binding.
+    fn remove_static_neighbor(&self, neighbor: Self::StaticNeighbor) -> Result<()> {
+        let interface_index =
+            u32::try_from(neighbor.interface_id.value()).map_err(|_| Error::NotFound)?;
+
+        let observed = self
+            .neighbors()?
+            .into_iter()
+            .find(|entry| {
+                entry.interface_index == interface_index && entry.address == neighbor.address
+            })
+            .ok_or(Error::NotFound)?;
+
+        ensure_removable_static_neighbor_state(observed.state)?;
+
+        let destination = ip_address_to_std(neighbor.address);
+
+        self.runtime.block_on(async {
+            let get_message =
+                static_neighbor_get_request(destination, interface_index, RTM_SEQ_NEIGHBOR_GET);
+            let reply = send_route_message(self.fd, &get_message, RTM_SEQ_NEIGHBOR_GET)?;
+            let reply_hdr = unsafe { &*(reply.as_ptr() as *const libc::rt_msghdr) };
+            let gateway = unsafe { extract_gateway_bytes(reply_hdr) }.ok_or(Error::NotFound)?;
+
+            let delete_message = static_neighbor_delete_request(
+                destination,
+                interface_index,
+                &gateway,
+                RTM_SEQ_NEIGHBOR_DELETE,
+            );
+            send_route_request(self.fd, &delete_message, RTM_SEQ_NEIGHBOR_DELETE)
+        })
     }
 }
 
@@ -1791,14 +2119,19 @@ impl CapabilityProvider for DarwinBackend {
     /// provider this backend implements already handles both address
     /// families. PF_ROUTE delivers every currently modeled event domain, so
     /// this backend truthfully advertises aggregate `MONITORING` through its
-    /// dedicated reader. `VRF`/`NAMESPACES` are left unset: BSD/macOS has no
-    /// direct equivalent and Net Lattice does not implement either domain.
+    /// dedicated reader. `NEIGHBOR_MUTATION` reflects `impl NeighborMutator
+    /// for DarwinBackend`'s `PF_ROUTE`-based static ARP/NDP add/delete —
+    /// **unverified on real macOS hardware**, see that impl's doc comment for
+    /// the exact verification-status caveat. `VRF`/`NAMESPACES` are left
+    /// unset: BSD/macOS has no direct equivalent and Net Lattice does not
+    /// implement either domain.
     fn capabilities(&self) -> Capability {
         Capability::IPV6
             | Capability::MONITORING
             | Capability::DNS_MUTATION
             | Capability::INTERFACE_ADMIN_STATE
             | Capability::INTERFACE_MTU
+            | Capability::NEIGHBOR_MUTATION
     }
 }
 
@@ -2146,187 +2479,21 @@ mod tests {
         ));
     }
 
-    /// Test-local `AF_LINK` `sockaddr_dl` gateway carrying a 6-byte MAC —
-    /// unlike production `push_link_gateway` (which names an interface with
-    /// *no* hardware address, for on-link routes), a static-ARP/NDP
-    /// `RTM_ADD` gateway must carry the neighbor's link-layer address via
-    /// `LLADDR`, mirroring Apple's own `arp.tproj/arp.c` `rtmsg()` (see the
-    /// module-level fixture doc comment below for citations). `sdl_type` is
-    /// deliberately left `0` here: real `arp.c`/`ndp.c` copy `sdl_type` from
-    /// a preceding `RTM_GET` reply rather than synthesizing it, which this
-    /// fixture does not attempt to reproduce (out of scope, see below).
-    fn push_mac_gateway(
-        buf: &mut [u8],
-        offset: usize,
-        interface_index: u32,
-        mac: [u8; 6],
-    ) -> usize {
-        const HEADER_LEN: usize = 8;
-        let sdl_len = HEADER_LEN + mac.len();
-        let space = (sdl_len + 3) & !3;
-        let mut sdl = libc::sockaddr_dl {
-            sdl_len: sdl_len as u8,
-            sdl_family: libc::AF_LINK as u8,
-            sdl_index: interface_index as u16,
-            sdl_type: 0,
-            sdl_nlen: 0,
-            sdl_alen: mac.len() as u8,
-            sdl_slen: 0,
-            sdl_data: [0; 12],
-        };
-        sdl.sdl_data[..mac.len()].copy_from_slice(&mac.map(|b| b as libc::c_char));
-        unsafe {
-            std::ptr::copy_nonoverlapping(
-                &sdl as *const _ as *const u8,
-                buf.as_mut_ptr().add(offset),
-                sdl_len,
-            );
-        }
-        space
-    }
-
-    /// Test-local, self-contained `RTM_ADD` static-ARP/NDP request buffer
-    /// for a single IPv4 or IPv6 destination.
-    ///
-    /// This mirrors Apple's own shipped `/usr/sbin/arp` and `/usr/sbin/ndp`
-    /// source (`network_cmds`, `main` branch, accessed 2026-08-02):
-    /// - `arp.tproj/arp.c` (`rtmsg()`, lines 781-865; `set()`, 380-460):
-    ///   <https://raw.githubusercontent.com/apple-oss-distributions/network_cmds/main/arp.tproj/arp.c>
-    /// - `ndp.tproj/ndp.c` (`rtmsg()`, lines 1288-1345):
-    ///   <https://raw.githubusercontent.com/apple-oss-distributions/network_cmds/main/ndp.tproj/ndp.c>
-    ///
-    /// Both set `rtm_flags |= RTF_HOST | RTF_STATIC` and
-    /// `rtm_addrs |= RTA_DST | RTA_GATEWAY` for a plain (non-proxy) static
-    /// entry, then append sockaddrs in strict `RTA_DST` -> `RTA_GATEWAY`
-    /// order: an IPv4 destination as `struct sockaddr_inarp` (`arp.c`) or an
-    /// IPv6 destination as `struct sockaddr_in6` (`ndp.c`), followed by a
-    /// from-scratch `AF_LINK sockaddr_dl` gateway carrying the MAC via
-    /// `LLADDR`. This backend has no `sockaddr_inarp` model type (its
-    /// `sin_other`/`sin_tos` tail is only used by ARP's proxy/"publish"
-    /// case, irrelevant to a plain static add); it reuses this file's
-    /// existing `push_sockaddr` `sockaddr_in`/`sockaddr_in6` shape for the
-    /// destination, matching what `build_add_message` already does for IPv4
-    /// route destinations.
-    ///
-    /// Scope: this is **request-construction only** — a byte-layout fixture,
-    /// not a live round trip through a `PF_ROUTE` socket, and it is not
-    /// wired into `NeighborProvider` or any new mutator trait.
-    ///
-    /// Unlike this `RTM_ADD` fixture, `RTM_DELETE` does **not** get a
-    /// self-contained sibling: Apple's own source documents (and this crate
-    /// re-verified directly against the primary source on 2026-08-02, see
-    /// `static_neighbor_get_request`/`static_neighbor_delete_request`'s doc
-    /// comments below) that `arp.c`'s `delete()` performs a mandatory
-    /// `RTM_GET`-then-`RTM_DELETE` sequence and the delete request reuses
-    /// the kernel's own `RTM_GET` reply buffer rather than being rebuilt
-    /// fresh. This fixture module models that two-message shape instead of
-    /// a single self-contained `RTA_DST`-only request.
-    fn static_neighbor_add_request(
-        destination: IpAddr,
-        interface_index: u32,
-        mac: [u8; 6],
-    ) -> Vec<u8> {
-        let mut buf = vec![0u8; RTM_MAXSIZE];
-        let hdr = unsafe { &mut *(buf.as_mut_ptr() as *mut libc::rt_msghdr) };
-        hdr.rtm_version = RTM_VERSION;
-        hdr.rtm_type = RTM_ADD;
-        hdr.rtm_flags = RTF_HOST | RTF_STATIC;
-        hdr.rtm_addrs = RTA_DST | RTA_GATEWAY;
-        hdr.rtm_index = interface_index as u16;
-        let mut offset = mem::size_of::<libc::rt_msghdr>();
-        offset += push_sockaddr(&mut buf, offset, destination);
-        offset += push_mac_gateway(&mut buf, offset, interface_index, mac);
-        hdr.rtm_msglen = offset as u16;
-        buf.truncate(offset);
-        buf
-    }
-
-    /// Test-local, self-contained `RTM_GET` static-ARP/NDP lookup request:
-    /// the first half of Apple's documented two-message delete sequence
-    /// (see `static_neighbor_delete_request`'s doc comment immediately
-    /// below). `rtm_addrs` carries only `RTA_DST` — this matches `arp.c`'s
-    /// `delete()` calling `rtmsg(RTM_GET, dst, NULL)`: the `sdl` argument is
-    /// `NULL`, so `rtmsg()`'s `NEXTADDR(RTA_GATEWAY, sdl)` macro appends
-    /// nothing to the *request* body, even though the kernel's *reply* to
-    /// this same message fills a gateway sockaddr back in (see
-    /// `network_cmds` `main` branch, `arp.tproj/arp.c`, `rtmsg()` lines
-    /// 781-875 and `delete()` lines 526-562, re-fetched and confirmed
-    /// unchanged on 2026-08-02:
-    /// <https://raw.githubusercontent.com/apple-oss-distributions/network_cmds/main/arp.tproj/arp.c>).
-    fn static_neighbor_get_request(destination: IpAddr, interface_index: u32) -> Vec<u8> {
-        let mut buf = vec![0u8; RTM_MAXSIZE];
-        let hdr = unsafe { &mut *(buf.as_mut_ptr() as *mut libc::rt_msghdr) };
-        hdr.rtm_version = RTM_VERSION;
-        hdr.rtm_type = libc::RTM_GET as u8;
-        hdr.rtm_addrs = RTA_DST;
-        hdr.rtm_index = interface_index as u16;
-        let mut offset = mem::size_of::<libc::rt_msghdr>();
-        offset += push_sockaddr(&mut buf, offset, destination);
-        hdr.rtm_msglen = offset as u16;
-        buf.truncate(offset);
-        buf
-    }
-
-    /// Test-local `RTM_DELETE` static-ARP/NDP request buffer modeling the
-    /// second half of Apple's documented two-message delete sequence.
-    ///
-    /// Apple's own `arp.tproj/arp.c` `delete()` (lines 526-562, re-fetched
-    /// and confirmed unchanged on 2026-08-02 against
-    /// <https://raw.githubusercontent.com/apple-oss-distributions/network_cmds/main/arp.tproj/arp.c>)
-    /// does **not** send a self-contained `RTA_DST`-only `RTM_DELETE`. It
-    /// first calls `rtmsg(RTM_GET, dst, NULL)` (`static_neighbor_get_request`
-    /// above), which — inside `rtmsg()` — overwrites that function's
-    /// `static struct { rt_msghdr; char[512]; } m_rtmsg` reply buffer with
-    /// whatever the *kernel* wrote back: a real `sockaddr_dl` gateway
-    /// (`sdl_type`/`sdl_index` naming the owning interface, and typically
-    /// the neighbor's current link-layer address) describing the matched
-    /// `RTF_LLINFO` entry. `delete()` then calls
-    /// `rtmsg(RTM_DELETE, dst, NULL)`; inside `rtmsg()`, `cmd == RTM_DELETE`
-    /// jumps straight to the `doit:` label — the source's own comment reads
-    /// "XXX RTM_DELETE relies on a previous RTM_GET to fill the buffer
-    /// appropriately" — reusing that same static buffer's body untouched
-    /// except for `rtm_type`/`rtm_seq`. The wire `RTM_DELETE` request Apple's
-    /// tool actually sends therefore carries `RTA_DST | RTA_GATEWAY`, with
-    /// the gateway being the kernel-populated `sockaddr_dl` from the prior
-    /// `RTM_GET` reply, not a freshly built or `RTA_DST`-only request.
-    ///
-    /// This fixture models that reuse deterministically: instead of a live
-    /// kernel reply, it reuses `push_mac_gateway` — the same `sockaddr_dl`
-    /// gateway builder `static_neighbor_add_request` already uses — as a
-    /// stand-in for "the interface/link-layer fields a prior `RTM_GET`
-    /// reply would have supplied," rather than duplicating a second gateway
-    /// builder. It is a **fixture-only**, deterministic byte-layout proof of
-    /// Apple's documented two-message shape — not a live `PF_ROUTE` round
-    /// trip, and not proof that this crate's own (not-yet-implemented)
-    /// `NeighborMutator::remove_static_neighbor` performs the real preceding
-    /// `RTM_GET` against a live kernel. See `.ai/0.17/AUDIT.md` for the
-    /// outstanding isolated privileged round-trip gate this fixture does not
-    /// close.
-    fn static_neighbor_delete_request(
-        destination: IpAddr,
-        interface_index: u32,
-        mac: [u8; 6],
-    ) -> Vec<u8> {
-        let mut buf = vec![0u8; RTM_MAXSIZE];
-        let hdr = unsafe { &mut *(buf.as_mut_ptr() as *mut libc::rt_msghdr) };
-        hdr.rtm_version = RTM_VERSION;
-        hdr.rtm_type = RTM_DELETE;
-        hdr.rtm_flags = RTF_HOST | RTF_STATIC;
-        hdr.rtm_addrs = RTA_DST | RTA_GATEWAY;
-        hdr.rtm_index = interface_index as u16;
-        let mut offset = mem::size_of::<libc::rt_msghdr>();
-        offset += push_sockaddr(&mut buf, offset, destination);
-        offset += push_mac_gateway(&mut buf, offset, interface_index, mac);
-        hdr.rtm_msglen = offset as u16;
-        buf.truncate(offset);
-        buf
-    }
+    /// Test-local seq value for the `static_neighbor_*_request_fixture_*`
+    /// tests below: these exercise the production
+    /// `static_neighbor_add_request`/`static_neighbor_get_request`/
+    /// `static_neighbor_delete_request` builders directly (moved out of this
+    /// test module in Stage 0.17 Slice C so `impl NeighborMutator for
+    /// DarwinBackend` can reuse the exact same encoding, per ADR-0001's "do
+    /// not write a second, parallel encoding path" constraint) — the actual
+    /// value is arbitrary, no assertion below checks `rtm_seq`/`rtm_pid`.
+    const FIXTURE_SEQ: libc::c_int = 99;
 
     #[test]
     fn static_neighbor_add_request_fixture_matches_arp_and_ndp_abi_for_ipv4() {
         let destination: IpAddr = "192.0.2.7".parse().expect("valid IPv4 address");
         let mac = [0x02, 0x00, 0x00, 0x00, 0x00, 0x11];
-        let buf = static_neighbor_add_request(destination, 9, mac);
+        let buf = static_neighbor_add_request(destination, 9, mac, FIXTURE_SEQ);
 
         let hdr = unsafe { &*(buf.as_ptr() as *const libc::rt_msghdr) };
         assert_eq!(hdr.rtm_type, RTM_ADD);
@@ -2362,7 +2529,7 @@ mod tests {
     fn static_neighbor_add_request_fixture_matches_arp_and_ndp_abi_for_ipv6() {
         let destination: IpAddr = "2001:db8::7".parse().expect("valid IPv6 address");
         let mac = [0x02, 0x00, 0x00, 0x00, 0x00, 0x22];
-        let buf = static_neighbor_add_request(destination, 9, mac);
+        let buf = static_neighbor_add_request(destination, 9, mac, FIXTURE_SEQ);
 
         let hdr = unsafe { &*(buf.as_ptr() as *const libc::rt_msghdr) };
         assert_eq!(hdr.rtm_type, RTM_ADD);
@@ -2396,7 +2563,7 @@ mod tests {
     #[test]
     fn static_neighbor_get_request_fixture_is_dst_only_for_ipv4() {
         let destination: IpAddr = "192.0.2.7".parse().expect("valid IPv4 address");
-        let buf = static_neighbor_get_request(destination, 9);
+        let buf = static_neighbor_get_request(destination, 9, FIXTURE_SEQ);
 
         let hdr = unsafe { &*(buf.as_ptr() as *const libc::rt_msghdr) };
         assert_eq!(hdr.rtm_type, libc::RTM_GET as u8);
@@ -2410,7 +2577,7 @@ mod tests {
     #[test]
     fn static_neighbor_get_request_fixture_is_dst_only_for_ipv6() {
         let destination: IpAddr = "2001:db8::7".parse().expect("valid IPv6 address");
-        let buf = static_neighbor_get_request(destination, 9);
+        let buf = static_neighbor_get_request(destination, 9, FIXTURE_SEQ);
 
         let hdr = unsafe { &*(buf.as_ptr() as *const libc::rt_msghdr) };
         assert_eq!(hdr.rtm_type, libc::RTM_GET as u8);
@@ -2425,7 +2592,15 @@ mod tests {
     fn static_neighbor_delete_request_fixture_reuses_the_get_replys_gateway_for_ipv4() {
         let destination: IpAddr = "192.0.2.7".parse().expect("valid IPv4 address");
         let mac = [0x02, 0x00, 0x00, 0x00, 0x00, 0x33];
-        let buf = static_neighbor_delete_request(destination, 9, mac);
+        // Stand in for "the bytes a real RTM_GET reply's sockaddr_dl gateway
+        // would contain": `push_mac_gateway` is production's own gateway
+        // builder, reused here (not duplicated) to synthesize a
+        // deterministic gateway slice, mirroring what
+        // `extract_gateway_bytes` would read out of a live kernel reply.
+        let mut gateway_buf = vec![0u8; RTM_MAXSIZE];
+        let gateway_len = push_mac_gateway(&mut gateway_buf, 0, 9, mac);
+        let gateway = &gateway_buf[..gateway_len];
+        let buf = static_neighbor_delete_request(destination, 9, gateway, FIXTURE_SEQ);
 
         let hdr = unsafe { &*(buf.as_ptr() as *const libc::rt_msghdr) };
         assert_eq!(hdr.rtm_type, RTM_DELETE);
@@ -2479,7 +2654,10 @@ mod tests {
     fn static_neighbor_delete_request_fixture_reuses_the_get_replys_gateway_for_ipv6() {
         let destination: IpAddr = "2001:db8::7".parse().expect("valid IPv6 address");
         let mac = [0x02, 0x00, 0x00, 0x00, 0x00, 0x44];
-        let buf = static_neighbor_delete_request(destination, 9, mac);
+        let mut gateway_buf = vec![0u8; RTM_MAXSIZE];
+        let gateway_len = push_mac_gateway(&mut gateway_buf, 0, 9, mac);
+        let gateway = &gateway_buf[..gateway_len];
+        let buf = static_neighbor_delete_request(destination, 9, gateway, FIXTURE_SEQ);
 
         let hdr = unsafe { &*(buf.as_ptr() as *const libc::rt_msghdr) };
         assert_eq!(hdr.rtm_type, RTM_DELETE);
@@ -2902,6 +3080,109 @@ mod tests {
         // running this test is arbitrary (may even be empty). Reaching here
         // without an error is the assertion.
         let _ = neighbors;
+    }
+
+    #[test]
+    fn ensure_removable_static_neighbor_state_rejects_non_permanent_entries() {
+        assert!(ensure_removable_static_neighbor_state(NeighborState::Permanent).is_ok());
+        for dynamic_state in [
+            NeighborState::Reachable,
+            NeighborState::Incomplete,
+            NeighborState::Failed,
+        ] {
+            assert!(matches!(
+                ensure_removable_static_neighbor_state(dynamic_state),
+                Err(Error::InvalidState)
+            ));
+        }
+    }
+
+    /// Exercises the complete static-neighbor mutation path
+    /// (`add_static_neighbor` -> read-after-write -> permanent-state guard ->
+    /// `remove_static_neighbor` -> gone -> second remove is `NotFound`)
+    /// against a real kernel, mirroring
+    /// `add_then_remove_static_neighbor_round_trips_through_the_kernel` in
+    /// `net-lattice-backend-linux`/`net-lattice-backend-windows`.
+    ///
+    /// Deliberately **not** run on the loopback interface: this stage found
+    /// loopback silently breaks static-neighbor MAC persistence on both
+    /// Linux and Windows for unrelated platform-specific reasons (see
+    /// `.ai/0.17/AUDIT.md` sections 15-16), and no primary source was found
+    /// during this slice confirming BSD/macOS `lo0` behaves differently for
+    /// `RTF_LLINFO | RTF_STATIC` entries — so the same non-loopback
+    /// interface-selection filter `interface_configuration_round_trips_observed_state`
+    /// already uses is reused here rather than assuming loopback is safe.
+    /// The destination is `192.0.2.253` (RFC 5737 `TEST-NET-1`), chosen to
+    /// avoid colliding with a real host on whatever LAN the selected
+    /// interface is attached to.
+    ///
+    /// **Verification status:** unverified on real macOS hardware in this
+    /// session — this sandbox cannot link a Darwin test binary at all (no
+    /// macOS SDK/Xcode), so this test has never executed anywhere. See `impl
+    /// NeighborMutator for DarwinBackend`'s doc comment and
+    /// `.ai/0.17/AUDIT.md` for the full caveat. This stage's track record
+    /// (three consecutive elevated-CI-only bugs on Linux/Windows despite
+    /// clean type-checks) means this should be assumed to have at least one
+    /// undiscovered bug until a real elevated macOS CI run proves otherwise.
+    #[test]
+    #[ignore = "requires root; run with `sudo -E cargo test -p net-lattice-backend-darwin add_then_remove_static_neighbor_round_trips_through_the_kernel -- --ignored`"]
+    fn add_then_remove_static_neighbor_round_trips_through_the_kernel() {
+        let _guard = darwin_test_guard();
+
+        let backend = DarwinBackend::new().expect("failed to open a route socket");
+        let interface = backend
+            .interfaces()
+            .expect("getifaddrs should list interfaces")
+            .into_iter()
+            .find(|interface| {
+                !matches!(interface.kind, InterfaceKind::Loopback)
+                    && matches!(interface.admin_state, AdminState::Up)
+            })
+            .expect("expected an up, non-loopback interface");
+        let interface_id = interface.id;
+        let interface_index = interface.index;
+        let address = IpAddress::from(Ipv4Address::new(192, 0, 2, 253));
+        let mac = MacAddress::new([0x02, 0x00, 0x00, 0x00, 0x00, 0x99]);
+        let neighbor = StaticNeighbor::new(interface_id, address, mac);
+
+        // Recover from an interrupted prior run before attempting the add.
+        let _ = backend.remove_static_neighbor(neighbor);
+
+        let added = backend
+            .add_static_neighbor(neighbor)
+            .expect("add_static_neighbor failed - are you running as root?");
+        assert_eq!(added.interface_index, interface_index);
+        assert_eq!(added.address, address);
+        assert_eq!(added.mac, Some(mac));
+        assert_eq!(added.state, NeighborState::Permanent);
+
+        let present = backend
+            .neighbors()
+            .expect("neighbors() failed after add_static_neighbor")
+            .into_iter()
+            .any(|entry| entry.interface_index == interface_index && entry.address == address);
+
+        backend
+            .remove_static_neighbor(neighbor)
+            .expect("remove_static_neighbor failed after successful add_static_neighbor");
+        let absent = !backend
+            .neighbors()
+            .expect("neighbors() failed after remove_static_neighbor")
+            .into_iter()
+            .any(|entry| entry.interface_index == interface_index && entry.address == address);
+
+        assert!(
+            present,
+            "added static neighbor was not present in neighbors() afterward"
+        );
+        assert!(
+            absent,
+            "removed static neighbor was still present in neighbors() afterward"
+        );
+        assert!(matches!(
+            backend.remove_static_neighbor(neighbor),
+            Err(Error::NotFound)
+        ));
     }
 
     #[test]
