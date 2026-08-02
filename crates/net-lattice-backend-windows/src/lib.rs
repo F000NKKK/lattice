@@ -9,8 +9,11 @@
 
 #![cfg(target_os = "windows")]
 
+use std::collections::HashMap;
 use std::ffi::c_void;
 use std::net::IpAddr;
+use std::sync::{Arc, Condvar, LazyLock, Mutex};
+use std::time::Duration;
 
 use net_lattice_core::{Error, Id, PlatformErrorCode, Result};
 use net_lattice_model::dns::{DnsConfig, NewDnsConfig};
@@ -43,9 +46,9 @@ use windows::Win32::NetworkManagement::IpHelper::{
     MIB_IF_ADMIN_STATUS_DOWN, MIB_IF_ADMIN_STATUS_UP, MIB_IF_ROW2, MIB_IF_TABLE2, MIB_IFROW,
     MIB_IPFORWARD_ROW2, MIB_IPFORWARD_TABLE2, MIB_IPINTERFACE_ROW, MIB_IPNET_ROW2,
     MIB_IPNET_TABLE2, MIB_NOTIFICATION_TYPE, MIB_UNICASTIPADDRESS_ROW, MIB_UNICASTIPADDRESS_TABLE,
-    MibAddInstance, MibDeleteInstance, NotifyIpInterfaceChange, NotifyRouteChange2,
-    NotifyUnicastIpAddressChange, SetDnsSettings, SetIfEntry, SetInterfaceDnsSettings,
-    SetIpInterfaceEntry,
+    MibAddInstance, MibDeleteInstance, MibInitialNotification, NotifyIpInterfaceChange,
+    NotifyRouteChange2, NotifyUnicastIpAddressChange, SetDnsSettings, SetIfEntry,
+    SetInterfaceDnsSettings, SetIpInterfaceEntry,
 };
 use windows::Win32::NetworkManagement::Ndis::{
     IfOperStatusDormant, IfOperStatusDown, IfOperStatusLowerLayerDown, IfOperStatusUp,
@@ -1087,6 +1090,169 @@ impl Drop for WindowsTokioWatch {
     }
 }
 
+/// How long `watch_filtered`/`watch_tokio` block waiting for all three
+/// `MibInitialNotification` registration confirmations before treating the
+/// registration as failed. IP Helper's own documented mechanism (see
+/// [`RegistrationReadiness`]) fires this confirmation as soon as a
+/// registration is genuinely live, so this is not a tuning knob for native
+/// event *delivery* latency (unrelated timing budgets elsewhere in this
+/// crate/the facade already cover that) — it only bounds how long the OS
+/// may reasonably take to finish wiring up a change-notification
+/// registration that has already returned success synchronously. Five
+/// seconds is generous headroom over the sub-millisecond confirmation this
+/// normally takes, while still failing fast (rather than hanging forever)
+/// if IP Helper never delivers the confirmation at all.
+const REGISTRATION_READY_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Synthetic Windows-style error code used only when a `watch_filtered`/
+/// `watch_tokio` registration never receives all three documented
+/// `MibInitialNotification` confirmations within [`REGISTRATION_READY_TIMEOUT`].
+/// This does not come from an actual IP Helper API return value — the
+/// registration calls themselves already reported success — so it is
+/// deliberately `ERROR_TIMEOUT` (`1460` / `0x5B4`), Windows' own generic
+/// "this operation did not complete within the time allotted" code, chosen
+/// for diagnostic familiarity rather than being returned by any Win32 call
+/// in this module.
+const ERROR_TIMEOUT: u32 = 1460;
+
+/// Blocks the registering thread until every expected `MibInitialNotification`
+/// confirmation has arrived from IP Helper's callback threads.
+///
+/// Per Microsoft's documented `InitialNotification` parameter (quoted
+/// verbatim, `NotifyRouteChange2`/`NotifyUnicastIpAddressChange`, Microsoft
+/// Learn, accessed 2026-08-02): "A value that indicates whether the
+/// callback should be invoked immediately after registration for change
+/// notification completes. This initial notification does not indicate a
+/// change occurred to an IP route entry. The purpose of this parameter to
+/// provide confirmation that the callback is registered." When set `TRUE`
+/// (as every registration call in this module now does), the callback
+/// fires once per registration with `NotificationType ==
+/// MibInitialNotification` and a `NULL` row as soon as the registration is
+/// genuinely, fully live — not merely as soon as the synchronous
+/// registration call has returned `NO_ERROR`. `NotifyIpInterfaceChange`
+/// shares the same IP Helper notification-registration family and is
+/// treated identically here by symmetry.
+///
+/// This closes a startup race that existed when every registration call
+/// passed `InitialNotification = FALSE`: a filtered/selected watcher
+/// created shortly before a very fast native mutation could previously miss
+/// that mutation's notification if the OS had not yet finished wiring up
+/// the registration internally, even though `NotifyRouteChange2` et al. had
+/// already returned success. Blocking here, using the documented
+/// confirmation mechanism instead of assuming synchronous return implies a
+/// live registration, eliminates that race by construction rather than by
+/// guessing at row-field reliability (a settled, doc-confirmed non-issue —
+/// see `resolve_notification_interface_index`/
+/// `complete_address_notification_row`).
+///
+/// IP Helper invokes every callback (including the `MibInitialNotification`
+/// confirmation) on arbitrary OS threads, per its own documentation, so the
+/// handoff between the registering thread (which calls [`RegistrationReadiness::wait`])
+/// and the callback threads (which call [`RegistrationReadiness::signal`])
+/// must be thread-safe; `Mutex`+`Condvar` is the natural fit already used
+/// throughout the standard library for exactly this "block until N
+/// external signals arrive" pattern.
+struct RegistrationReadiness {
+    remaining: Mutex<usize>,
+    ready: Condvar,
+}
+
+impl RegistrationReadiness {
+    fn new(expected_confirmations: usize) -> Self {
+        Self {
+            remaining: Mutex::new(expected_confirmations),
+            ready: Condvar::new(),
+        }
+    }
+
+    /// Called from an IP Helper callback thread when it observes
+    /// `NotificationType == MibInitialNotification`.
+    fn signal(&self) {
+        let mut remaining = self
+            .remaining
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if *remaining > 0 {
+            *remaining -= 1;
+        }
+        self.ready.notify_all();
+    }
+
+    /// Blocks the calling (registering) thread until every expected
+    /// confirmation has arrived or `timeout` elapses. Returns `true` once
+    /// all confirmations arrived, `false` on timeout.
+    fn wait(&self, timeout: Duration) -> bool {
+        let remaining = self
+            .remaining
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let (remaining, wait_result) = self
+            .ready
+            .wait_timeout_while(remaining, timeout, |remaining| *remaining > 0)
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        drop(remaining);
+        !wait_result.timed_out()
+    }
+}
+
+/// Registration-readiness signals keyed by the raw `WindowsWatchState`/
+/// `WindowsTokioWatchState` pointer passed to IP Helper as the notification
+/// callback context (all three registrations in one `watch_filtered`/
+/// `watch_tokio` call share the same context pointer). A module-level map
+/// keyed by that pointer's address lets the `route_change_callback`/
+/// `interface_change_callback`/`address_change_callback` family (and their
+/// Tokio counterparts) signal readiness without adding a field to
+/// `WindowsWatchState`/`WindowsTokioWatchState` themselves — those structs
+/// are also constructed directly by this module's deterministic fixture
+/// tests, which never exercise `MibInitialNotification` and should not need
+/// to know about registration bookkeeping that only applies to a real IP
+/// Helper registration.
+static REGISTRATION_READY: LazyLock<Mutex<HashMap<usize, Arc<RegistrationReadiness>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Registers a new readiness tracker for `expected_confirmations` upcoming
+/// `MibInitialNotification` callbacks against `context`, returning the
+/// `Arc` the registering thread should call [`RegistrationReadiness::wait`]
+/// on.
+fn register_readiness(
+    context: *const c_void,
+    expected_confirmations: usize,
+) -> Arc<RegistrationReadiness> {
+    let readiness = Arc::new(RegistrationReadiness::new(expected_confirmations));
+    REGISTRATION_READY
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .insert(context as usize, Arc::clone(&readiness));
+    readiness
+}
+
+/// Removes `context`'s readiness tracker once registration either succeeds
+/// or is abandoned, so the map does not grow unboundedly across repeated
+/// `watch_filtered`/`watch_tokio` calls.
+fn unregister_readiness(context: *const c_void) {
+    REGISTRATION_READY
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .remove(&(context as usize));
+}
+
+/// Called from every callback (sync and Tokio) when
+/// `NotificationType == MibInitialNotification`. Looks up `context`'s
+/// tracker, if any is currently registered, and signals it. A miss is not
+/// an error: it means either registration already finished (the tracker
+/// was removed) or, for the deterministic fixture tests in this module that
+/// invoke callbacks directly without going through `watch_filtered`/
+/// `watch_tokio`, no tracker was ever registered for that context.
+fn signal_registration_ready(context: *const c_void) {
+    if let Some(readiness) = REGISTRATION_READY
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(&(context as usize))
+    {
+        readiness.signal();
+    }
+}
+
 fn change_kind(notification: MIB_NOTIFICATION_TYPE) -> ChangeKind {
     if notification == MibAddInstance {
         ChangeKind::Added
@@ -1105,7 +1271,18 @@ unsafe extern "system" fn route_change_callback(
     row: *const MIB_IPFORWARD_ROW2,
     notification: MIB_NOTIFICATION_TYPE,
 ) {
-    if context.is_null() || row.is_null() {
+    if context.is_null() {
+        return;
+    }
+    if notification == MibInitialNotification {
+        // Row is documented as NULL for this notification kind; there is
+        // nothing to process, only a "registration is now live"
+        // confirmation. See `RegistrationReadiness` for the full
+        // documented rationale.
+        signal_registration_ready(context);
+        return;
+    }
+    if row.is_null() {
         return;
     }
     let state = unsafe { &*(context.cast::<WindowsWatchState>()) };
@@ -1126,7 +1303,14 @@ unsafe extern "system" fn interface_change_callback(
     row: *const windows::Win32::NetworkManagement::IpHelper::MIB_IPINTERFACE_ROW,
     notification: MIB_NOTIFICATION_TYPE,
 ) {
-    if context.is_null() || row.is_null() {
+    if context.is_null() {
+        return;
+    }
+    if notification == MibInitialNotification {
+        signal_registration_ready(context);
+        return;
+    }
+    if row.is_null() {
         return;
     }
     let state = unsafe { &*(context.cast::<WindowsWatchState>()) };
@@ -1145,7 +1329,14 @@ unsafe extern "system" fn address_change_callback(
     row: *const MIB_UNICASTIPADDRESS_ROW,
     notification: MIB_NOTIFICATION_TYPE,
 ) {
-    if context.is_null() || row.is_null() {
+    if context.is_null() {
+        return;
+    }
+    if notification == MibInitialNotification {
+        signal_registration_ready(context);
+        return;
+    }
+    if row.is_null() {
         return;
     }
     let state = unsafe { &*(context.cast::<WindowsWatchState>()) };
@@ -1167,7 +1358,14 @@ unsafe extern "system" fn tokio_route_change_callback(
     row: *const MIB_IPFORWARD_ROW2,
     notification: MIB_NOTIFICATION_TYPE,
 ) {
-    if context.is_null() || row.is_null() {
+    if context.is_null() {
+        return;
+    }
+    if notification == MibInitialNotification {
+        signal_registration_ready(context);
+        return;
+    }
+    if row.is_null() {
         return;
     }
     let state = unsafe { &*(context.cast::<WindowsTokioWatchState>()) };
@@ -1189,7 +1387,14 @@ unsafe extern "system" fn tokio_interface_change_callback(
     row: *const windows::Win32::NetworkManagement::IpHelper::MIB_IPINTERFACE_ROW,
     notification: MIB_NOTIFICATION_TYPE,
 ) {
-    if context.is_null() || row.is_null() {
+    if context.is_null() {
+        return;
+    }
+    if notification == MibInitialNotification {
+        signal_registration_ready(context);
+        return;
+    }
+    if row.is_null() {
         return;
     }
     let state = unsafe { &*(context.cast::<WindowsTokioWatchState>()) };
@@ -1208,7 +1413,14 @@ unsafe extern "system" fn tokio_address_change_callback(
     row: *const MIB_UNICASTIPADDRESS_ROW,
     notification: MIB_NOTIFICATION_TYPE,
 ) {
-    if context.is_null() || row.is_null() {
+    if context.is_null() {
+        return;
+    }
+    if notification == MibInitialNotification {
+        signal_registration_ready(context);
+        return;
+    }
+    if row.is_null() {
         return;
     }
     let state = unsafe { &*(context.cast::<WindowsTokioWatchState>()) };
