@@ -1497,10 +1497,10 @@ mod tests {
         let enoent = rtnetlink::Error::NetlinkError(enoent_message);
         assert_eq!(rtnetlink_error_code(&enoent), PlatformErrorCode::Linux(-2));
 
-        let mut eperm_message = rtnetlink::packet_core::ErrorMessage::default();
-        eperm_message.code = std::num::NonZeroI32::new(-13);
-        let eperm = rtnetlink::Error::NetlinkError(eperm_message);
-        assert_eq!(rtnetlink_error_code(&eperm), PlatformErrorCode::Linux(-13));
+        let mut eacces_message = rtnetlink::packet_core::ErrorMessage::default();
+        eacces_message.code = std::num::NonZeroI32::new(-13);
+        let eacces = rtnetlink::Error::NetlinkError(eacces_message);
+        assert_eq!(rtnetlink_error_code(&eacces), PlatformErrorCode::Linux(-13));
     }
 
     #[test]
