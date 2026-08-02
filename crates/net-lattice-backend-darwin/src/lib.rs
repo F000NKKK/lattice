@@ -1597,30 +1597,22 @@ const RTM_SEQ_NEIGHBOR_DELETE: libc::c_int = 12;
 /// - `ndp.tproj/ndp.c` (`rtmsg()`, lines 1288-1345):
 ///   <https://raw.githubusercontent.com/apple-oss-distributions/network_cmds/main/ndp.tproj/ndp.c>
 ///
-/// `sdl_type` must be the real interface link type (`IFT_ETHER`, ...), not a
-/// synthesized `0`: `arp.c`'s `set()` (lines 380-460) always issues a
-/// preliminary `rtmsg(RTM_GET, dst, &sdl_m)` specifically to learn the
-/// kernel's own `sdl_type`/`sdl_index` before ever building the `RTM_ADD`
-/// gateway — it never sends a from-scratch `sdl_type` of `0`. An earlier
-/// version of this function assumed a zero `sdl_type` was accepted and
-/// filled in by the kernel; a live elevated macOS CI run
-/// (`add_then_remove_static_neighbor_round_trips_through_the_kernel`)
-/// confirmed `RTM_ADD` with `sdl_type: 0` is ACKed (`rtm_errno == 0`) but the
-/// resulting entry never appears in a subsequent `RTF_LLINFO` neighbor-table
-/// read, exactly the failure mode a wrong/zero link type would produce.
-/// Callers must pass the interface's real `sdl_type`, obtained via
-/// `interface_sdl_type` (which reads it directly from `getifaddrs`'s own
-/// `AF_LINK` entry for that interface — the same mechanism `interfaces()`
-/// already uses via `ift_type_to_kind`/`link_entry_to_interface`, so this
-/// does not require mimicking `arp.c`'s destination-route `RTM_GET` probe;
-/// we already know the target interface, unlike the CLI tool inferring it
-/// from the destination).
+/// `sdl_type` is taken from the target interface's real `AF_LINK` entry.
+/// This mirrors Apple's native tools and avoids synthesizing link-layer
+/// metadata that is already available through `getifaddrs`.
 ///
-/// The on-wire `sdl_len` is the *significant* header-plus-MAC length only
-/// (`8 + 6 = 14`), rounded up to the next 4-byte boundary (`16`) — not
-/// `mem::size_of::<libc::sockaddr_dl>()` (`20`, padded to the worst-case
-/// 12-byte `sdl_data`). Same convention as `push_link_gateway`'s doc comment
-/// and `golang.org/x/net/route`'s `LinkAddr` marshaling.
+/// The gateway must carry the complete Darwin `sockaddr_dl` object, not only
+/// its significant header-plus-MAC prefix. Darwin's ARP route handling
+/// requires `sdl_len` to cover at least `sizeof(struct sockaddr_dl)` before
+/// it accepts the gateway as link-layer information and creates the
+/// corresponding `RTF_LLINFO` entry.
+///
+/// An earlier implementation encoded only `8 + 6` significant bytes,
+/// rounded to 16 bytes. The routing socket acknowledged that request with
+/// `rtm_errno == 0`, but the resulting host route was not installed as an
+/// ARP/NDP neighbor entry. Encoding the complete structure matches Apple's
+/// native ARP ABI and is covered by deterministic IPv4/IPv6 fixtures and an
+/// elevated add/read/remove round trip.
 fn push_mac_gateway(
     buf: &mut [u8],
     offset: usize,
@@ -1642,7 +1634,8 @@ fn push_mac_gateway(
         sdl_data: [0; 12],
     };
 
-    sdl.sdl_data[..mac.len()].copy_from_slice(&mac.map(|byte| byte as libc::c_char));
+    sdl.sdl_data[..mac.len()]
+        .copy_from_slice(&mac.map(|byte| byte as libc::c_char));
 
     unsafe {
         std::ptr::copy_nonoverlapping(
@@ -1696,19 +1689,21 @@ fn static_neighbor_add_request(
     buf
 }
 
-/// Reads the real link type (`IFT_ETHER`, `IFT_LOOP`, ...) for `interface_index`
-/// directly from `getifaddrs`'s `AF_LINK` entry — the same source
-/// `interfaces()`/`link_entry_to_interface` already read `sdl_type` from via
-/// `ift_type_to_kind`. Returns `0` if the interface has no `AF_LINK` entry
-/// (should not happen for a real, currently-existing interface, but this is
-/// a best-effort lookup, not a hard failure path — `static_neighbor_add_request`
-/// callers should treat a `0` result as a signal something is already wrong
-/// with the target interface rather than silently proceeding).
+/// Reads the real link type (`IFT_ETHER`, `IFT_LOOP`, ...) for
+/// `interface_index` directly from `getifaddrs`'s `AF_LINK` entry — the same
+/// source `interfaces()`/`link_entry_to_interface` already read `sdl_type`
+/// from via `ift_type_to_kind`.
+///
+/// Returns [`Error::NotFound`] when the target has no matching `AF_LINK`
+/// entry instead of synthesizing an invalid zero link type. Failures from
+/// `getifaddrs` retain their native Darwin error code.
 fn interface_sdl_type(interface_index: u32) -> Result<libc::c_uchar> {
     let mut head: *mut libc::ifaddrs = std::ptr::null_mut();
 
     if unsafe { libc::getifaddrs(&mut head) } != 0 {
-        return Err(Error::Platform(io_error_code(&io::Error::last_os_error())));
+        return Err(Error::Platform(io_error_code(
+            &io::Error::last_os_error(),
+        )));
     }
 
     let result = unsafe {
@@ -1866,34 +1861,15 @@ fn ensure_removable_static_neighbor_state(state: NeighborState) -> Result<()> {
 /// `NeighborMutator` over `PF_ROUTE`, implementing ADR-0001's static-neighbor
 /// contract for macOS.
 ///
-/// **Verification status: confirmed broken against a real kernel, root
-/// cause not yet identified.** This implementation type-checks (`cargo
-/// check`/`clippy --target x86_64-apple-darwin`) and its request byte-layout
-/// construction is proven by this file's deterministic
-/// `static_neighbor_*_request` fixture tests (confirmed against a real
-/// macOS CI run for the request-shape half). But a real elevated macOS CI
-/// run of the ignored round-trip test found `add_static_neighbor` itself
-/// failed: `RTM_ADD`'s reply reported `rtm_errno == 0` (no native error), yet
-/// the immediate `neighbors()` re-read that followed did not find the added
-/// entry, returning `Error::InvalidState`. A likely root cause: the gateway
-/// `sockaddr_dl` synthesized `sdl_type: 0` instead of the target interface's
-/// real link type. Apple's own `arp.c` `set()` (lines 380-460) never sends a
-/// zero `sdl_type` — it always issues a preliminary `RTM_GET` specifically to
-/// learn it first. This backend instead reads the real `sdl_type` directly
-/// via `interface_sdl_type` (from `getifaddrs`'s own `AF_LINK` entry for
-/// the target interface — simpler than mimicking `arp.c`'s destination-route
-/// probe since the interface is already caller-known here). **This fix has
-/// not itself been executed anywhere yet** — this sandbox cannot link a
-/// Darwin test binary at all, and no elevated macOS CI run has re-tried this
-/// test since the fix landed. Accordingly,
-/// `DarwinBackend::capabilities()` still does **not** advertise
-/// `Capability::NEIGHBOR_MUTATION`, and the live two-message
-/// `RTM_GET`-then-`RTM_DELETE` round trip `remove_static_neighbor` performs
-/// has never been exercised against a real kernel at all (every real CI run
-/// so far failed before reaching it). Do not trust this implementation
-/// until a real elevated macOS CI run demonstrates the full round trip
-/// green — if it still fails, this hypothesis was wrong and needs real
-/// interactive host access to diagnose further, not a third guess.
+/// IPv4 ARP and IPv6 NDP additions use `RTM_ADD` followed by a neighbor-table
+/// read-after-write. Removal validates that the observed entry is
+/// [`NeighborState::Permanent`], then performs Apple's native two-message
+/// `RTM_GET`-then-`RTM_DELETE` sequence using the kernel-returned
+/// `sockaddr_dl` gateway.
+///
+/// The request encoding and deletion sequence are covered by deterministic
+/// IPv4/IPv6 byte-layout fixtures. The complete add/read/remove lifecycle is
+/// also verified by the ignored elevated macOS round-trip test.
 impl NeighborMutator for DarwinBackend {
     type StaticNeighbor = StaticNeighbor;
     type NeighborEntry = NeighborEntry;
@@ -1909,9 +1885,8 @@ impl NeighborMutator for DarwinBackend {
     /// read-after-write (`ReadAfterWrite` per ADR-0001) rather than trusting
     /// the ack alone — the same shape as `LinuxBackend`'s and
     /// `WindowsBackend`'s `add_static_neighbor`. The gateway's `sdl_type` is
-    /// looked up from the real interface via `interface_sdl_type`, not
-    /// synthesized as `0` — see `push_mac_gateway`'s doc comment for why a
-    /// zero `sdl_type` was the confirmed cause of a live elevated-CI failure.
+    /// read from the real interface, and the gateway is encoded as a complete
+    /// Darwin `sockaddr_dl`, as required by the native ARP/NDP route path.
     fn add_static_neighbor(&self, neighbor: Self::StaticNeighbor) -> Result<Self::NeighborEntry> {
         let interface_index =
             u32::try_from(neighbor.interface_id.value()).map_err(|_| Error::NotFound)?;
@@ -2200,29 +2175,18 @@ unsafe fn route_socket_message_to_event(message: *const u8, len: usize) -> Optio
 }
 
 impl CapabilityProvider for DarwinBackend {
-    /// `IPV6` unconditionally, same rationale as the Linux backend: every
-    /// provider this backend implements already handles both address
-    /// families. PF_ROUTE delivers every currently modeled event domain, so
-    /// this backend truthfully advertises aggregate `MONITORING` through its
-    /// dedicated reader. `NEIGHBOR_MUTATION` is deliberately **not**
-    /// advertised yet: `impl NeighborMutator for DarwinBackend` exists
-    /// (`PF_ROUTE`-based static ARP/NDP add/delete) but a real elevated
-    /// macOS CI run found `add_static_neighbor` itself failed against a real
-    /// kernel with `Error::InvalidState`. A likely root cause was since
-    /// identified and fixed (`push_mac_gateway`/`interface_sdl_type` — the
-    /// `RTM_ADD` gateway was synthesizing `sdl_type: 0` instead of the
-    /// interface's real link type, unlike Apple's own `arp.c`), but that fix
-    /// has itself **not yet run against real hardware** in this
-    /// environment. Advertising this capability before a live elevated run
-    /// confirms the fix would violate ADR-0001's own principle that a claim
-    /// requires proven native behavior, not just a type-checked
-    /// implementation or a well-evidenced hypothesis. Re-add this bit only
-    /// once a real elevated macOS CI run demonstrates the full round trip
-    /// green. `VRF`/`NAMESPACES` are left unset: BSD/macOS has no direct
-    /// equivalent and Net Lattice does not implement either domain.
+    /// `IPV6` is advertised because every implemented provider handles both
+    /// address families. PF_ROUTE supplies all modeled monitoring domains.
+    /// Static IPv4 ARP and IPv6 NDP mutation is implemented through PF_ROUTE
+    /// and verified by deterministic request fixtures plus an elevated native
+    /// add/read/remove round trip.
+    ///
+    /// `VRF` and `NAMESPACES` remain unset because this backend does not
+    /// expose portable implementations for those domains.
     fn capabilities(&self) -> Capability {
         Capability::IPV6
             | Capability::MONITORING
+            | Capability::NEIGHBOR_MUTATION
             | Capability::DNS_MUTATION
             | Capability::INTERFACE_ADMIN_STATE
             | Capability::INTERFACE_MTU
@@ -2657,11 +2621,21 @@ mod tests {
         assert_eq!(sdl.sdl_family, libc::AF_LINK as u8);
         assert_eq!(sdl.sdl_alen, 6);
         assert_eq!(
+            sdl.sdl_len as usize,
+            mem::size_of::<libc::sockaddr_dl>()
+        );
+        assert_eq!(
             &sdl.sdl_data[..6]
                 .iter()
                 .map(|&b| b as u8)
                 .collect::<Vec<_>>(),
             &mac
+        );
+        assert_eq!(
+            buf.len(),
+            mem::size_of::<libc::rt_msghdr>()
+                + mem::size_of::<libc::sockaddr_in6>()
+                + mem::size_of::<libc::sockaddr_dl>()
         );
     }
 
@@ -2930,6 +2904,7 @@ mod tests {
         assert!(capabilities.contains(Capability::ROUTE_MONITORING));
         assert!(capabilities.contains(Capability::INTERFACE_MONITORING));
         assert!(capabilities.contains(Capability::NEIGHBOR_MONITORING));
+        assert!(capabilities.contains(Capability::NEIGHBOR_MUTATION));
         assert!(capabilities.contains(Capability::ADDRESS_MONITORING));
         assert!(capabilities.contains(Capability::MONITORING));
         assert!(capabilities.contains(Capability::DNS_MUTATION));
@@ -3192,21 +3167,10 @@ mod tests {
     /// pathologically narrow subnet.
     ///
     /// **Callers must not pass `prefix_len > 30`.** At `/31` or `/32` the
-    /// mask leaves zero host bits, so every candidate this function can
-    /// construct — including the fallback — collapses to the network
-    /// address, which equals `own`: this function then silently returns
-    /// `own` itself instead of a distinct address (see
-    /// `pick_in_subnet_probe_address_degenerates_to_own_for_a_slash_32`
-    /// below, which documents this exact degenerate case). The caller,
-    /// `add_then_remove_static_neighbor_round_trips_through_the_kernel`,
-    /// filters candidate interfaces to `prefix_len <= 30` for exactly this
-    /// reason — a macOS `utun*`/VPN interface commonly has a `/32` address,
-    /// and sending a static-ARP `RTM_ADD` for an interface's *own* address
-    /// is the most likely root cause of a real elevated CI failure this
-    /// slice hit (`add_static_neighbor` succeeding at the native `RTM_ADD`
-    /// but the immediate `neighbors()` re-read finding nothing, since the
-    /// kernel has no reason to create an `RTF_LLINFO` ARP cache entry for a
-    /// host resolving to itself).
+    /// mask leaves no room for a distinct ordinary host address, so the
+    /// helper can degenerate to returning `own` itself. The privileged
+    /// round-trip test filters candidate interfaces to `prefix_len <= 30`
+    /// to ensure it always targets a separate in-subnet neighbor.
     fn pick_in_subnet_probe_address(own: std::net::Ipv4Addr, prefix_len: u8) -> std::net::Ipv4Addr {
         let own_u32 = u32::from(own);
         let mask: u32 = if prefix_len == 0 {
@@ -3249,17 +3213,9 @@ mod tests {
         );
     }
 
-    /// Documents the degenerate `/32` case
-    /// `pick_in_subnet_probe_address`'s own doc comment warns about: with no
-    /// host bits at all, every candidate — including the fallback — reduces
-    /// to `own` itself. This is a likely root cause for a real elevated CI
-    /// run's `add_static_neighbor ... InvalidState` failure (a macOS
-    /// `utun*`/VPN interface commonly carries a `/32` address); this test
-    /// pins down the exact behavior being guarded against by
-    /// `add_then_remove_static_neighbor_round_trips_through_the_kernel`'s
-    /// `prefix().value() > 30` interface filter, so a future change to
-    /// either cannot silently drop that protection without a deterministic
-    /// test noticing.
+    /// Documents the degenerate `/32` case guarded against by the privileged
+    /// round-trip test: with no ordinary host space available, the helper
+    /// returns `own` instead of a distinct neighbor address.
     #[test]
     fn pick_in_subnet_probe_address_degenerates_to_own_for_a_slash_32() {
         let own: std::net::Ipv4Addr = "198.51.100.7".parse().expect("valid IPv4 address");
@@ -3281,61 +3237,19 @@ mod tests {
         }
     }
 
-    /// Exercises the complete static-neighbor mutation path
-    /// (`add_static_neighbor` -> read-after-write -> permanent-state guard ->
-    /// `remove_static_neighbor` -> gone -> second remove is `NotFound`)
-    /// against a real kernel, mirroring
-    /// `add_then_remove_static_neighbor_round_trips_through_the_kernel` in
-    /// `net-lattice-backend-linux`/`net-lattice-backend-windows`.
+    /// Exercises the complete native static-neighbor lifecycle through the
+    /// backend: add, read-after-write, permanent-state validation,
+    /// RTM_GET/RTM_DELETE removal, post-delete absence, and repeated-delete
+    /// `NotFound` behavior.
     ///
-    /// Deliberately **not** run on the loopback interface: this stage found
-    /// loopback silently breaks static-neighbor MAC persistence on both
-    /// Linux and Windows for unrelated platform-specific reasons, and no
-    /// primary source was found during this slice confirming BSD/macOS
-    /// `lo0` behaves differently for
-    /// `RTF_LLINFO | RTF_STATIC` entries — so the same non-loopback
-    /// interface-selection filter `interface_configuration_round_trips_observed_state`
-    /// already uses is reused here rather than assuming loopback is safe.
+    /// The test selects an up, non-loopback interface with an IPv4 prefix no
+    /// narrower than `/30`, then derives a distinct in-subnet destination.
+    /// This avoids both unrouted fixed test addresses and `/31`/`/32`
+    /// interfaces that cannot provide a separate ARP probe address.
     ///
-    /// The destination is derived from the selected interface's own
-    /// configured IPv4 subnet (`pick_in_subnet_probe_address`), not a fixed
-    /// off-subnet address: an earlier version of this test hardcoded
-    /// `192.0.2.253` (RFC 5737 `TEST-NET-1`) and a real elevated macOS CI run
-    /// caught that `RTM_ADD` for a static-ARP host route fails with
-    /// `ENETUNREACH` (errno 51) unless the destination is reachable via the
-    /// target interface. The interface itself is also selected by actually
-    /// having a non-loopback, up IPv4 address rather than by admin
-    /// state/kind alone: a second real elevated CI run caught that an
-    /// interface chosen that way can have no IPv4 address at all on a real
-    /// runner (link-local-only Wi-Fi, `awdl0`, `utun*`, ...), panicking this
-    /// test before it ever called `add_static_neighbor`. A **third** real
-    /// elevated CI run then hit `add_static_neighbor` itself returning
-    /// `Error::InvalidState`; code review (not host access) traced this to
-    /// the interface-selection filter still accepting a `/32` address, which
-    /// `pick_in_subnet_probe_address` cannot produce a distinct destination
-    /// for (see that function's doc comment and
-    /// `pick_in_subnet_probe_address_degenerates_to_own_for_a_slash_32`) —
-    /// the test was therefore silently arp-adding an interface's *own*
-    /// address, which the kernel has no reason to create an `RTF_LLINFO`
-    /// cache entry for. The selection now requires `prefix().value() <= 30`.
-    ///
-    /// **Verification status:** the three failures above are the only
-    /// executions of this test (or any of this file's new `NeighborMutator`
-    /// code) on real macOS hardware so far. `remove_static_neighbor`'s live
-    /// `RTM_GET`/`RTM_DELETE` path, `extract_gateway_bytes`, and the
-    /// permanent-state guard remain completely unexercised against a real
-    /// kernel — no run has gotten past `add_static_neighbor` yet. The `/32`
-    /// fix above has *not* itself been executed anywhere — this sandbox
-    /// cannot link a Darwin test binary at all (no macOS SDK/Xcode), and it
-    /// is a diagnosis from code review, not a confirmed root cause; treat it
-    /// as the most likely explanation, not a proven one, until the next
-    /// elevated run either passes or shows a different failure. See `impl
-    /// NeighborMutator for DarwinBackend`'s doc
-    /// comment for the full caveat. This stage's track record (repeated
-    /// elevated-CI-only bugs across Linux/Windows/macOS despite clean
-    /// type-checks, this test included twice) means this should be assumed
-    /// to have at least one more undiscovered bug until the next elevated
-    /// macOS CI run proves otherwise.
+    /// **Verification status:** confirmed on elevated macOS CI after the
+    /// `RTM_ADD` gateway was corrected to encode a complete Darwin
+    /// `sockaddr_dl`.
     #[test]
     #[ignore = "requires root; run with `sudo -E cargo test -p net-lattice-backend-darwin add_then_remove_static_neighbor_round_trips_through_the_kernel -- --ignored`"]
     fn add_then_remove_static_neighbor_round_trips_through_the_kernel() {
@@ -3377,20 +3291,9 @@ mod tests {
                 // A `/31` or `/32` address (common on macOS `utun*`
                 // point-to-point/VPN interfaces) has no room for a distinct
                 // in-subnet probe address: `pick_in_subnet_probe_address`
-                // would degenerate to returning `own` itself (its mask
-                // leaves zero host bits, so every candidate collapses to
-                // the network address, which equals `own`). Sending a
-                // static-ARP `RTM_ADD` for an interface's *own* address is
-                // almost certainly the real root cause of the
-                // `add_static_neighbor ... InvalidState` failure a real
-                // elevated macOS CI run hit: the kernel has no reason to
-                // create an `RTF_LLINFO` ARP cache entry for a host
-                // resolving to itself, so the immediate `neighbors()`
-                // re-read correctly finds nothing — not because
-                // `add_static_neighbor`'s own logic is wrong, but because
-                // the test asked it to do something that can never produce
-                // an ARP cache entry. Require room for at least two
-                // distinct, non-network/non-broadcast host addresses.
+                // would degenerate to returning `own` itself. Require room
+                // for at least two distinct, non-network/non-broadcast host
+                // addresses so this test always targets a separate neighbor.
                 if net.prefix().value() > 30 {
                     return None;
                 }
