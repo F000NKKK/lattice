@@ -2642,7 +2642,7 @@ mod tests {
         // comment documents and `golang.org/x/net/route`'s `LinkAddr`
         // marshaling uses; asserting against the padded `sizeof` here
         // overcounts by exactly 4 bytes, which is what a real macOS CI run
-        // caught (see `.ai/0.17/AUDIT.md`).
+        // caught.
         const GATEWAY_SPACE: usize = (8 + 6 + 3) & !3;
         assert_eq!(
             buf.len(),
@@ -3162,9 +3162,9 @@ mod tests {
     ///
     /// Deliberately **not** run on the loopback interface: this stage found
     /// loopback silently breaks static-neighbor MAC persistence on both
-    /// Linux and Windows for unrelated platform-specific reasons (see
-    /// `.ai/0.17/AUDIT.md` sections 15-16), and no primary source was found
-    /// during this slice confirming BSD/macOS `lo0` behaves differently for
+    /// Linux and Windows for unrelated platform-specific reasons, and no
+    /// primary source was found during this slice confirming BSD/macOS
+    /// `lo0` behaves differently for
     /// `RTF_LLINFO | RTF_STATIC` entries — so the same non-loopback
     /// interface-selection filter `interface_configuration_round_trips_observed_state`
     /// already uses is reused here rather than assuming loopback is safe.
@@ -3175,7 +3175,7 @@ mod tests {
     /// `192.0.2.253` (RFC 5737 `TEST-NET-1`) and a real elevated macOS CI run
     /// caught that `RTM_ADD` for a static-ARP host route fails with
     /// `ENETUNREACH` (errno 51) unless the destination is reachable via the
-    /// target interface — see `.ai/0.17/AUDIT.md` for the exact failure.
+    /// target interface.
     ///
     /// **Verification status:** the `ENETUNREACH` failure above is the one
     /// and only execution of this test (or any of this file's new
@@ -3183,7 +3183,7 @@ mod tests {
     /// The in-subnet-destination fix above has *not* itself been executed
     /// anywhere yet — this sandbox cannot link a Darwin test binary at all
     /// (no macOS SDK/Xcode). See `impl NeighborMutator for DarwinBackend`'s
-    /// doc comment and `.ai/0.17/AUDIT.md` for the full caveat. This stage's
+    /// doc comment for the full caveat. This stage's
     /// track record (four consecutive elevated-CI-only bugs across
     /// Linux/Windows/macOS despite clean type-checks, this one included)
     /// means this should be assumed to have at least one more undiscovered
