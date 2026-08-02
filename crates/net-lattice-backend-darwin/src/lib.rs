@@ -1609,7 +1609,7 @@ const RTM_SEQ_NEIGHBOR_DELETE: libc::c_int = 12;
 /// resulting entry never appears in a subsequent `RTF_LLINFO` neighbor-table
 /// read, exactly the failure mode a wrong/zero link type would produce.
 /// Callers must pass the interface's real `sdl_type`, obtained via
-/// [`interface_sdl_type`] (which reads it directly from `getifaddrs`'s own
+/// `interface_sdl_type` (which reads it directly from `getifaddrs`'s own
 /// `AF_LINK` entry for that interface — the same mechanism `interfaces()`
 /// already uses via `ift_type_to_kind`/`link_entry_to_interface`, so this
 /// does not require mimicking `arp.c`'s destination-route `RTM_GET` probe;
@@ -1870,7 +1870,7 @@ fn ensure_removable_static_neighbor_state(state: NeighborState) -> Result<()> {
 /// real link type. Apple's own `arp.c` `set()` (lines 380-460) never sends a
 /// zero `sdl_type` — it always issues a preliminary `RTM_GET` specifically to
 /// learn it first. This backend instead reads the real `sdl_type` directly
-/// via [`interface_sdl_type`] (from `getifaddrs`'s own `AF_LINK` entry for
+/// via `interface_sdl_type` (from `getifaddrs`'s own `AF_LINK` entry for
 /// the target interface — simpler than mimicking `arp.c`'s destination-route
 /// probe since the interface is already caller-known here). **This fix has
 /// not itself been executed anywhere yet** — this sandbox cannot link a
@@ -1899,7 +1899,7 @@ impl NeighborMutator for DarwinBackend {
     /// read-after-write (`ReadAfterWrite` per ADR-0001) rather than trusting
     /// the ack alone — the same shape as `LinuxBackend`'s and
     /// `WindowsBackend`'s `add_static_neighbor`. The gateway's `sdl_type` is
-    /// looked up from the real interface via [`interface_sdl_type`], not
+    /// looked up from the real interface via `interface_sdl_type`, not
     /// synthesized as `0` — see [`push_mac_gateway`]'s doc comment for why a
     /// zero `sdl_type` was the confirmed cause of a live elevated-CI failure.
     fn add_static_neighbor(&self, neighbor: Self::StaticNeighbor) -> Result<Self::NeighborEntry> {
