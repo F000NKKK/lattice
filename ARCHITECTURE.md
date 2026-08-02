@@ -275,7 +275,7 @@ force every backend to stub out methods for features it doesn't have:
   `Capability::NEIGHBOR_MUTATION`. The macOS implementation is unverified
   against real hardware or CI in this repository's development environment
   (this sandbox cannot link a Darwin test binary at all — no macOS SDK/Xcode
-  — so only cross-compiled type-checking has run; see `.ai/0.17/AUDIT.md`).
+  — so only cross-compiled type-checking has run).
   The `net-lattice` facade does not forward to `NeighborMutator` on any
   platform yet (see ADR-0001, still `proposed`).
 - `DnsProvider` — read/write DNS resolver configuration.

@@ -3082,6 +3082,62 @@ mod tests {
         let _ = neighbors;
     }
 
+    /// Picks a host address inside `own`'s `/prefix_len` subnet that is
+    /// neither `own` itself, the network address, nor the broadcast address.
+    /// Test-only helper for
+    /// `add_then_remove_static_neighbor_round_trips_through_the_kernel`: a
+    /// static-ARP `RTM_ADD` needs a destination the kernel considers
+    /// reachable via the target interface (see that test's doc comment for
+    /// the real elevated-CI failure this fixes), which a fixed off-subnet
+    /// address cannot guarantee on an arbitrary CI runner's network.
+    ///
+    /// Tries a handful of candidate host offsets before falling back to
+    /// flipping `own`'s lowest host bit, so this terminates even for a
+    /// pathologically narrow subnet (e.g. `/31`, which has no distinct
+    /// non-network/non-broadcast host address at all — the fallback then
+    /// simply returns a different, still in-subnet, address).
+    fn pick_in_subnet_probe_address(own: std::net::Ipv4Addr, prefix_len: u8) -> std::net::Ipv4Addr {
+        let own_u32 = u32::from(own);
+        let mask: u32 = if prefix_len == 0 {
+            0
+        } else {
+            !0u32 << (32 - prefix_len)
+        };
+        let network = own_u32 & mask;
+        let broadcast = network | !mask;
+        for host in [250u32, 251, 252, 2, 3, 4] {
+            let candidate = network | (host & !mask);
+            if candidate != own_u32 && candidate != network && candidate != broadcast {
+                return std::net::Ipv4Addr::from(candidate);
+            }
+        }
+        std::net::Ipv4Addr::from(network | ((own_u32 ^ 1) & !mask))
+    }
+
+    #[test]
+    fn pick_in_subnet_probe_address_stays_in_subnet_and_differs_from_own() {
+        let own: std::net::Ipv4Addr = "192.0.2.10".parse().expect("valid IPv4 address");
+        let probe = pick_in_subnet_probe_address(own, 24);
+        assert_ne!(probe, own);
+        assert_eq!(u32::from(probe) & 0xffff_ff00, u32::from(own) & 0xffff_ff00);
+    }
+
+    #[test]
+    fn pick_in_subnet_probe_address_avoids_network_and_broadcast_when_own_is_a_host_offset() {
+        // Deliberately picks an `own` address whose host bits collide with
+        // this function's first preferred offset (`.250`), forcing it to
+        // fall through to a later candidate rather than returning `own`
+        // itself.
+        let own: std::net::Ipv4Addr = "203.0.113.250".parse().expect("valid IPv4 address");
+        let probe = pick_in_subnet_probe_address(own, 24);
+        assert_ne!(probe, own);
+        assert_ne!(probe, "203.0.113.0".parse::<std::net::Ipv4Addr>().unwrap());
+        assert_ne!(
+            probe,
+            "203.0.113.255".parse::<std::net::Ipv4Addr>().unwrap()
+        );
+    }
+
     #[test]
     fn ensure_removable_static_neighbor_state_rejects_non_permanent_entries() {
         assert!(ensure_removable_static_neighbor_state(NeighborState::Permanent).is_ok());
@@ -3112,18 +3168,26 @@ mod tests {
     /// `RTF_LLINFO | RTF_STATIC` entries — so the same non-loopback
     /// interface-selection filter `interface_configuration_round_trips_observed_state`
     /// already uses is reused here rather than assuming loopback is safe.
-    /// The destination is `192.0.2.253` (RFC 5737 `TEST-NET-1`), chosen to
-    /// avoid colliding with a real host on whatever LAN the selected
-    /// interface is attached to.
     ///
-    /// **Verification status:** unverified on real macOS hardware in this
-    /// session — this sandbox cannot link a Darwin test binary at all (no
-    /// macOS SDK/Xcode), so this test has never executed anywhere. See `impl
-    /// NeighborMutator for DarwinBackend`'s doc comment and
-    /// `.ai/0.17/AUDIT.md` for the full caveat. This stage's track record
-    /// (three consecutive elevated-CI-only bugs on Linux/Windows despite
-    /// clean type-checks) means this should be assumed to have at least one
-    /// undiscovered bug until a real elevated macOS CI run proves otherwise.
+    /// The destination is derived from the selected interface's own
+    /// configured IPv4 subnet (`pick_in_subnet_probe_address`), not a fixed
+    /// off-subnet address: an earlier version of this test hardcoded
+    /// `192.0.2.253` (RFC 5737 `TEST-NET-1`) and a real elevated macOS CI run
+    /// caught that `RTM_ADD` for a static-ARP host route fails with
+    /// `ENETUNREACH` (errno 51) unless the destination is reachable via the
+    /// target interface — see `.ai/0.17/AUDIT.md` for the exact failure.
+    ///
+    /// **Verification status:** the `ENETUNREACH` failure above is the one
+    /// and only execution of this test (or any of this file's new
+    /// `NeighborMutator` code) on real macOS hardware so far, and it failed.
+    /// The in-subnet-destination fix above has *not* itself been executed
+    /// anywhere yet — this sandbox cannot link a Darwin test binary at all
+    /// (no macOS SDK/Xcode). See `impl NeighborMutator for DarwinBackend`'s
+    /// doc comment and `.ai/0.17/AUDIT.md` for the full caveat. This stage's
+    /// track record (four consecutive elevated-CI-only bugs across
+    /// Linux/Windows/macOS despite clean type-checks, this one included)
+    /// means this should be assumed to have at least one more undiscovered
+    /// bug until the next elevated macOS CI run proves otherwise.
     #[test]
     #[ignore = "requires root; run with `sudo -E cargo test -p net-lattice-backend-darwin add_then_remove_static_neighbor_round_trips_through_the_kernel -- --ignored`"]
     fn add_then_remove_static_neighbor_round_trips_through_the_kernel() {
@@ -3141,7 +3205,28 @@ mod tests {
             .expect("expected an up, non-loopback interface");
         let interface_id = interface.id;
         let interface_index = interface.index;
-        let address = IpAddress::from(Ipv4Address::new(192, 0, 2, 253));
+
+        // `RTM_ADD` for a static-ARP host route needs a destination the
+        // kernel considers reachable via `interface_index` — a fixed
+        // off-subnet address (originally `192.0.2.253`, RFC 5737
+        // `TEST-NET-1`) is unrouted on a real interface and `RTM_ADD` fails
+        // with `ENETUNREACH` (errno 51), exactly as caught on live elevated
+        // macOS CI (`.ai/0.17/AUDIT.md`). Derive an in-subnet, currently
+        // unassigned host address from the interface's own configured IPv4
+        // network instead.
+        let own = backend
+            .addresses()
+            .expect("getifaddrs should list addresses")
+            .into_iter()
+            .find_map(|addr| match addr.address {
+                Network::V4(net) if addr.interface_index == interface_index => Some(net),
+                _ => None,
+            })
+            .expect("expected the selected interface to have a configured IPv4 address");
+        let address = IpAddress::from(Ipv4Address::from(pick_in_subnet_probe_address(
+            own.address().into(),
+            own.prefix().value(),
+        )));
         let mac = MacAddress::new([0x02, 0x00, 0x00, 0x00, 0x00, 0x99]);
         let neighbor = StaticNeighbor::new(interface_id, address, mac);
 

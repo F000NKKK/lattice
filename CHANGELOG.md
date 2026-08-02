@@ -28,8 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   entry, returning `InvalidState`; a missing target returns `NotFound`, and
   native `ERROR_ACCESS_DENIED`/`ERROR_OBJECT_ALREADY_EXISTS`/`ERROR_NOT_SUPPORTED`
   map to `PermissionDenied`/`AlreadyExists`/`Unsupported`. This implementation
-  has been confirmed on a live elevated Windows CI run (see
-  `.ai/0.17/AUDIT.md` sections 14-16).
+  has been confirmed on a live elevated Windows CI run.
 - Stage 0.17 macOS native static-neighbor mutation: `net-lattice-backend-darwin`
   implements `NeighborMutator` over `PF_ROUTE` (`RTM_ADD` for add; a real
   two-message `RTM_GET`-then-`RTM_DELETE` sequence for remove, reusing the
@@ -42,8 +41,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `AlreadyExists`/`NotFound`/`PermissionDenied`. **Unverified on real macOS
   hardware or CI**: this repository's development sandbox cannot link a
   Darwin test binary at all (no macOS SDK/Xcode), so only deterministic
-  fixtures and a cross-compiled type/lint/doc check have run (see
-  `.ai/0.17/AUDIT.md`). The `net-lattice` facade does not forward to
+  fixtures and a cross-compiled type/lint/doc check have run. The
+  `net-lattice` facade does not forward to
   `NeighborMutator` on any platform yet; facade/executor integration remains
   a separate follow-up slice (Slice D), and ADR-0001 remains `proposed`
   pending a real elevated macOS CI run.
