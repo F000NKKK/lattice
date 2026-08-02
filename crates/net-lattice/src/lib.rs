@@ -1752,6 +1752,187 @@ mod tests {
         assert!(matches!(report.rollback(), RollbackStatus::Completed));
     }
 
+    /// IPv6 counterpart to `native_facade_compensates_after_second_route_operation_fails`.
+    /// Mirrors it exactly except for using the IPv6 documentation prefix
+    /// (RFC 3849, `2001:db8::/32`) with a subnet suffix distinct from the
+    /// other IPv6 route/address facade tests, so a previous interrupted run
+    /// of any of those tests can never collide with this one.
+    #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+    #[test]
+    #[ignore = "requires native networking privilege; run with \
+                `cargo test -p net-lattice native_facade_compensates_after_second_ipv6_route_operation_fails -- --ignored`"]
+    fn native_facade_compensates_after_second_ipv6_route_operation_fails() {
+        #[cfg(target_os = "linux")]
+        let _guard = native_facade_linux_guard();
+
+        let lattice = Lattice::connect().expect("failed to connect native backend");
+        let interface = lattice
+            .interfaces()
+            .expect("failed to list interfaces")
+            .into_iter()
+            .find(|interface| matches!(interface.kind, InterfaceKind::Loopback))
+            .or_else(|| {
+                lattice
+                    .interfaces()
+                    .ok()
+                    .and_then(|mut interfaces| interfaces.pop())
+            })
+            .expect("native backend reported no interfaces");
+        let destination = Network::from(Ipv6Network::new(
+            Ipv6Address::new([0x2001, 0xdb8, 4, 0, 0, 0, 0, 0]),
+            Ipv6PrefixLength::new(64).expect("valid IPv6 prefix"),
+        ));
+        let route = Route::new(RouteId::new(0), destination).with_interface_index(interface.index);
+        let failed_route = Route::new(
+            RouteId::new(0),
+            Network::from(Ipv6Network::new(
+                Ipv6Address::new([0x2001, 0xdb8, 5, 0, 0, 0, 0, 0]),
+                Ipv6PrefixLength::new(64).expect("valid IPv6 prefix"),
+            )),
+        )
+        .with_interface_index(u32::MAX);
+        let plan = MutationPlan::from_operations([
+            Mutation::AddRoute(route.clone()),
+            Mutation::AddRoute(failed_route),
+        ]);
+
+        let mut snapshot = |_, operation: &Mutation| lattice.snapshot_for_mutation(operation);
+        let mut compensate = |_, operation: &Mutation, _: Option<&MutationSnapshot>| match operation
+        {
+            Mutation::AddRoute(route) => lattice.remove_route(route.clone()),
+            _ => Ok(()),
+        };
+        let mut options = ExecutionOptions::default()
+            .snapshot(&mut snapshot)
+            .compensation(&mut compensate);
+        let report = lattice.execute_plan(&plan, &mut options);
+
+        assert!(matches!(report.outcome(0), Some(MutationOutcome::Applied)));
+        assert!(matches!(
+            report.outcome(1),
+            Some(MutationOutcome::Failed { .. })
+        ));
+        assert!(matches!(report.rollback(), RollbackStatus::Completed));
+
+        let survives = lattice
+            .routes()
+            .expect("failed to read routes after compensation")
+            .into_iter()
+            .any(|candidate| {
+                candidate.destination == route.destination
+                    && candidate.interface_index == route.interface_index
+            });
+        assert!(
+            !survives,
+            "compensated ipv6 route was still observed after rollback"
+        );
+    }
+
+    /// Address counterpart to
+    /// `native_facade_compensates_after_second_ipv6_route_operation_fails`:
+    /// two-operation plan whose second `AddAddress` operation targets a
+    /// nonexistent interface id, forcing first-failure-stops plus explicit
+    /// reverse-order compensation of the first `AddAddress`. Uses the IPv6
+    /// documentation prefix with a subnet suffix distinct from every other
+    /// IPv6 address facade test.
+    #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+    #[test]
+    #[ignore = "requires native networking privilege; run with \
+                `cargo test -p net-lattice native_facade_compensates_after_second_ipv6_address_operation_fails -- --ignored`"]
+    fn native_facade_compensates_after_second_ipv6_address_operation_fails() {
+        #[cfg(target_os = "linux")]
+        let _guard = native_facade_linux_guard();
+
+        let lattice = Lattice::connect().expect("failed to connect native backend");
+        let interface = lattice
+            .interfaces()
+            .expect("failed to list interfaces")
+            .into_iter()
+            .find(|interface| matches!(interface.kind, InterfaceKind::Loopback))
+            .or_else(|| {
+                lattice
+                    .interfaces()
+                    .ok()
+                    .and_then(|mut interfaces| interfaces.pop())
+            })
+            .expect("native backend reported no interfaces");
+        let network = Network::from(Ipv6Network::new(
+            Ipv6Address::new([0x2001, 0xdb8, 6, 0, 0, 0, 0, 9]),
+            Ipv6PrefixLength::new(64).expect("valid IPv6 prefix"),
+        ));
+
+        // A prior interrupted ignored-test run must not turn this run into a
+        // false duplicate; best-effort remove any matching leftover before
+        // asserting, matching the round-trip test's cleanup idiom.
+        if let Some(existing) = lattice
+            .addresses()
+            .expect("failed to list addresses before add")
+            .into_iter()
+            .find(|address| {
+                address.interface_index == interface.index && address.address == network
+            })
+        {
+            let _ = lattice.remove_address(existing);
+        }
+
+        let requested = NewInterfaceAddress::new(interface.id, network);
+        let failed_request = NewInterfaceAddress::new(
+            InterfaceId::new(u64::MAX),
+            Network::from(Ipv6Network::new(
+                Ipv6Address::new([0x2001, 0xdb8, 7, 0, 0, 0, 0, 9]),
+                Ipv6PrefixLength::new(64).expect("valid IPv6 prefix"),
+            )),
+        );
+        let plan = MutationPlan::from_operations([
+            Mutation::AddAddress(requested.clone()),
+            Mutation::AddAddress(failed_request),
+        ]);
+
+        let mut snapshot = |_, operation: &Mutation| lattice.snapshot_for_mutation(operation);
+        let mut compensate =
+            |_, operation: &Mutation, snapshot: Option<&MutationSnapshot>| match operation {
+                Mutation::AddAddress(_) => {
+                    if let Some(MutationSnapshot::InterfaceAddress(None)) = snapshot
+                        && let Some(observed) = lattice
+                            .addresses()
+                            .expect("failed to list addresses during compensation")
+                            .into_iter()
+                            .find(|address| {
+                                address.interface_index == interface.index
+                                    && address.address == network
+                            })
+                    {
+                        return lattice.remove_address(observed);
+                    }
+                    Ok(())
+                }
+                _ => Ok(()),
+            };
+        let mut options = ExecutionOptions::default()
+            .snapshot(&mut snapshot)
+            .compensation(&mut compensate);
+        let report = lattice.execute_plan(&plan, &mut options);
+
+        assert!(matches!(report.outcome(0), Some(MutationOutcome::Applied)));
+        assert!(matches!(
+            report.outcome(1),
+            Some(MutationOutcome::Failed { .. })
+        ));
+        assert!(matches!(report.rollback(), RollbackStatus::Completed));
+
+        let survives = lattice
+            .addresses()
+            .expect("failed to read addresses after compensation")
+            .into_iter()
+            .any(|address| {
+                address.interface_index == interface.index && address.address == network
+            });
+        assert!(
+            !survives,
+            "compensated ipv6 address was still observed after rollback"
+        );
+    }
+
     #[test]
     fn facade_runs_supplied_compensation_in_reverse_order() {
         let lattice = lattice(Capability::empty());

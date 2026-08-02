@@ -2262,4 +2262,85 @@ mod tests {
             "async object route filter did not report removal"
         );
     }
+
+    /// IPv6 counterpart of `watch_observes_route_changes`: same end-to-end
+    /// monitoring verification (plain `watcher.recv_timeout` and, with the
+    /// `async` feature, `watch_tokio`/`tokio_route_event`), but for an IPv6
+    /// route on RFC 3849 `2001:db8:8::/64` — distinct from every other IPv6
+    /// subnet already reserved by the other ignored tests in this module
+    /// (`2001:db8:1::/64`, `2001:db8:2::9/64`, `2001:db8::/32` plain) so
+    /// concurrent kernel state never overlaps.
+    #[test]
+    #[ignore = "requires CAP_NET_ADMIN; run with `sudo -E cargo test -p net-lattice-backend-linux watch_observes_ipv6_route_changes -- --ignored`"]
+    fn watch_observes_ipv6_route_changes() {
+        use std::time::Duration;
+
+        let _guard = kernel_test_guard();
+        let backend = LinuxBackend::new().expect("failed to open a Netlink connection");
+        assert!(backend.capabilities().contains(Capability::MONITORING));
+        let watcher = backend
+            .watch()
+            .expect("failed to subscribe to Netlink events");
+        #[cfg(feature = "async")]
+        let mut async_watcher = backend
+            .watch_tokio(EventFilter::none().routes())
+            .expect("failed to subscribe to async Netlink events");
+        let interface_index = loopback_interface_index(&backend);
+        let destination = Network::from(net_lattice_ip::Ipv6Network::new(
+            net_lattice_ip::Ipv6Address::new([0x2001, 0xdb8, 8, 0, 0, 0, 0, 0]),
+            net_lattice_ip::Ipv6PrefixLength::new(64).unwrap(),
+        ));
+        let route = Route::new(RouteId::new(0), destination).with_interface_index(interface_index);
+
+        // Recover from an interrupted prior run before attempting the add.
+        // The test route is deliberately isolated to 2001:db8:8::/64.
+        let _ = backend.remove_route(route.clone());
+        backend
+            .add_route(route.clone())
+            .expect("failed to add monitoring test route");
+        // Obtain the identity from the notification itself. A concurrent
+        // RTM_GETROUTE dump can be rejected with EBUSY while the multicast
+        // sockets are active, whereas the notification is the authoritative
+        // identity source for this monitoring test.
+        let watched_id = (0..12)
+            .find_map(|_| match watcher.recv_timeout(Duration::from_millis(250)) {
+                Ok(Some(Event::Route { id, .. })) => Some(id),
+                _ => None,
+            })
+            .expect("watch() did not report the route addition");
+        let observed = true;
+        #[cfg(feature = "async")]
+        let async_observed = tokio_route_event(&mut async_watcher, watched_id);
+        let selected_watcher = backend
+            .watch_filtered(EventFilter::none().route(watched_id))
+            .expect("failed to subscribe to selected Netlink route events");
+        #[cfg(feature = "async")]
+        let mut selected_async_watcher = backend
+            .watch_tokio(EventFilter::none().route(watched_id))
+            .expect("failed to subscribe to selected async Netlink route events");
+        let _ = backend.remove_route(route);
+        let selected_observed = (0..12).any(|_| {
+            matches!(
+                selected_watcher.recv_timeout(Duration::from_millis(250)),
+                Ok(Some(Event::Route { id, kind: ChangeKind::Removed })) if id == watched_id
+            )
+        });
+        #[cfg(feature = "async")]
+        let selected_async_observed = tokio_route_event(&mut selected_async_watcher, watched_id);
+        assert!(observed, "watch() did not report the route mutation");
+        assert!(
+            selected_observed,
+            "object route filter did not report removal"
+        );
+        #[cfg(feature = "async")]
+        assert!(
+            async_observed,
+            "watch_tokio() did not report the route mutation"
+        );
+        #[cfg(feature = "async")]
+        assert!(
+            selected_async_observed,
+            "async object route filter did not report removal"
+        );
+    }
 }
