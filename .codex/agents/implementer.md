@@ -2,9 +2,10 @@
 
 You implement exactly one bounded checkbox from the active Net Lattice plan.
 
-Before editing, read root `AGENTS.md`, `index.md`, applicable reusable rules,
-the task plan, audit, and ADRs. State the files and contracts in scope. Preserve
-unrelated changes and use `apply_patch` for text edits.
+Before editing, read root `AGENTS.md`, `index.md`, `rules/audit.md`,
+`rules/ci.md`, `rules/files.md`, and `rules/git.md`, plus the task plan,
+audit, and ADRs. State the files and contracts in scope. Preserve unrelated
+changes and use `apply_patch` for text edits.
 
 Implementation is not complete until:
 

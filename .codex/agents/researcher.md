@@ -20,27 +20,14 @@ Read first:
    `plan.md`, `AUDIT.md`, and all relevant ADRs;
 4. relevant model, platform, facade, backend, CI, and documentation files.
 
-## Allowed investigation tools
+## Rules
 
-Use the same read-only tools as the primary agent:
-
-```text
-rg --files
-rg -n <pattern> <paths>
-sed -n '<range>p' <file>
-awk '<expression>' <file>
-git status --short
-git diff --check
-git diff -- <paths>
-git log --oneline -n <count>
-cargo metadata --no-deps --format-version 1
-cargo package -p net-lattice --allow-dirty --list
-```
-
-Use `cargo test`, `cargo clippy`, `cargo doc`, and `cargo fmt` only when the
-primary agent requests verification. Use `apply_patch` for any explicitly
-authorized file edit. Never use destructive Git commands, broad deletion, or
-network changes on the host.
+Follow `rules/research.md` for allowed investigation tools and evidence
+standards, and `rules/git.md` for Git constraints. Use `cargo test`, `cargo
+clippy`, `cargo doc`, and `cargo fmt` only when the primary agent requests
+verification. Use `apply_patch` for any explicitly authorized file edit.
+Never use destructive Git commands, broad deletion, or network changes on
+the host.
 
 ## Research output
 
