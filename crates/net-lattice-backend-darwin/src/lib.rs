@@ -2124,6 +2124,230 @@ mod tests {
         ));
     }
 
+    /// Test-local `AF_LINK` `sockaddr_dl` gateway carrying a 6-byte MAC —
+    /// unlike production `push_link_gateway` (which names an interface with
+    /// *no* hardware address, for on-link routes), a static-ARP/NDP
+    /// `RTM_ADD` gateway must carry the neighbor's link-layer address via
+    /// `LLADDR`, mirroring Apple's own `arp.tproj/arp.c` `rtmsg()` (see the
+    /// module-level fixture doc comment below for citations). `sdl_type` is
+    /// deliberately left `0` here: real `arp.c`/`ndp.c` copy `sdl_type` from
+    /// a preceding `RTM_GET` reply rather than synthesizing it, which this
+    /// fixture does not attempt to reproduce (out of scope, see below).
+    fn push_mac_gateway(
+        buf: &mut [u8],
+        offset: usize,
+        interface_index: u32,
+        mac: [u8; 6],
+    ) -> usize {
+        const HEADER_LEN: usize = 8;
+        let sdl_len = HEADER_LEN + mac.len();
+        let space = (sdl_len + 3) & !3;
+        let mut sdl = libc::sockaddr_dl {
+            sdl_len: sdl_len as u8,
+            sdl_family: libc::AF_LINK as u8,
+            sdl_index: interface_index as u16,
+            sdl_type: 0,
+            sdl_nlen: 0,
+            sdl_alen: mac.len() as u8,
+            sdl_slen: 0,
+            sdl_data: [0; 12],
+        };
+        sdl.sdl_data[..mac.len()].copy_from_slice(&mac.map(|b| b as libc::c_char));
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                &sdl as *const _ as *const u8,
+                buf.as_mut_ptr().add(offset),
+                sdl_len,
+            );
+        }
+        space
+    }
+
+    /// Test-local, self-contained `RTM_ADD` static-ARP/NDP request buffer
+    /// for a single IPv4 or IPv6 destination.
+    ///
+    /// This mirrors Apple's own shipped `/usr/sbin/arp` and `/usr/sbin/ndp`
+    /// source (`network_cmds`, `main` branch, accessed 2026-08-02):
+    /// - `arp.tproj/arp.c` (`rtmsg()`, lines 781-865; `set()`, 380-460):
+    ///   <https://raw.githubusercontent.com/apple-oss-distributions/network_cmds/main/arp.tproj/arp.c>
+    /// - `ndp.tproj/ndp.c` (`rtmsg()`, lines 1288-1345):
+    ///   <https://raw.githubusercontent.com/apple-oss-distributions/network_cmds/main/ndp.tproj/ndp.c>
+    ///
+    /// Both set `rtm_flags |= RTF_HOST | RTF_STATIC` and
+    /// `rtm_addrs |= RTA_DST | RTA_GATEWAY` for a plain (non-proxy) static
+    /// entry, then append sockaddrs in strict `RTA_DST` -> `RTA_GATEWAY`
+    /// order: an IPv4 destination as `struct sockaddr_inarp` (`arp.c`) or an
+    /// IPv6 destination as `struct sockaddr_in6` (`ndp.c`), followed by a
+    /// from-scratch `AF_LINK sockaddr_dl` gateway carrying the MAC via
+    /// `LLADDR`. This backend has no `sockaddr_inarp` model type (its
+    /// `sin_other`/`sin_tos` tail is only used by ARP's proxy/"publish"
+    /// case, irrelevant to a plain static add); it reuses this file's
+    /// existing `push_sockaddr` `sockaddr_in`/`sockaddr_in6` shape for the
+    /// destination, matching what `build_add_message` already does for IPv4
+    /// route destinations.
+    ///
+    /// Scope: this is **request-construction only** — a byte-layout fixture,
+    /// not a live round trip through a `PF_ROUTE` socket, and it is not
+    /// wired into `NeighborProvider` or any new mutator trait. Apple's own
+    /// source additionally documents that `RTM_DELETE` normally depends on a
+    /// preceding `RTM_GET` to fill in `sdl_type`/`sdl_index`
+    /// ("XXX RTM_DELETE relies on a previous RTM_GET to fill the buffer
+    /// appropriately", `arp.c`); this fixture module deliberately does
+    /// **not** implement or claim that two-step GET-before-DELETE sequence.
+    /// The delete fixture below instead mirrors this codebase's own
+    /// self-contained `RTA_DST`-only `build_delete_message` convention for
+    /// routes. Whether a self-contained delete request (without a prior
+    /// `RTM_GET`) is actually accepted by current macOS for `RTF_LLINFO`
+    /// entries is an open question that only real hardware can answer — see
+    /// the 2026-08-02 researcher AUDIT entry — and is explicitly not proven
+    /// by this fixture.
+    fn static_neighbor_add_request(
+        destination: IpAddr,
+        interface_index: u32,
+        mac: [u8; 6],
+    ) -> Vec<u8> {
+        let mut buf = vec![0u8; RTM_MAXSIZE];
+        let hdr = unsafe { &mut *(buf.as_mut_ptr() as *mut libc::rt_msghdr) };
+        hdr.rtm_version = RTM_VERSION;
+        hdr.rtm_type = RTM_ADD;
+        hdr.rtm_flags = RTF_HOST | RTF_STATIC;
+        hdr.rtm_addrs = RTA_DST | RTA_GATEWAY;
+        hdr.rtm_index = interface_index as u16;
+        let mut offset = mem::size_of::<libc::rt_msghdr>();
+        offset += push_sockaddr(&mut buf, offset, destination);
+        offset += push_mac_gateway(&mut buf, offset, interface_index, mac);
+        hdr.rtm_msglen = offset as u16;
+        buf.truncate(offset);
+        buf
+    }
+
+    /// Test-local, self-contained `RTM_DELETE` static-ARP/NDP request
+    /// buffer: `RTA_DST` only, matching this backend's `build_delete_message`
+    /// convention for routes. See `static_neighbor_add_request`'s doc
+    /// comment for the primary-source citations and the explicit
+    /// GET-before-DELETE caveat this fixture does not resolve.
+    fn static_neighbor_delete_request(destination: IpAddr, interface_index: u32) -> Vec<u8> {
+        let mut buf = vec![0u8; RTM_MAXSIZE];
+        let hdr = unsafe { &mut *(buf.as_mut_ptr() as *mut libc::rt_msghdr) };
+        hdr.rtm_version = RTM_VERSION;
+        hdr.rtm_type = RTM_DELETE;
+        hdr.rtm_flags = RTF_HOST | RTF_STATIC;
+        hdr.rtm_addrs = RTA_DST;
+        hdr.rtm_index = interface_index as u16;
+        let mut offset = mem::size_of::<libc::rt_msghdr>();
+        offset += push_sockaddr(&mut buf, offset, destination);
+        hdr.rtm_msglen = offset as u16;
+        buf.truncate(offset);
+        buf
+    }
+
+    #[test]
+    fn static_neighbor_add_request_fixture_matches_arp_and_ndp_abi_for_ipv4() {
+        let destination: IpAddr = "192.0.2.7".parse().expect("valid IPv4 address");
+        let mac = [0x02, 0x00, 0x00, 0x00, 0x00, 0x11];
+        let buf = static_neighbor_add_request(destination, 9, mac);
+
+        let hdr = unsafe { &*(buf.as_ptr() as *const libc::rt_msghdr) };
+        assert_eq!(hdr.rtm_type, RTM_ADD);
+        assert_eq!(
+            hdr.rtm_flags & (RTF_HOST | RTF_STATIC),
+            RTF_HOST | RTF_STATIC
+        );
+        assert_eq!(hdr.rtm_addrs, RTA_DST | RTA_GATEWAY);
+
+        let dst_offset = mem::size_of::<libc::rt_msghdr>();
+        let sin = unsafe { &*(buf.as_ptr().add(dst_offset) as *const libc::sockaddr_in) };
+        assert_eq!(sin.sin_family, libc::AF_INET as u8);
+        let expected: std::net::Ipv4Addr = "192.0.2.7".parse().expect("valid IPv4 address");
+        assert_eq!(
+            sin.sin_addr.s_addr,
+            u32::from_be_bytes(expected.octets()).to_be()
+        );
+
+        let gw_offset = dst_offset + mem::size_of::<libc::sockaddr_in>();
+        let sdl = unsafe { &*(buf.as_ptr().add(gw_offset) as *const libc::sockaddr_dl) };
+        assert_eq!(sdl.sdl_family, libc::AF_LINK as u8);
+        assert_eq!(sdl.sdl_alen, 6);
+        assert_eq!(
+            &sdl.sdl_data[..6]
+                .iter()
+                .map(|&b| b as u8)
+                .collect::<Vec<_>>(),
+            &mac
+        );
+    }
+
+    #[test]
+    fn static_neighbor_add_request_fixture_matches_arp_and_ndp_abi_for_ipv6() {
+        let destination: IpAddr = "2001:db8::7".parse().expect("valid IPv6 address");
+        let mac = [0x02, 0x00, 0x00, 0x00, 0x00, 0x22];
+        let buf = static_neighbor_add_request(destination, 9, mac);
+
+        let hdr = unsafe { &*(buf.as_ptr() as *const libc::rt_msghdr) };
+        assert_eq!(hdr.rtm_type, RTM_ADD);
+        assert_eq!(
+            hdr.rtm_flags & (RTF_HOST | RTF_STATIC),
+            RTF_HOST | RTF_STATIC
+        );
+        assert_eq!(hdr.rtm_addrs, RTA_DST | RTA_GATEWAY);
+
+        let dst_offset = mem::size_of::<libc::rt_msghdr>();
+        let sin6 = unsafe { &*(buf.as_ptr().add(dst_offset) as *const libc::sockaddr_in6) };
+        assert_eq!(sin6.sin6_family, libc::AF_INET6 as u8);
+        assert_eq!(
+            std::net::Ipv6Addr::from(sin6.sin6_addr.s6_addr),
+            "2001:db8::7".parse::<std::net::Ipv6Addr>().unwrap()
+        );
+
+        let gw_offset = dst_offset + mem::size_of::<libc::sockaddr_in6>();
+        let sdl = unsafe { &*(buf.as_ptr().add(gw_offset) as *const libc::sockaddr_dl) };
+        assert_eq!(sdl.sdl_family, libc::AF_LINK as u8);
+        assert_eq!(sdl.sdl_alen, 6);
+        assert_eq!(
+            &sdl.sdl_data[..6]
+                .iter()
+                .map(|&b| b as u8)
+                .collect::<Vec<_>>(),
+            &mac
+        );
+    }
+
+    #[test]
+    fn static_neighbor_delete_request_fixture_is_self_contained_dst_only_for_ipv4() {
+        let destination: IpAddr = "192.0.2.7".parse().expect("valid IPv4 address");
+        let buf = static_neighbor_delete_request(destination, 9);
+
+        let hdr = unsafe { &*(buf.as_ptr() as *const libc::rt_msghdr) };
+        assert_eq!(hdr.rtm_type, RTM_DELETE);
+        assert_eq!(
+            hdr.rtm_flags & (RTF_HOST | RTF_STATIC),
+            RTF_HOST | RTF_STATIC
+        );
+        assert_eq!(hdr.rtm_addrs, RTA_DST);
+        assert_eq!(
+            buf.len(),
+            mem::size_of::<libc::rt_msghdr>() + mem::size_of::<libc::sockaddr_in>()
+        );
+    }
+
+    #[test]
+    fn static_neighbor_delete_request_fixture_is_self_contained_dst_only_for_ipv6() {
+        let destination: IpAddr = "2001:db8::7".parse().expect("valid IPv6 address");
+        let buf = static_neighbor_delete_request(destination, 9);
+
+        let hdr = unsafe { &*(buf.as_ptr() as *const libc::rt_msghdr) };
+        assert_eq!(hdr.rtm_type, RTM_DELETE);
+        assert_eq!(
+            hdr.rtm_flags & (RTF_HOST | RTF_STATIC),
+            RTF_HOST | RTF_STATIC
+        );
+        assert_eq!(hdr.rtm_addrs, RTA_DST);
+        assert_eq!(
+            buf.len(),
+            mem::size_of::<libc::rt_msghdr>() + mem::size_of::<libc::sockaddr_in6>()
+        );
+    }
+
     #[test]
     fn pf_route_ipv6_neighbor_messages_preserve_identity_and_events() {
         fn message(message_type: u8) -> (Vec<libc::c_long>, usize) {
