@@ -1708,9 +1708,7 @@ fn interface_sdl_type(interface_index: u32) -> Result<libc::c_uchar> {
     let mut head: *mut libc::ifaddrs = std::ptr::null_mut();
 
     if unsafe { libc::getifaddrs(&mut head) } != 0 {
-        return Err(Error::Platform(io_error_code(
-            &io::Error::last_os_error(),
-        )));
+        return Err(Error::Platform(io_error_code(&io::Error::last_os_error())));
     }
 
     let result = unsafe {
@@ -1920,7 +1918,7 @@ impl NeighborMutator for DarwinBackend {
         let destination = ip_address_to_std(neighbor.address);
         let mac = neighbor.mac.octets();
         let sdl_type = interface_sdl_type(interface_index)?;
-        
+
         self.runtime.block_on(async {
             let message = static_neighbor_add_request(
                 destination,
