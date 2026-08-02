@@ -1900,7 +1900,7 @@ impl NeighborMutator for DarwinBackend {
     /// the ack alone — the same shape as `LinuxBackend`'s and
     /// `WindowsBackend`'s `add_static_neighbor`. The gateway's `sdl_type` is
     /// looked up from the real interface via `interface_sdl_type`, not
-    /// synthesized as `0` — see [`push_mac_gateway`]'s doc comment for why a
+    /// synthesized as `0` — see `push_mac_gateway`'s doc comment for why a
     /// zero `sdl_type` was the confirmed cause of a live elevated-CI failure.
     fn add_static_neighbor(&self, neighbor: Self::StaticNeighbor) -> Result<Self::NeighborEntry> {
         let interface_index =
