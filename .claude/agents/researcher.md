@@ -28,11 +28,12 @@ Read first:
 
 @.claude/rules/research.md
 @.claude/rules/audit.md
+@.claude/rules/git.md
 
 Use `cargo test`, `cargo clippy`, `cargo doc`, and `cargo fmt` only when
 verification is explicitly requested. Never run destructive Git commands,
-broad deletion, or network-changing commands (see `.claude/rules/git.md`,
-also enforced via `permissions.deny`).
+broad deletion, or network-changing commands (also enforced via
+`permissions.deny`).
 
 ## Research output
 
