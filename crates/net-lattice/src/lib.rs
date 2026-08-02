@@ -2059,7 +2059,11 @@ mod tests {
         );
         restore.route = None;
 
-        let selected_observed = (0..12).any(|_| {
+        // Widened from the usual 3s (12 * 250ms) polling window used
+        // elsewhere in this module: Windows IP Helper route-change
+        // notification delivery has been observed to lag noticeably behind
+        // 3s under CI load, unlike Linux Netlink/macOS PF_ROUTE.
+        let selected_observed = (0..40).any(|_| {
             matches!(
                 selected_watcher.recv_timeout(Duration::from_millis(250)),
                 Ok(Some(Event::Route { id, kind: ChangeKind::Removed })) if id == watched_id
@@ -2085,7 +2089,7 @@ mod tests {
         );
     }
 
-    /// Polls an [`EventStream`] for up to 3 seconds looking for a
+    /// Polls an [`EventStream`] for up to 10 seconds looking for a
     /// `Event::Route` notification matching `id`, mirroring the backend
     /// crate's `tokio_route_event` helper but for the facade's
     /// runtime-agnostic `EventStream` instead of a native
@@ -2100,7 +2104,10 @@ mod tests {
 
         let waker = Waker::noop();
         let mut context = Context::from_waker(waker);
-        for _ in 0..12 {
+        // Widened to 10s, matching the corresponding sync polling window
+        // above (Windows IP Helper notification delivery has been observed
+        // to lag noticeably behind 3s under CI load).
+        for _ in 0..40 {
             match Pin::new(&mut *watcher).poll_next(&mut context) {
                 Poll::Ready(Some(Ok(Event::Route { id: event_id, .. }))) if event_id == id => {
                     return true;
@@ -2248,7 +2255,9 @@ mod tests {
         );
         restore.address = None;
 
-        let selected_observed = (0..12).any(|_| {
+        // Widened from the usual 3s (12 * 250ms) polling window; see the
+        // matching comment on the route event test's `selected_observed`.
+        let selected_observed = (0..40).any(|_| {
             matches!(
                 selected_watcher.recv_timeout(Duration::from_millis(250)),
                 Ok(Some(Event::Address { id, kind: ChangeKind::Removed })) if id == watched_id
@@ -2290,7 +2299,10 @@ mod tests {
 
         let waker = Waker::noop();
         let mut context = Context::from_waker(waker);
-        for _ in 0..12 {
+        // Widened to 10s, matching the corresponding sync polling window
+        // above (Windows IP Helper notification delivery has been observed
+        // to lag noticeably behind 3s under CI load).
+        for _ in 0..40 {
             match Pin::new(&mut *watcher).poll_next(&mut context) {
                 Poll::Ready(Some(Ok(Event::Address { id: event_id, .. }))) if event_id == id => {
                     return true;
