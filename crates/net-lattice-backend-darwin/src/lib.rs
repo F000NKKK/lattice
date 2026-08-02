@@ -26,13 +26,13 @@ use net_lattice_model::interface::{
     AdminState, DesiredAdminState, Interface, InterfaceConfig, InterfaceKind, OperationalState,
 };
 use net_lattice_model::mac::MacAddress;
-use net_lattice_model::neighbor::{NeighborEntry, NeighborId, NeighborState};
+use net_lattice_model::neighbor::{NeighborEntry, NeighborId, NeighborState, StaticNeighbor};
 use net_lattice_model::route::{Route, RouteId};
 use net_lattice_model::{IpAddress, Network};
 use net_lattice_platform::{
     AddressMutator, AddressProvider, Capability, CapabilityProvider, DnsMutator, DnsProvider,
-    EventProvider, EventReceiver, InterfaceMutator, InterfaceProvider, NeighborProvider,
-    RouteProvider,
+    EventProvider, EventReceiver, InterfaceMutator, InterfaceProvider, NeighborMutator,
+    NeighborProvider, RouteProvider,
 };
 #[cfg(feature = "async")]
 use net_lattice_platform::{TokioEventProvider, TokioEventReceiver};
@@ -1558,6 +1558,28 @@ impl NeighborProvider for DarwinBackend {
             }
         }
         Ok(neighbors)
+    }
+}
+
+/// Stub `NeighborMutator` implementation. Static ARP/NDP add/delete request
+/// encoding over `PF_ROUTE` (`RTF_LLINFO | RTF_STATIC`) is not yet proven on
+/// this backend — the feasibility gate in ADR-0001 (deterministic byte-level
+/// fixtures plus an isolated privileged round trip) is still open (Stage
+/// 0.17 Slice C). `DarwinBackend::capabilities` never advertises
+/// `Capability::NEIGHBOR_MUTATION`, so the `net-lattice` facade's preflight
+/// rejects any plan requiring it before this method is ever reached; both
+/// methods return [`Error::Unsupported`] defensively for a caller that
+/// bypasses the facade and invokes the trait directly.
+impl NeighborMutator for DarwinBackend {
+    type StaticNeighbor = StaticNeighbor;
+    type NeighborEntry = NeighborEntry;
+
+    fn add_static_neighbor(&self, _neighbor: Self::StaticNeighbor) -> Result<Self::NeighborEntry> {
+        Err(Error::Unsupported)
+    }
+
+    fn remove_static_neighbor(&self, _neighbor: Self::StaticNeighbor) -> Result<()> {
+        Err(Error::Unsupported)
     }
 }
 
