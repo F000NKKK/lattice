@@ -8,7 +8,8 @@
 //!
 //! Stage 0.4 added `InterfaceProvider`; Stage 0.5 added `DnsProvider`;
 //! Stage 0.6 added `NeighborProvider`; Stage 0.7 added `AddressProvider`;
-//! Stage 0.8 added `EventProvider`; Stage 0.16 adds `InterfaceMutator`.
+//! Stage 0.8 added `EventProvider`; Stage 0.16 added `InterfaceMutator`;
+//! Stage 0.17 adds `NeighborMutator` and `Capability::NEIGHBOR_MUTATION`.
 
 mod address_mutator;
 mod address_provider;
@@ -18,6 +19,7 @@ mod dns_provider;
 mod event_provider;
 mod interface_mutator;
 mod interface_provider;
+mod neighbor_mutator;
 mod neighbor_provider;
 mod route_provider;
 #[cfg(feature = "async")]
@@ -31,6 +33,7 @@ pub use dns_provider::DnsProvider;
 pub use event_provider::{EventProvider, EventReceiver, EventSender};
 pub use interface_mutator::InterfaceMutator;
 pub use interface_provider::InterfaceProvider;
+pub use neighbor_mutator::NeighborMutator;
 pub use neighbor_provider::NeighborProvider;
 pub use route_provider::RouteProvider;
 #[cfg(feature = "async")]

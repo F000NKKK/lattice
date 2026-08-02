@@ -48,6 +48,12 @@ bitflags::bitflags! {
         const NEIGHBOR_MONITORING = 1 << 8;
         /// The backend delivers native interface-address change notifications.
         const ADDRESS_MONITORING = 1 << 9;
+        /// The backend can add and remove static ARP/NDP neighbor entries
+        /// through a supported operating-system mechanism.
+        ///
+        /// This is a feature gate, not proof that the current process has the
+        /// privilege or policy permission to change a neighbor entry.
+        const NEIGHBOR_MUTATION = 1 << 10;
         /// Every currently modeled event domain is deliverable by the
         /// backend. This is the capability required by an all-domain
         /// [`EventProvider::watch`](crate::EventProvider::watch) request.
@@ -91,5 +97,15 @@ mod tests {
             | Capability::ADDRESS_MONITORING;
         assert!(!partial.contains(Capability::MONITORING));
         assert!((partial | Capability::NEIGHBOR_MONITORING).contains(Capability::MONITORING));
+    }
+
+    #[test]
+    fn neighbor_mutation_is_a_distinct_bit_outside_the_monitoring_aggregate() {
+        assert_ne!(
+            Capability::NEIGHBOR_MUTATION.bits(),
+            Capability::NEIGHBOR_MONITORING.bits()
+        );
+        assert!(!Capability::MONITORING.contains(Capability::NEIGHBOR_MUTATION));
+        assert!(!Capability::NEIGHBOR_MUTATION.contains(Capability::NEIGHBOR_MONITORING));
     }
 }

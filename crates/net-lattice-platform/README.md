@@ -7,7 +7,9 @@ public facade and native platform backends.
 
 - generic inspection and mutation provider traits using associated types,
   including `InterfaceMutator` for desired administrative-state and MTU
-  patches;
+  patches, and `NeighborMutator` for static ARP/NDP entry add/remove intent
+  (defined at the model/platform layer only as of Stage 0.17 Slice B; no
+  backend implements it yet and the facade does not forward to it);
 - runtime `Capability` reporting;
 - synchronous event sender/receiver contracts;
 - optional native Tokio watcher contracts behind the `async` feature.
@@ -41,3 +43,6 @@ Monitoring is also domain-specific: `ROUTE_MONITORING`,
 mean that the backend has a native delivery path for that domain.
 `MONITORING` is their all-domain aggregate, not merely proof that some watcher
 can be constructed.
+
+`Capability::NEIGHBOR_MUTATION` gates static ARP/NDP add/remove support and is
+distinct from `NEIGHBOR_MONITORING`. It is not advertised by any backend yet.
