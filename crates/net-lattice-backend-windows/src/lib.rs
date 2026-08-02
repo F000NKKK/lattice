@@ -23,13 +23,13 @@ use net_lattice_model::interface::{
     AdminState, DesiredAdminState, Interface, InterfaceConfig, InterfaceKind, OperationalState,
 };
 use net_lattice_model::mac::MacAddress;
-use net_lattice_model::neighbor::{NeighborEntry, NeighborId, NeighborState};
+use net_lattice_model::neighbor::{NeighborEntry, NeighborId, NeighborState, StaticNeighbor};
 use net_lattice_model::route::{Route, RouteId};
 use net_lattice_model::{IpAddress, Network};
 use net_lattice_platform::{
     AddressMutator, AddressProvider, Capability, CapabilityProvider, DnsMutator, DnsProvider,
     EventProvider, EventReceiver, EventSender, InterfaceMutator, InterfaceProvider,
-    NeighborProvider, RouteProvider,
+    NeighborMutator, NeighborProvider, RouteProvider,
 };
 #[cfg(feature = "async")]
 use net_lattice_platform::{TokioEventProvider, TokioEventReceiver, TokioEventSender};
@@ -1039,6 +1039,28 @@ impl NeighborProvider for WindowsBackend {
             unsafe { FreeMibTable(table.cast()) };
             Ok(neighbors)
         })
+    }
+}
+
+/// Stub `NeighborMutator` implementation. Windows exposes
+/// `CreateIpNetEntry2`/`DeleteIpNetEntry2` over `MIB_IPNET_ROW2` (see
+/// ADR-0001), but live CRUD, native error mapping, and an isolated elevated
+/// round trip are not yet implemented for this backend (Stage 0.17 Slice C
+/// remains outstanding for Windows). `WindowsBackend::capabilities` never
+/// advertises `Capability::NEIGHBOR_MUTATION`, so the `net-lattice` facade's
+/// preflight rejects any plan requiring it before this method is ever
+/// reached; both methods return [`Error::Unsupported`] defensively for a
+/// caller that bypasses the facade and invokes the trait directly.
+impl NeighborMutator for WindowsBackend {
+    type StaticNeighbor = StaticNeighbor;
+    type NeighborEntry = NeighborEntry;
+
+    fn add_static_neighbor(&self, _neighbor: Self::StaticNeighbor) -> Result<Self::NeighborEntry> {
+        Err(Error::Unsupported)
+    }
+
+    fn remove_static_neighbor(&self, _neighbor: Self::StaticNeighbor) -> Result<()> {
+        Err(Error::Unsupported)
     }
 }
 
