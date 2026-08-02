@@ -523,12 +523,10 @@ impl<B: LatticeBackend> Lattice<B> {
                 Mutation::RemoveAddress(address) => self.remove_address(address.clone()),
 
                 Mutation::AddStaticNeighbor(neighbor) => {
-                    self.add_static_neighbor(neighbor.clone()).map(|_| ())
+                    self.add_static_neighbor(*neighbor).map(|_| ())
                 }
 
-                Mutation::RemoveStaticNeighbor(neighbor) => {
-                    self.remove_static_neighbor(neighbor.clone())
-                }
+                Mutation::RemoveStaticNeighbor(neighbor) => self.remove_static_neighbor(*neighbor),
 
                 Mutation::SetDnsConfig(config) => self.set_dns_config(config.clone()).map(|_| ()),
 
