@@ -33,22 +33,25 @@ use net_lattice_platform::{
 };
 #[cfg(feature = "async")]
 use net_lattice_platform::{TokioEventProvider, TokioEventReceiver, TokioEventSender};
-use windows::Win32::Foundation::{ERROR_NOT_FOUND, HANDLE};
+use windows::Win32::Foundation::{
+    ERROR_ACCESS_DENIED, ERROR_NOT_FOUND, ERROR_NOT_SUPPORTED, ERROR_OBJECT_ALREADY_EXISTS, HANDLE,
+    WIN32_ERROR,
+};
 use windows::Win32::NetworkManagement::IpHelper::{
-    CancelMibChangeNotify2, ConvertInterfaceLuidToIndex, CreateIpForwardEntry2,
+    CancelMibChangeNotify2, ConvertInterfaceLuidToIndex, CreateIpForwardEntry2, CreateIpNetEntry2,
     CreateUnicastIpAddressEntry, DNS_INTERFACE_SETTINGS, DNS_INTERFACE_SETTINGS_VERSION1,
     DNS_SETTING_NAMESERVER, DNS_SETTING_SEARCHLIST, DNS_SETTINGS, DNS_SETTINGS_VERSION1,
-    DeleteIpForwardEntry2, DeleteUnicastIpAddressEntry, FreeMibTable, GAA_FLAG_SKIP_ANYCAST,
-    GAA_FLAG_SKIP_FRIENDLY_NAME, GAA_FLAG_SKIP_MULTICAST, GAA_FLAG_SKIP_UNICAST,
-    GetAdaptersAddresses, GetIfEntry, GetIfEntry2, GetIfTable2, GetIpForwardTable2,
-    GetIpInterfaceEntry, GetIpNetTable2, GetUnicastIpAddressEntry, GetUnicastIpAddressTable,
-    IP_ADAPTER_ADDRESSES_LH, InitializeIpForwardEntry, InitializeUnicastIpAddressEntry,
-    MIB_IF_ADMIN_STATUS_DOWN, MIB_IF_ADMIN_STATUS_UP, MIB_IF_ROW2, MIB_IF_TABLE2, MIB_IFROW,
-    MIB_IPFORWARD_ROW2, MIB_IPFORWARD_TABLE2, MIB_IPINTERFACE_ROW, MIB_IPNET_ROW2,
-    MIB_IPNET_TABLE2, MIB_NOTIFICATION_TYPE, MIB_UNICASTIPADDRESS_ROW, MIB_UNICASTIPADDRESS_TABLE,
-    MibAddInstance, MibDeleteInstance, MibInitialNotification, NotifyIpInterfaceChange,
-    NotifyRouteChange2, NotifyUnicastIpAddressChange, SetDnsSettings, SetIfEntry,
-    SetInterfaceDnsSettings, SetIpInterfaceEntry,
+    DeleteIpForwardEntry2, DeleteIpNetEntry2, DeleteUnicastIpAddressEntry, FreeMibTable,
+    GAA_FLAG_SKIP_ANYCAST, GAA_FLAG_SKIP_FRIENDLY_NAME, GAA_FLAG_SKIP_MULTICAST,
+    GAA_FLAG_SKIP_UNICAST, GetAdaptersAddresses, GetIfEntry, GetIfEntry2, GetIfTable2,
+    GetIpForwardTable2, GetIpInterfaceEntry, GetIpNetTable2, GetUnicastIpAddressEntry,
+    GetUnicastIpAddressTable, IP_ADAPTER_ADDRESSES_LH, InitializeIpForwardEntry,
+    InitializeUnicastIpAddressEntry, MIB_IF_ADMIN_STATUS_DOWN, MIB_IF_ADMIN_STATUS_UP, MIB_IF_ROW2,
+    MIB_IF_TABLE2, MIB_IFROW, MIB_IPFORWARD_ROW2, MIB_IPFORWARD_TABLE2, MIB_IPINTERFACE_ROW,
+    MIB_IPNET_ROW2, MIB_IPNET_TABLE2, MIB_NOTIFICATION_TYPE, MIB_UNICASTIPADDRESS_ROW,
+    MIB_UNICASTIPADDRESS_TABLE, MibAddInstance, MibDeleteInstance, MibInitialNotification,
+    NotifyIpInterfaceChange, NotifyRouteChange2, NotifyUnicastIpAddressChange, SetDnsSettings,
+    SetIfEntry, SetInterfaceDnsSettings, SetIpInterfaceEntry,
 };
 use windows::Win32::NetworkManagement::Ndis::{
     IfOperStatusDormant, IfOperStatusDown, IfOperStatusLowerLayerDown, IfOperStatusUp,
@@ -1042,25 +1045,148 @@ impl NeighborProvider for WindowsBackend {
     }
 }
 
-/// Stub `NeighborMutator` implementation. Windows exposes
-/// `CreateIpNetEntry2`/`DeleteIpNetEntry2` over `MIB_IPNET_ROW2` (see
-/// ADR-0001), but live CRUD, native error mapping, and an isolated elevated
-/// round trip are not yet implemented for this backend (Stage 0.17 Slice C
-/// remains outstanding for Windows). `WindowsBackend::capabilities` never
-/// advertises `Capability::NEIGHBOR_MUTATION`, so the `net-lattice` facade's
-/// preflight rejects any plan requiring it before this method is ever
-/// reached; both methods return [`Error::Unsupported`] defensively for a
-/// caller that bypasses the facade and invokes the trait directly.
+/// Builds the `MIB_IPNET_ROW2` input required by `CreateIpNetEntry2` for a
+/// static ARP/NDP entry, per ADR-0001. `PhysicalAddressLength` is always 6
+/// (the only length [`MacAddress`] represents) and `State` is always
+/// `NlnsPermanent`, since this stage only creates caller-configured static
+/// mappings.
+fn static_neighbor_create_row(
+    interface_index: u32,
+    address: IpAddr,
+    mac: [u8; 6],
+) -> MIB_IPNET_ROW2 {
+    let mut row = MIB_IPNET_ROW2 {
+        InterfaceIndex: interface_index,
+        Address: ip_to_sockaddr_inet(address),
+        PhysicalAddressLength: mac.len() as u32,
+        State: NlnsPermanent,
+        ..Default::default()
+    };
+    row.PhysicalAddress[..mac.len()].copy_from_slice(&mac);
+    row
+}
+
+/// Builds the documented identity-only input for `DeleteIpNetEntry2`. Per
+/// Microsoft Learn, delete selects an entry by interface and address only;
+/// the physical address and state fields are not part of this request.
+fn static_neighbor_delete_row(interface_index: u32, address: IpAddr) -> MIB_IPNET_ROW2 {
+    MIB_IPNET_ROW2 {
+        InterfaceIndex: interface_index,
+        Address: ip_to_sockaddr_inet(address),
+        ..Default::default()
+    }
+}
+
+/// Guards `remove_static_neighbor` against deleting a present but
+/// dynamically learned (non-permanent) ARP/NDP cache entry — mirrors
+/// Linux's `ensure_removable_static_neighbor_state`. This is the safety
+/// property ADR-0001 exists for: `DeleteIpNetEntry2`'s own contract does not
+/// distinguish "existing but dynamic" from "existing and static," so only a
+/// currently `Permanent` entry may proceed to the native delete call.
+fn ensure_removable_static_neighbor_state(state: NeighborState) -> Result<()> {
+    if state == NeighborState::Permanent {
+        Ok(())
+    } else {
+        Err(Error::InvalidState)
+    }
+}
+
+/// Maps a `CreateIpNetEntry2`/`DeleteIpNetEntry2` native status to the
+/// shared `Error` model.
+///
+/// Per Microsoft Learn (accessed 2026-08-02):
+/// - `CreateIpNetEntry2`:
+///   <https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-createipnetentry2>
+///   documents `ERROR_ACCESS_DENIED` (caller lacks the required privilege),
+///   `ERROR_INVALID_PARAMETER`, `ERROR_NOT_FOUND` (the interface was not
+///   found), `ERROR_NOT_SUPPORTED` (the address family's stack is not
+///   present on the interface), and `ERROR_OBJECT_ALREADY_EXISTS` (a
+///   neighbor entry for that address already exists on the interface).
+/// - `DeleteIpNetEntry2`:
+///   <https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-deleteipnetentry2>
+///   documents `ERROR_ACCESS_DENIED`, `ERROR_INVALID_PARAMETER`,
+///   `ERROR_NOT_FOUND` (the *interface* was not found — confirmed against
+///   the live page 2026-08-02: it does not document `ERROR_NOT_FOUND` for a
+///   missing neighbor entry, only "The specified interface could not be
+///   found"), and `ERROR_NOT_SUPPORTED`. It does not document
+///   `ERROR_OBJECT_ALREADY_EXISTS` at all, since that condition cannot arise
+///   on delete. `remove_static_neighbor` never reaches this ambiguity in
+///   practice: it always performs its own pre-delete existence/state read
+///   via [`NeighborProvider::neighbors`] and returns [`Error::NotFound`]
+///   from that read before the native call is ever made, so an
+///   entry-not-found `DeleteIpNetEntry2` status is not relied upon here —
+///   this remains unverified against a live, concurrently-racing kernel
+///   because no Windows host was available to run the elevated round trip
+///   in this environment.
+///
+/// Any status not covered by the above falls back to
+/// `Error::Platform(PlatformErrorCode::Windows(status.0))`.
+fn static_neighbor_mutation_error(status: WIN32_ERROR) -> Error {
+    match status {
+        ERROR_ACCESS_DENIED => Error::PermissionDenied,
+        ERROR_NOT_FOUND => Error::NotFound,
+        ERROR_OBJECT_ALREADY_EXISTS => Error::AlreadyExists,
+        ERROR_NOT_SUPPORTED => Error::Unsupported,
+        other => Error::Platform(PlatformErrorCode::Windows(other.0)),
+    }
+}
+
 impl NeighborMutator for WindowsBackend {
     type StaticNeighbor = StaticNeighbor;
     type NeighborEntry = NeighborEntry;
 
-    fn add_static_neighbor(&self, _neighbor: Self::StaticNeighbor) -> Result<Self::NeighborEntry> {
-        Err(Error::Unsupported)
+    /// Submits a static ARP/NDP entry via `CreateIpNetEntry2` with
+    /// `State: NlnsPermanent`, then re-reads the neighbor table so the
+    /// returned entry reflects what IP Helper actually holds
+    /// (`ReadAfterWrite`, per ADR-0001) rather than a synthesized guess. See
+    /// [`static_neighbor_mutation_error`] for the native error mapping.
+    fn add_static_neighbor(&self, neighbor: Self::StaticNeighbor) -> Result<Self::NeighborEntry> {
+        let interface_index = neighbor.interface_id.value() as u32;
+        let address = ip_address_to_std(neighbor.address);
+        let row = static_neighbor_create_row(interface_index, address, neighbor.mac.octets());
+
+        let status = unsafe { CreateIpNetEntry2(&row) };
+        if status.0 != 0 {
+            return Err(static_neighbor_mutation_error(status));
+        }
+
+        self.neighbors()?
+            .into_iter()
+            .find(|entry| {
+                entry.interface_index == interface_index && entry.address == neighbor.address
+            })
+            .ok_or(Error::InvalidState)
     }
 
-    fn remove_static_neighbor(&self, _neighbor: Self::StaticNeighbor) -> Result<()> {
-        Err(Error::Unsupported)
+    /// Deletes a static entry through `DeleteIpNetEntry2`, but only after
+    /// confirming through [`NeighborProvider::neighbors`] that a matching
+    /// `(interface_id, address)` entry currently exists and is
+    /// `NeighborState::Permanent`. This is the safety property ADR-0001
+    /// exists for: a present but dynamically learned (non-permanent)
+    /// ARP/NDP cache entry is never deleted by this call. A missing target
+    /// returns [`Error::NotFound`]; a present but non-permanent target
+    /// returns [`Error::InvalidState`].
+    fn remove_static_neighbor(&self, neighbor: Self::StaticNeighbor) -> Result<()> {
+        let interface_index = neighbor.interface_id.value() as u32;
+
+        let observed = self
+            .neighbors()?
+            .into_iter()
+            .find(|entry| {
+                entry.interface_index == interface_index && entry.address == neighbor.address
+            })
+            .ok_or(Error::NotFound)?;
+
+        ensure_removable_static_neighbor_state(observed.state)?;
+
+        let address = ip_address_to_std(neighbor.address);
+        let row = static_neighbor_delete_row(interface_index, address);
+
+        let status = unsafe { DeleteIpNetEntry2(&row) };
+        if status.0 != 0 {
+            return Err(static_neighbor_mutation_error(status));
+        }
+        Ok(())
     }
 }
 
@@ -1484,7 +1610,11 @@ impl CapabilityProvider for WindowsBackend {
     /// address notifications, but not neighbor-table notifications; therefore
     /// this backend intentionally does not advertise aggregate `MONITORING`.
     /// `VRF`/`NAMESPACES` remain unset because Net Lattice does not implement
-    /// either domain yet.
+    /// either domain yet. `NEIGHBOR_MUTATION` is advertised because
+    /// `CreateIpNetEntry2`/`DeleteIpNetEntry2` now back a real
+    /// `NeighborMutator` implementation (ADR-0001); this does not imply a
+    /// native neighbor-change watcher, which IP Helper still does not
+    /// provide.
     fn capabilities(&self) -> Capability {
         Capability::IPV6
             | Capability::ROUTE_MONITORING
@@ -1493,6 +1623,7 @@ impl CapabilityProvider for WindowsBackend {
             | Capability::DNS_MUTATION
             | Capability::INTERFACE_ADMIN_STATE
             | Capability::INTERFACE_MTU
+            | Capability::NEIGHBOR_MUTATION
     }
 }
 
@@ -1786,9 +1917,6 @@ impl DnsMutator for WindowsBackend {
 mod tests {
     use super::*;
     use net_lattice_ip::{Ipv4Address, Ipv4Network, Ipv4PrefixLength};
-    use windows::Win32::Foundation::{
-        ERROR_ACCESS_DENIED, ERROR_NOT_SUPPORTED, ERROR_OBJECT_ALREADY_EXISTS, WIN32_ERROR,
-    };
     use windows::Win32::NetworkManagement::IpHelper::MibParameterNotification;
 
     /// Serializes ignored native tests in this module. Each one mutates or
