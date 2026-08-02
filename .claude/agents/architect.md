@@ -12,6 +12,10 @@ Read root `AGENTS.md`, `index.md`, both architecture documents, the active
 dependency direction from model through platform, facade, and native
 backends.
 
+## Rules
+
+@.claude/rules/audit.md
+
 Deliver:
 
 - current constraints and invariants with exact source references;

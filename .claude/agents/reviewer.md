@@ -12,6 +12,11 @@ rustdoc, tests, all three backend paths, CI, package metadata, and affected
 documentation. Review for correctness, compatibility, platform parity,
 privilege safety, cleanup, cancellation/failure boundaries, and stale docs.
 
+## Rules
+
+@.claude/rules/ci.md
+@.claude/rules/files.md
+
 Do not reuse the implementer's claim as evidence: inspect the diff and
 verification results independently (re-run the relevant `cargo test` /
 `cargo clippy` / `cargo fmt --check` / `cargo doc` commands yourself where
