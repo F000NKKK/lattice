@@ -1,8 +1,7 @@
 # Git rules
 
-Ported from `.codex/rules/git.md`. The destructive-command restrictions below
-are also enforced mechanically via `permissions.deny` in
-`.claude/settings.json`, not just as prose here.
+The destructive-command restrictions below are also enforced mechanically
+via `permissions.deny` in `.claude/settings.json`, not just as prose here.
 
 - Inspect `git status --short` and `git diff --check` before and after each
   bounded task.
