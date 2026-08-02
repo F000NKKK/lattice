@@ -2622,8 +2622,6 @@ mod tests {
 
         let gw_offset = dst_offset + mem::size_of::<libc::sockaddr_in>();
         let sdl = unsafe { &*(buf.as_ptr().add(gw_offset) as *const libc::sockaddr_dl) };
-        let gw_offset = dst_offset + mem::size_of::<libc::sockaddr_in>();
-        let sdl = unsafe { &*(buf.as_ptr().add(gw_offset) as *const libc::sockaddr_dl) };
 
         assert_eq!(sdl.sdl_family, libc::AF_LINK as u8);
         assert_eq!(sdl.sdl_alen, 6);
