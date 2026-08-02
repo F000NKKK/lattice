@@ -2394,16 +2394,12 @@ mod tests {
     }
 
     #[test]
-    fn static_neighbor_delete_request_fixture_is_self_contained_dst_only_for_ipv4() {
+    fn static_neighbor_get_request_fixture_is_dst_only_for_ipv4() {
         let destination: IpAddr = "192.0.2.7".parse().expect("valid IPv4 address");
-        let buf = static_neighbor_delete_request(destination, 9);
+        let buf = static_neighbor_get_request(destination, 9);
 
         let hdr = unsafe { &*(buf.as_ptr() as *const libc::rt_msghdr) };
-        assert_eq!(hdr.rtm_type, RTM_DELETE);
-        assert_eq!(
-            hdr.rtm_flags & (RTF_HOST | RTF_STATIC),
-            RTF_HOST | RTF_STATIC
-        );
+        assert_eq!(hdr.rtm_type, libc::RTM_GET as u8);
         assert_eq!(hdr.rtm_addrs, RTA_DST);
         assert_eq!(
             buf.len(),
@@ -2412,9 +2408,24 @@ mod tests {
     }
 
     #[test]
-    fn static_neighbor_delete_request_fixture_is_self_contained_dst_only_for_ipv6() {
+    fn static_neighbor_get_request_fixture_is_dst_only_for_ipv6() {
         let destination: IpAddr = "2001:db8::7".parse().expect("valid IPv6 address");
-        let buf = static_neighbor_delete_request(destination, 9);
+        let buf = static_neighbor_get_request(destination, 9);
+
+        let hdr = unsafe { &*(buf.as_ptr() as *const libc::rt_msghdr) };
+        assert_eq!(hdr.rtm_type, libc::RTM_GET as u8);
+        assert_eq!(hdr.rtm_addrs, RTA_DST);
+        assert_eq!(
+            buf.len(),
+            mem::size_of::<libc::rt_msghdr>() + mem::size_of::<libc::sockaddr_in6>()
+        );
+    }
+
+    #[test]
+    fn static_neighbor_delete_request_fixture_reuses_the_get_replys_gateway_for_ipv4() {
+        let destination: IpAddr = "192.0.2.7".parse().expect("valid IPv4 address");
+        let mac = [0x02, 0x00, 0x00, 0x00, 0x00, 0x33];
+        let buf = static_neighbor_delete_request(destination, 9, mac);
 
         let hdr = unsafe { &*(buf.as_ptr() as *const libc::rt_msghdr) };
         assert_eq!(hdr.rtm_type, RTM_DELETE);
@@ -2422,10 +2433,79 @@ mod tests {
             hdr.rtm_flags & (RTF_HOST | RTF_STATIC),
             RTF_HOST | RTF_STATIC
         );
-        assert_eq!(hdr.rtm_addrs, RTA_DST);
+        // The Apple-documented delete request is not `RTA_DST`-only: it
+        // reuses the kernel's prior `RTM_GET` reply, which also carries a
+        // gateway (`sockaddr_dl`) sockaddr for the matched entry.
+        assert_eq!(hdr.rtm_addrs, RTA_DST | RTA_GATEWAY);
+
+        let dst_offset = mem::size_of::<libc::rt_msghdr>();
+        let sin = unsafe { &*(buf.as_ptr().add(dst_offset) as *const libc::sockaddr_in) };
+        assert_eq!(sin.sin_family, libc::AF_INET as u8);
+        let expected: std::net::Ipv4Addr = "192.0.2.7".parse().expect("valid IPv4 address");
+        assert_eq!(
+            sin.sin_addr.s_addr,
+            u32::from_be_bytes(expected.octets()).to_be()
+        );
+
+        let gw_offset = dst_offset + mem::size_of::<libc::sockaddr_in>();
+        let sdl = unsafe { &*(buf.as_ptr().add(gw_offset) as *const libc::sockaddr_dl) };
+        assert_eq!(sdl.sdl_family, libc::AF_LINK as u8);
+        assert_eq!(sdl.sdl_index, 9);
+        assert_eq!(sdl.sdl_alen, 6);
+        assert_eq!(
+            &sdl.sdl_data[..6]
+                .iter()
+                .map(|&b| b as u8)
+                .collect::<Vec<_>>(),
+            &mac
+        );
         assert_eq!(
             buf.len(),
-            mem::size_of::<libc::rt_msghdr>() + mem::size_of::<libc::sockaddr_in6>()
+            mem::size_of::<libc::rt_msghdr>()
+                + mem::size_of::<libc::sockaddr_in>()
+                + mem::size_of::<libc::sockaddr_dl>()
+        );
+    }
+
+    #[test]
+    fn static_neighbor_delete_request_fixture_reuses_the_get_replys_gateway_for_ipv6() {
+        let destination: IpAddr = "2001:db8::7".parse().expect("valid IPv6 address");
+        let mac = [0x02, 0x00, 0x00, 0x00, 0x00, 0x44];
+        let buf = static_neighbor_delete_request(destination, 9, mac);
+
+        let hdr = unsafe { &*(buf.as_ptr() as *const libc::rt_msghdr) };
+        assert_eq!(hdr.rtm_type, RTM_DELETE);
+        assert_eq!(
+            hdr.rtm_flags & (RTF_HOST | RTF_STATIC),
+            RTF_HOST | RTF_STATIC
+        );
+        assert_eq!(hdr.rtm_addrs, RTA_DST | RTA_GATEWAY);
+
+        let dst_offset = mem::size_of::<libc::rt_msghdr>();
+        let sin6 = unsafe { &*(buf.as_ptr().add(dst_offset) as *const libc::sockaddr_in6) };
+        assert_eq!(sin6.sin6_family, libc::AF_INET6 as u8);
+        assert_eq!(
+            std::net::Ipv6Addr::from(sin6.sin6_addr.s6_addr),
+            "2001:db8::7".parse::<std::net::Ipv6Addr>().unwrap()
+        );
+
+        let gw_offset = dst_offset + mem::size_of::<libc::sockaddr_in6>();
+        let sdl = unsafe { &*(buf.as_ptr().add(gw_offset) as *const libc::sockaddr_dl) };
+        assert_eq!(sdl.sdl_family, libc::AF_LINK as u8);
+        assert_eq!(sdl.sdl_index, 9);
+        assert_eq!(sdl.sdl_alen, 6);
+        assert_eq!(
+            &sdl.sdl_data[..6]
+                .iter()
+                .map(|&b| b as u8)
+                .collect::<Vec<_>>(),
+            &mac
+        );
+        assert_eq!(
+            buf.len(),
+            mem::size_of::<libc::rt_msghdr>()
+                + mem::size_of::<libc::sockaddr_in6>()
+                + mem::size_of::<libc::sockaddr_dl>()
         );
     }
 
