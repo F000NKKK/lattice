@@ -13,6 +13,16 @@
   CONTRIBUTING review when their status or support statements are affected.
 - Do not edit generated `target/` content or include `.ai/` working records
   in published crate sources.
+- `.ai/` is gitignored, local-only agent context. Never reference or link
+  `.ai/` paths (e.g. `.ai/<task>/AUDIT.md`) from README, CHANGELOG,
+  ARCHITECTURE, SUPPORT, SECURITY, CONTRIBUTING, or rustdoc — a reader
+  without local agent context (crates.io, docs.rs, a GitHub visitor) cannot
+  resolve the link. If evidence from `AUDIT.md` needs to be visible in a
+  published doc, restate the relevant fact/finding inline instead of citing
+  the path. This restriction is specific to published/public-facing docs;
+  `.claude/`, `.codex/`, `AGENTS.md`, `CLAUDE.md`, and `index.md` may
+  continue to reference `.ai/` since they document the workflow that
+  produces it.
 - Each crate has its own local `README.md`; crate READMEs must not use
   relative links to the repository root because crates.io does not support
   those links.

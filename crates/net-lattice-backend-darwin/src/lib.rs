@@ -3194,35 +3194,42 @@ mod tests {
         let _guard = darwin_test_guard();
 
         let backend = DarwinBackend::new().expect("failed to open a route socket");
-        let interface = backend
-            .interfaces()
-            .expect("getifaddrs should list interfaces")
-            .into_iter()
-            .find(|interface| {
-                !matches!(interface.kind, InterfaceKind::Loopback)
-                    && matches!(interface.admin_state, AdminState::Up)
-            })
-            .expect("expected an up, non-loopback interface");
-        let interface_id = interface.id;
-        let interface_index = interface.index;
 
         // `RTM_ADD` for a static-ARP host route needs a destination the
-        // kernel considers reachable via `interface_index` — a fixed
+        // kernel considers reachable via the target interface — a fixed
         // off-subnet address (originally `192.0.2.253`, RFC 5737
         // `TEST-NET-1`) is unrouted on a real interface and `RTM_ADD` fails
         // with `ENETUNREACH` (errno 51), exactly as caught on live elevated
-        // macOS CI. Derive an in-subnet, currently
-        // unassigned host address from the interface's own configured IPv4
-        // network instead.
-        let own = backend
+        // macOS CI. An interface picked purely by admin-state/kind (as the
+        // first version of this test did) can also legitimately have *no*
+        // IPv4 address at all on a real CI runner (link-local-only Wi-Fi,
+        // `awdl0`, `utun*`, ...), which a second live run caught as a panic
+        // here — so the interface itself must be selected by actually
+        // having a non-loopback, up IPv4 address, not chosen first and
+        // hoped to have one.
+        let interfaces = backend
+            .interfaces()
+            .expect("getifaddrs should list interfaces");
+        let own_address = backend
             .addresses()
             .expect("getifaddrs should list addresses")
             .into_iter()
-            .find_map(|addr| match addr.address {
-                Network::V4(net) if addr.interface_index == interface_index => Some(net),
-                _ => None,
+            .find_map(|addr| {
+                let Network::V4(net) = addr.address else {
+                    return None;
+                };
+                let interface = interfaces
+                    .iter()
+                    .find(|interface| interface.index == addr.interface_index)?;
+                if matches!(interface.kind, InterfaceKind::Loopback)
+                    || !matches!(interface.admin_state, AdminState::Up)
+                {
+                    return None;
+                }
+                Some((interface.id, addr.interface_index, net))
             })
-            .expect("expected the selected interface to have a configured IPv4 address");
+            .expect("expected an up, non-loopback interface with a configured IPv4 address");
+        let (interface_id, interface_index, own) = own_address;
         let address = IpAddress::from(Ipv4Address::from(pick_in_subnet_probe_address(
             own.address().into(),
             own.prefix().value(),
