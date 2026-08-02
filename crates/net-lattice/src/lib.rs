@@ -643,11 +643,18 @@ impl Lattice<net_lattice_backend_darwin::DarwinBackend> {
 mod tests {
     use super::*;
 
-    /// Serializes ignored native facade tests on Linux. Their real Netlink
-    /// operations share one network namespace, whose route dumps can reject
-    /// concurrent submissions with `EBUSY`.
-    #[cfg(target_os = "linux")]
-    fn native_facade_linux_guard() -> std::sync::MutexGuard<'static, ()> {
+    /// Serializes ignored native facade tests across all platforms. Their
+    /// real native networking operations (Netlink on Linux, IP Helper on
+    /// Windows, `PF_ROUTE`/SCDynamicStore on macOS) mutate and observe
+    /// shared OS-level state — routes, addresses, and change-notification
+    /// subscriptions — that is not safe to touch concurrently from more
+    /// than one test in this process. On Linux, concurrent route dumps in a
+    /// shared CI network namespace can reject concurrent submissions with
+    /// `EBUSY`; on Windows and macOS, concurrent native mutation and
+    /// notification-subscription tests race on the same interface and can
+    /// produce inconsistent or spurious failures. Every ignored/privileged
+    /// test in this module takes this guard as its first statement.
+    fn native_facade_privileged_guard() -> std::sync::MutexGuard<'static, ()> {
         static GUARD: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
         GUARD
             .get_or_init(|| std::sync::Mutex::new(()))
@@ -1337,8 +1344,7 @@ mod tests {
     #[test]
     #[ignore = "requires native networking privilege; run with the platform privileged test job"]
     fn native_facade_interface_configuration_round_trip() {
-        #[cfg(target_os = "linux")]
-        let _guard = native_facade_linux_guard();
+        let _guard = native_facade_privileged_guard();
 
         let lattice = Lattice::connect().expect("failed to connect native backend");
         assert!(
@@ -1480,8 +1486,7 @@ mod tests {
     #[test]
     #[ignore = "requires native networking privilege; run with the platform privileged test job"]
     fn native_facade_route_transaction_round_trip() {
-        #[cfg(target_os = "linux")]
-        let _guard = native_facade_linux_guard();
+        let _guard = native_facade_privileged_guard();
 
         let lattice = Lattice::connect().expect("failed to connect native backend");
         let interface = lattice
@@ -1543,8 +1548,7 @@ mod tests {
     #[ignore = "requires native networking privilege; run with \
                 `cargo test -p net-lattice native_facade_ipv6_route_transaction_round_trip -- --ignored`"]
     fn native_facade_ipv6_route_transaction_round_trip() {
-        #[cfg(target_os = "linux")]
-        let _guard = native_facade_linux_guard();
+        let _guard = native_facade_privileged_guard();
 
         let lattice = Lattice::connect().expect("failed to connect native backend");
         let interface = lattice
@@ -1614,8 +1618,7 @@ mod tests {
     #[ignore = "requires native networking privilege; run with \
                 `cargo test -p net-lattice native_facade_ipv6_address_transaction_round_trip -- --ignored`"]
     fn native_facade_ipv6_address_transaction_round_trip() {
-        #[cfg(target_os = "linux")]
-        let _guard = native_facade_linux_guard();
+        let _guard = native_facade_privileged_guard();
 
         let lattice = Lattice::connect().expect("failed to connect native backend");
         let interface = lattice
@@ -1699,8 +1702,7 @@ mod tests {
     #[test]
     #[ignore = "requires native networking privilege; run with the platform privileged test job"]
     fn native_facade_compensates_after_second_route_operation_fails() {
-        #[cfg(target_os = "linux")]
-        let _guard = native_facade_linux_guard();
+        let _guard = native_facade_privileged_guard();
 
         let lattice = Lattice::connect().expect("failed to connect native backend");
         let interface = lattice
@@ -1762,8 +1764,7 @@ mod tests {
     #[ignore = "requires native networking privilege; run with \
                 `cargo test -p net-lattice native_facade_compensates_after_second_ipv6_route_operation_fails -- --ignored`"]
     fn native_facade_compensates_after_second_ipv6_route_operation_fails() {
-        #[cfg(target_os = "linux")]
-        let _guard = native_facade_linux_guard();
+        let _guard = native_facade_privileged_guard();
 
         let lattice = Lattice::connect().expect("failed to connect native backend");
         let interface = lattice
@@ -1840,8 +1841,7 @@ mod tests {
     #[ignore = "requires native networking privilege; run with \
                 `cargo test -p net-lattice native_facade_compensates_after_second_ipv6_address_operation_fails -- --ignored`"]
     fn native_facade_compensates_after_second_ipv6_address_operation_fails() {
-        #[cfg(target_os = "linux")]
-        let _guard = native_facade_linux_guard();
+        let _guard = native_facade_privileged_guard();
 
         let lattice = Lattice::connect().expect("failed to connect native backend");
         let interface = lattice
@@ -1963,9 +1963,7 @@ mod tests {
                 `cargo test -p net-lattice native_facade_ipv6_route_event_and_watcher -- --ignored`"]
     fn native_facade_ipv6_route_event_and_watcher() {
         use std::time::Duration;
-
-        #[cfg(target_os = "linux")]
-        let _guard = native_facade_linux_guard();
+        let _guard = native_facade_privileged_guard();
 
         let lattice = Lattice::connect().expect("failed to connect native backend");
         assert!(lattice.supports(Capability::ROUTE_MONITORING));
@@ -2144,9 +2142,7 @@ mod tests {
                 `cargo test -p net-lattice native_facade_ipv6_address_event_and_watcher -- --ignored`"]
     fn native_facade_ipv6_address_event_and_watcher() {
         use std::time::Duration;
-
-        #[cfg(target_os = "linux")]
-        let _guard = native_facade_linux_guard();
+        let _guard = native_facade_privileged_guard();
 
         let lattice = Lattice::connect().expect("failed to connect native backend");
         assert!(lattice.supports(Capability::ADDRESS_MONITORING));

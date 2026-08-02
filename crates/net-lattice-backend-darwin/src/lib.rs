@@ -1971,6 +1971,21 @@ mod tests {
     use super::*;
     use net_lattice_ip::{Ipv4Address, Ipv4Network, Ipv4PrefixLength};
 
+    /// Serializes ignored native tests in this module. Each one mutates or
+    /// observes real macOS `PF_ROUTE`/SCDynamicStore state (routes,
+    /// addresses, and change-notification subscriptions) on a live
+    /// interface; running more than one concurrently in this process would
+    /// race on that shared native state and produce inconsistent,
+    /// order-dependent failures. Every `#[ignore]`-gated test below takes
+    /// this guard as its first statement.
+    fn darwin_test_guard() -> std::sync::MutexGuard<'static, ()> {
+        static GUARD: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+        GUARD
+            .get_or_init(|| std::sync::Mutex::new(()))
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
     #[cfg(feature = "async")]
     fn tokio_route_event(watcher: &mut TokioEventReceiver<Event>, id: RouteId) -> bool {
         use std::pin::Pin;
@@ -2402,6 +2417,8 @@ mod tests {
     #[test]
     #[ignore = "requires root; run with `sudo -E cargo test -p net-lattice-backend-darwin interface_configuration_round_trips_observed_state -- --ignored`"]
     fn interface_configuration_round_trips_observed_state() {
+        let _guard = darwin_test_guard();
+
         let backend = DarwinBackend::new().expect("failed to open a route socket");
         let original = backend
             .interfaces()
@@ -2632,6 +2649,8 @@ mod tests {
     #[test]
     #[ignore = "requires root; run with `sudo -E cargo test -p net-lattice-backend-darwin add_then_remove_address_round_trips_through_the_kernel -- --ignored`"]
     fn add_then_remove_address_round_trips_through_the_kernel() {
+        let _guard = darwin_test_guard();
+
         let backend = DarwinBackend::new().expect("failed to open a route socket");
         let interface_index = loopback_interface_index(&backend);
         let network = Network::from(Ipv4Network::new(
@@ -2691,6 +2710,8 @@ mod tests {
     #[test]
     #[ignore = "requires root; run with `sudo -E cargo test -p net-lattice-backend-darwin add_then_remove_ipv6_address_round_trips_through_the_kernel -- --ignored`"]
     fn add_then_remove_ipv6_address_round_trips_through_the_kernel() {
+        let _guard = darwin_test_guard();
+
         let backend = DarwinBackend::new().expect("failed to open a route socket");
         let interface_index = loopback_interface_index(&backend);
         let network = Network::from(net_lattice_ip::Ipv6Network::new(
@@ -2846,6 +2867,8 @@ mod tests {
     #[test]
     #[ignore = "requires root; run with `sudo -E cargo test -p net-lattice-backend-darwin -- --ignored`"]
     fn add_then_remove_route_round_trips_through_the_kernel() {
+        let _guard = darwin_test_guard();
+
         let backend = DarwinBackend::new().expect("failed to open a route socket");
         let interface_index = loopback_interface_index(&backend);
 
@@ -3023,6 +3046,8 @@ mod tests {
     #[test]
     #[ignore = "requires root; run with `sudo -E cargo test -p net-lattice-backend-darwin add_then_remove_ipv6_route_round_trips_through_the_kernel -- --ignored`"]
     fn add_then_remove_ipv6_route_round_trips_through_the_kernel() {
+        let _guard = darwin_test_guard();
+
         let backend = DarwinBackend::new().expect("failed to open a route socket");
         let interface_index = loopback_interface_index(&backend);
 
@@ -3072,6 +3097,8 @@ mod tests {
     #[test]
     #[ignore = "requires root; run with `sudo -E cargo test -p net-lattice-backend-darwin watch_observes_route_changes -- --ignored`"]
     fn watch_observes_route_changes() {
+        let _guard = darwin_test_guard();
+
         use std::time::Duration;
 
         let backend = DarwinBackend::new().expect("failed to open a route socket");

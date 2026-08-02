@@ -1747,6 +1747,21 @@ mod tests {
     use net_lattice_ip::{Ipv4Address, Ipv4Network, Ipv4PrefixLength};
     use windows::Win32::NetworkManagement::IpHelper::MibParameterNotification;
 
+    /// Serializes ignored native tests in this module. Each one mutates or
+    /// observes real Windows IP Helper state (routes, addresses, neighbor
+    /// entries, and change-notification subscriptions) on a live interface;
+    /// running more than one concurrently in this process would race on
+    /// that shared native state and produce inconsistent, order-dependent
+    /// failures. Every `#[ignore]`-gated test below takes this guard as its
+    /// first statement.
+    fn windows_test_guard() -> std::sync::MutexGuard<'static, ()> {
+        static GUARD: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+        GUARD
+            .get_or_init(|| std::sync::Mutex::new(()))
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
     /// Builds the `MIB_IPNET_ROW2` input required by `CreateIpNetEntry2` for
     /// a static ARP/NDP entry. It is test-local feasibility evidence only:
     /// Stage 0.17 has not accepted a production neighbor-mutator contract.
@@ -2280,6 +2295,8 @@ mod tests {
     #[test]
     #[ignore = "requires Administrator; run from elevated cmd/PowerShell: cargo test -p net-lattice-backend-windows interface_configuration_round_trips_observed_values -- --ignored"]
     fn interface_configuration_round_trips_observed_values() {
+        let _guard = windows_test_guard();
+
         struct RestoreInterfaceConfig<'a> {
             backend: &'a WindowsBackend,
             config: InterfaceConfig,
@@ -2379,6 +2396,8 @@ mod tests {
     #[test]
     #[ignore = "requires Administrator; run from elevated cmd/PowerShell: cargo test -p net-lattice-backend-windows add_then_remove_address_round_trips_through_the_kernel -- --ignored"]
     fn add_then_remove_address_round_trips_through_the_kernel() {
+        let _guard = windows_test_guard();
+
         let backend = WindowsBackend::new().expect("failed to create Windows backend");
         let interface_index = backend
             .interfaces()
@@ -2440,6 +2459,8 @@ mod tests {
     #[test]
     #[ignore = "requires Administrator; run from elevated cmd/PowerShell: cargo test -p net-lattice-backend-windows add_then_remove_ipv6_address_round_trips_through_the_kernel -- --ignored"]
     fn add_then_remove_ipv6_address_round_trips_through_the_kernel() {
+        let _guard = windows_test_guard();
+
         let backend = WindowsBackend::new().expect("failed to create Windows backend");
         let interface_index = backend
             .interfaces()
@@ -2630,6 +2651,8 @@ mod tests {
     #[test]
     #[ignore = "requires Administrator; run manually from elevated cmd/PowerShell on Windows"]
     fn add_then_remove_route_round_trips_through_the_kernel() {
+        let _guard = windows_test_guard();
+
         let backend = WindowsBackend::new().expect("failed to create Windows backend");
         let interface_index = 1u32;
 
@@ -2681,6 +2704,8 @@ mod tests {
     #[test]
     #[ignore = "requires Administrator; run manually from elevated cmd/PowerShell on Windows"]
     fn add_then_remove_ipv6_route_round_trips_through_the_kernel() {
+        let _guard = windows_test_guard();
+
         let backend = WindowsBackend::new().expect("failed to create Windows backend");
         let interface_index = 1u32;
 
@@ -2734,6 +2759,8 @@ mod tests {
     #[test]
     #[ignore = "requires Administrator; run from elevated cmd/PowerShell: cargo test -p net-lattice-backend-windows watch_observes_route_changes -- --ignored"]
     fn watch_observes_route_changes() {
+        let _guard = windows_test_guard();
+
         use std::time::Duration;
 
         let backend = WindowsBackend::new().expect("failed to create Windows backend");
