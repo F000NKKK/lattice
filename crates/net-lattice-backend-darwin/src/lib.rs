@@ -2681,6 +2681,65 @@ mod tests {
         );
     }
 
+    /// Exercises Darwin's native `SIOCAIFADDR`/`SIOCDIFADDR` path for an
+    /// IPv6 address: assign it to `lo0`, read its canonical `getifaddrs`
+    /// representation, and remove that exact record. Uses RFC 3849
+    /// `2001:db8:b::9/64`, distinct from every other `2001:db8:N::` literal
+    /// used anywhere in this repository (backend and facade crates alike)
+    /// so it can't collide with any other ignored test's network state even
+    /// when run in the same elevated CI job.
+    #[test]
+    #[ignore = "requires root; run with `sudo -E cargo test -p net-lattice-backend-darwin add_then_remove_ipv6_address_round_trips_through_the_kernel -- --ignored`"]
+    fn add_then_remove_ipv6_address_round_trips_through_the_kernel() {
+        let backend = DarwinBackend::new().expect("failed to open a route socket");
+        let interface_index = loopback_interface_index(&backend);
+        let network = Network::from(net_lattice_ip::Ipv6Network::new(
+            net_lattice_ip::Ipv6Address::new([0x2001, 0xdb8, 0xb, 0, 0, 0, 0, 9]),
+            net_lattice_ip::Ipv6PrefixLength::new(64).expect("valid IPv6 prefix"),
+        ));
+
+        if let Some(existing) = backend
+            .addresses()
+            .expect("addresses() failed before add_address")
+            .into_iter()
+            .find(|address| {
+                address.interface_index == interface_index && address.address == network
+            })
+        {
+            let _ = backend.remove_address(existing);
+        }
+
+        let observed = backend
+            .add_address(NewInterfaceAddress::new(
+                Id::new(interface_index as u64),
+                network,
+            ))
+            .expect("add_address failed - are you running as root?");
+        let present = backend
+            .addresses()
+            .expect("addresses() failed after add_address")
+            .into_iter()
+            .any(|address| address.id == observed.id);
+
+        backend
+            .remove_address(observed.clone())
+            .expect("remove_address failed after successful add_address");
+        let absent = !backend
+            .addresses()
+            .expect("addresses() failed after remove_address")
+            .into_iter()
+            .any(|address| address.id == observed.id);
+
+        assert!(
+            present,
+            "added IPv6 address was not present in addresses() afterward"
+        );
+        assert!(
+            absent,
+            "removed IPv6 address was still present in addresses() afterward"
+        );
+    }
+
     /// Raw `rt_msghdr` fields (bypassing `message_to_route` entirely) for
     /// every dumped entry whose `RTA_DST` decodes to `target`, regardless
     /// of `rtm_index`.
@@ -2944,6 +3003,66 @@ mod tests {
                 .iter()
                 .any(|r| r.destination == destination && r.interface_index == Some(interface_index)),
             "removed route was still present in routes() afterward"
+        );
+    }
+
+    /// Exercises the complete route-mutation path against the real kernel
+    /// for an IPv6 destination: create a route on `lo0`, read the canonical
+    /// observed record via `routes()`, then remove that exact record. Uses
+    /// RFC 3849 `2001:db8:a::/64`, distinct from every other `2001:db8:N::`
+    /// literal used anywhere in this repository (backend and facade crates
+    /// alike; N=1,2,3,4,5,6,7,8,9 and plain `2001:db8::/32` are already
+    /// claimed elsewhere), so a route/address collision cannot occur even
+    /// when backend-level and facade-level ignored tests run in the same
+    /// elevated CI job on the same host. `/64` is deliberately not `/32` or
+    /// `/128`: `build_add_message`/`build_delete_message` previously
+    /// misclassified an IPv6 `/32` as a host route by reusing the IPv4
+    /// `prefix_len == 32` check family-blindly (see the family-aware
+    /// `is_host` match in both functions above); a `/64` prefix exercises
+    /// the ordinary (non-host, netmask-carrying) branch instead.
+    #[test]
+    #[ignore = "requires root; run with `sudo -E cargo test -p net-lattice-backend-darwin add_then_remove_ipv6_route_round_trips_through_the_kernel -- --ignored`"]
+    fn add_then_remove_ipv6_route_round_trips_through_the_kernel() {
+        let backend = DarwinBackend::new().expect("failed to open a route socket");
+        let interface_index = loopback_interface_index(&backend);
+
+        let destination = Network::from(net_lattice_ip::Ipv6Network::new(
+            net_lattice_ip::Ipv6Address::new([0x2001, 0xdb8, 0xa, 0, 0, 0, 0, 0]),
+            net_lattice_ip::Ipv6PrefixLength::new(64).expect("valid IPv6 prefix"),
+        ));
+        let route = Route::new(RouteId::new(0), destination).with_interface_index(interface_index);
+
+        // Recover from an interrupted prior run before attempting the add.
+        let _ = backend.remove_route(route.clone());
+
+        backend
+            .add_route(route.clone())
+            .expect("add_route failed - are you running as root?");
+
+        let routes = backend
+            .routes()
+            .expect("routes() failed after add_route succeeded");
+        let found = routes
+            .iter()
+            .any(|r| r.destination == destination && r.interface_index == Some(interface_index));
+
+        // Clean up before asserting, so a failed assertion doesn't leave
+        // the test route behind on the machine that ran this.
+        let _ = backend.remove_route(route);
+
+        assert!(
+            found,
+            "added IPv6 route was not present in routes() afterward"
+        );
+
+        let routes_after_removal = backend
+            .routes()
+            .expect("routes() failed after remove_route");
+        assert!(
+            !routes_after_removal
+                .iter()
+                .any(|r| r.destination == destination && r.interface_index == Some(interface_index)),
+            "removed IPv6 route was still present in routes() afterward"
         );
     }
 

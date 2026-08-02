@@ -1987,7 +1987,15 @@ mod tests {
         ));
         let route = Route::new(RouteId::new(0), destination).with_interface_index(interface.index);
 
-        let watcher = lattice.watch().expect("failed to subscribe to events");
+        // `Lattice::watch()` is deliberately all-domain and requires the
+        // aggregate `Capability::MONITORING` (including neighbor
+        // monitoring, which Windows never advertises); this test only
+        // needs route events, so use the routes-only filter, matching the
+        // async watcher subscription just below and the
+        // `Capability::ROUTE_MONITORING` assertion above.
+        let watcher = lattice
+            .watch_filtered(EventFilter::none().routes())
+            .expect("failed to subscribe to events");
         #[cfg(feature = "async")]
         let mut async_watcher = lattice
             .watch_async(EventFilter::none().routes())
@@ -2095,6 +2103,183 @@ mod tests {
         for _ in 0..12 {
             match Pin::new(&mut *watcher).poll_next(&mut context) {
                 Poll::Ready(Some(Ok(Event::Route { id: event_id, .. }))) if event_id == id => {
+                    return true;
+                }
+                Poll::Ready(Some(_)) | Poll::Pending => {
+                    std::thread::sleep(Duration::from_millis(250))
+                }
+                Poll::Ready(None) => return false,
+            }
+        }
+        false
+    }
+
+    /// Address-domain counterpart of `native_facade_ipv6_route_event_and_
+    /// watcher`: same three-phase shape (unfiltered `watch()` to learn the
+    /// id from the notification, `watch_filtered(EventFilter::none()
+    /// .address(id))` for the selected removal, and, with the `async`
+    /// feature, `watch_async` polled via `facade_async_address_event`), but
+    /// built through `execute_plan`/`MutationPlan`/`AddressRestore` for
+    /// `Mutation::AddAddress`/`Mutation::RemoveAddress`, matching
+    /// `native_facade_ipv6_address_transaction_round_trip`'s idiom. Asserts
+    /// `Capability::ADDRESS_MONITORING` rather than the full `MONITORING`
+    /// aggregate, matching the just-fixed route event test's rationale:
+    /// Windows never advertises `NEIGHBOR_MONITORING`, so the aggregate
+    /// would never pass there even though this test only needs address
+    /// events. Uses `2001:db8:a::9/64` (RFC 3849), distinct from every
+    /// other IPv6 subnet already reserved by the other ignored facade tests
+    /// in this module (plain `2001:db8::/32`, `2001:db8:3::9/64`,
+    /// `2001:db8:4::/64`, `2001:db8:5::/64`, `2001:db8:6::9/64`,
+    /// `2001:db8:7::9/64`, `2001:db8:9::/64`).
+    #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+    #[test]
+    #[ignore = "requires native networking privilege; run with \
+                `cargo test -p net-lattice native_facade_ipv6_address_event_and_watcher -- --ignored`"]
+    fn native_facade_ipv6_address_event_and_watcher() {
+        use std::time::Duration;
+
+        #[cfg(target_os = "linux")]
+        let _guard = native_facade_linux_guard();
+
+        let lattice = Lattice::connect().expect("failed to connect native backend");
+        assert!(lattice.supports(Capability::ADDRESS_MONITORING));
+        let interface = lattice
+            .interfaces()
+            .expect("failed to list interfaces")
+            .into_iter()
+            .find(|interface| matches!(interface.kind, InterfaceKind::Loopback))
+            .or_else(|| {
+                lattice
+                    .interfaces()
+                    .ok()
+                    .and_then(|mut interfaces| interfaces.pop())
+            })
+            .expect("native backend reported no interfaces");
+        let network = Network::from(Ipv6Network::new(
+            Ipv6Address::new([0x2001, 0xdb8, 0xa, 0, 0, 0, 0, 9]),
+            Ipv6PrefixLength::new(64).expect("valid IPv6 prefix"),
+        ));
+
+        // Recover from an interrupted prior run before attempting the add.
+        if let Some(existing) = lattice
+            .addresses()
+            .expect("failed to list addresses before add")
+            .into_iter()
+            .find(|address| {
+                address.interface_index == interface.index && address.address == network
+            })
+        {
+            let _ = lattice.remove_address(existing);
+        }
+
+        let watcher = lattice
+            .watch_filtered(EventFilter::none().addresses())
+            .expect("failed to subscribe to events");
+        #[cfg(feature = "async")]
+        let mut async_watcher = lattice
+            .watch_async(EventFilter::none().addresses())
+            .expect("failed to subscribe to async events");
+
+        let requested = NewInterfaceAddress::new(interface.id, network);
+        let add_plan = MutationPlan::from_operations([Mutation::AddAddress(requested)]);
+        let mut snapshot = |_, operation: &Mutation| lattice.snapshot_for_mutation(operation);
+        let mut options = ExecutionOptions::default().snapshot(&mut snapshot);
+        let add_report = lattice.execute_plan(&add_plan, &mut options);
+        assert!(
+            add_report.is_success(),
+            "ipv6 address add report: {add_report:?}"
+        );
+        let mut restore = AddressRestore {
+            lattice: &lattice,
+            address: None,
+        };
+
+        // Obtain the identity from the notification itself, matching the
+        // backend-level and route-event facade tests' approach.
+        let watched_id = (0..12)
+            .find_map(|_| match watcher.recv_timeout(Duration::from_millis(250)) {
+                Ok(Some(Event::Address { id, .. })) => Some(id),
+                _ => None,
+            })
+            .expect("watch() did not report the ipv6 address addition");
+        #[cfg(feature = "async")]
+        let async_observed = facade_async_address_event(&mut async_watcher, watched_id);
+
+        // Re-read the observed address before setting up compensation and
+        // building the remove plan: `remove_address` and `RemoveAddress`
+        // validation match by id (or interface_index + address), and the
+        // locally constructed `requested` value carries no id at all.
+        let observed_address = lattice
+            .addresses()
+            .expect("failed to read addresses before removal")
+            .into_iter()
+            .find(|address| address.id == watched_id)
+            .expect("added ipv6 address was not observed before removal");
+        restore.address = Some(observed_address.clone());
+
+        let selected_watcher = lattice
+            .watch_filtered(EventFilter::none().address(watched_id))
+            .expect("failed to subscribe to selected address events");
+        #[cfg(feature = "async")]
+        let mut selected_async_watcher = lattice
+            .watch_async(EventFilter::none().address(watched_id))
+            .expect("failed to subscribe to selected async address events");
+
+        let remove_plan =
+            MutationPlan::from_operations([Mutation::RemoveAddress(observed_address)]);
+        let mut remove_options = ExecutionOptions::default();
+        let remove_report = lattice.execute_plan(&remove_plan, &mut remove_options);
+        assert!(
+            remove_report.is_success(),
+            "ipv6 address remove report: {remove_report:?}"
+        );
+        restore.address = None;
+
+        let selected_observed = (0..12).any(|_| {
+            matches!(
+                selected_watcher.recv_timeout(Duration::from_millis(250)),
+                Ok(Some(Event::Address { id, kind: ChangeKind::Removed })) if id == watched_id
+            )
+        });
+        #[cfg(feature = "async")]
+        let selected_async_observed =
+            facade_async_address_event(&mut selected_async_watcher, watched_id);
+
+        assert!(
+            selected_observed,
+            "object address filter did not report ipv6 removal"
+        );
+        #[cfg(feature = "async")]
+        assert!(
+            async_observed,
+            "watch_async() did not report the ipv6 address mutation"
+        );
+        #[cfg(feature = "async")]
+        assert!(
+            selected_async_observed,
+            "async object address filter did not report ipv6 removal"
+        );
+    }
+
+    /// Polls an [`EventStream`] for up to 3 seconds looking for an
+    /// `Event::Address` notification matching `id`, mirroring
+    /// `facade_async_route_event` but for the address domain.
+    #[cfg(feature = "async")]
+    #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+    fn facade_async_address_event(
+        watcher: &mut EventStream<Event>,
+        id: InterfaceAddressId,
+    ) -> bool {
+        use futures::Stream;
+        use std::pin::Pin;
+        use std::task::{Context, Poll, Waker};
+        use std::time::Duration;
+
+        let waker = Waker::noop();
+        let mut context = Context::from_waker(waker);
+        for _ in 0..12 {
+            match Pin::new(&mut *watcher).poll_next(&mut context) {
+                Poll::Ready(Some(Ok(Event::Address { id: event_id, .. }))) if event_id == id => {
                     return true;
                 }
                 Poll::Ready(Some(_)) | Poll::Pending => {

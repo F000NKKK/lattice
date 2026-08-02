@@ -1007,6 +1007,29 @@ mod tests {
         std::thread::sleep(duration);
     }
 
+    #[cfg(feature = "async")]
+    fn tokio_address_event(
+        watcher: &mut TokioEventReceiver<Event>,
+        id: InterfaceAddressId,
+    ) -> bool {
+        use std::pin::Pin;
+        use std::task::{Context, Poll, Waker};
+        use std::time::Duration;
+
+        let waker = Waker::noop();
+        let mut context = Context::from_waker(waker);
+        for _ in 0..12 {
+            match Pin::new(&mut *watcher).poll_recv(&mut context) {
+                Poll::Ready(Some(Ok(Event::Address { id: event_id, .. }))) if event_id == id => {
+                    return true;
+                }
+                Poll::Ready(Some(_)) | Poll::Pending => thread_sleep(Duration::from_millis(250)),
+                Poll::Ready(None) => return false,
+            }
+        }
+        false
+    }
+
     /// The kernel can reject simultaneous Netlink dumps in a shared CI
     /// network namespace with `EBUSY`. All tests that open a real Netlink
     /// socket take this guard; pure parser tests intentionally do not.
@@ -2341,6 +2364,106 @@ mod tests {
         assert!(
             selected_async_observed,
             "async object route filter did not report removal"
+        );
+    }
+
+    /// Address-domain counterpart of `watch_observes_ipv6_route_changes`:
+    /// same end-to-end monitoring verification (plain `watcher.recv_timeout`
+    /// and, with the `async` feature, `watch_tokio`/`tokio_address_event`),
+    /// but for `Event::Address` driven by `add_address`/`remove_address` on
+    /// an IPv6 address on RFC 3849 `2001:db8:a::9/64` — distinct from every
+    /// other IPv6 subnet already reserved by the other ignored tests in this
+    /// module (`2001:db8:1::/64`, `2001:db8:2::9/64`, `2001:db8::/32` plain,
+    /// `2001:db8:8::/64`). No IPv4 address-watch backend test exists yet
+    /// (only the IPv4/IPv6 round-trip tests without an event assertion), so
+    /// this test is the first of its kind at this level.
+    #[test]
+    #[ignore = "requires CAP_NET_ADMIN; run with `sudo -E cargo test -p net-lattice-backend-linux watch_observes_ipv6_address_changes -- --ignored`"]
+    fn watch_observes_ipv6_address_changes() {
+        use std::time::Duration;
+
+        let _guard = kernel_test_guard();
+        let backend = LinuxBackend::new().expect("failed to open a Netlink connection");
+        assert!(backend.capabilities().contains(Capability::MONITORING));
+        let watcher = backend
+            .watch()
+            .expect("failed to subscribe to Netlink events");
+        #[cfg(feature = "async")]
+        let mut async_watcher = backend
+            .watch_tokio(EventFilter::none().addresses())
+            .expect("failed to subscribe to async Netlink events");
+        let interface_index = loopback_interface_index(&backend);
+        let network = Network::from(net_lattice_ip::Ipv6Network::new(
+            net_lattice_ip::Ipv6Address::new([0x2001, 0xdb8, 0xa, 0, 0, 0, 0, 9]),
+            net_lattice_ip::Ipv6PrefixLength::new(64).unwrap(),
+        ));
+
+        // Recover from an interrupted prior run before attempting the add.
+        // The test address is deliberately isolated to 2001:db8:a::9/64.
+        if let Some(existing) = backend
+            .addresses()
+            .expect("addresses() failed before add_address")
+            .into_iter()
+            .find(|address| {
+                address.interface_index == interface_index && address.address == network
+            })
+        {
+            let _ = backend.remove_address(existing);
+        }
+        let requested = NewInterfaceAddress::new(Id::new(interface_index as u64), network);
+        backend
+            .add_address(requested)
+            .expect("failed to add monitoring test address");
+        // Obtain the identity from the notification itself, matching the
+        // route counterpart's rationale: a concurrent RTM_GETADDR dump can
+        // be rejected with EBUSY while the multicast sockets are active.
+        let watched_id = (0..12)
+            .find_map(|_| match watcher.recv_timeout(Duration::from_millis(250)) {
+                Ok(Some(Event::Address { id, .. })) => Some(id),
+                _ => None,
+            })
+            .expect("watch() did not report the address addition");
+        let observed = true;
+        #[cfg(feature = "async")]
+        let async_observed = tokio_address_event(&mut async_watcher, watched_id);
+        let selected_watcher = backend
+            .watch_filtered(EventFilter::none().address(watched_id))
+            .expect("failed to subscribe to selected Netlink address events");
+        #[cfg(feature = "async")]
+        let mut selected_async_watcher = backend
+            .watch_tokio(EventFilter::none().address(watched_id))
+            .expect("failed to subscribe to selected async Netlink address events");
+        // remove_address matches by id, so the current observed record must
+        // be re-read rather than reusing `requested` (which carries no id).
+        let observed_address = backend
+            .addresses()
+            .expect("addresses() failed before remove_address")
+            .into_iter()
+            .find(|address| address.id == watched_id)
+            .expect("added address was not observable before removal");
+        let _ = backend.remove_address(observed_address);
+        let selected_observed = (0..12).any(|_| {
+            matches!(
+                selected_watcher.recv_timeout(Duration::from_millis(250)),
+                Ok(Some(Event::Address { id, kind: ChangeKind::Removed })) if id == watched_id
+            )
+        });
+        #[cfg(feature = "async")]
+        let selected_async_observed = tokio_address_event(&mut selected_async_watcher, watched_id);
+        assert!(observed, "watch() did not report the address mutation");
+        assert!(
+            selected_observed,
+            "object address filter did not report removal"
+        );
+        #[cfg(feature = "async")]
+        assert!(
+            async_observed,
+            "watch_tokio() did not report the address mutation"
+        );
+        #[cfg(feature = "async")]
+        assert!(
+            selected_async_observed,
+            "async object address filter did not report removal"
         );
     }
 }
