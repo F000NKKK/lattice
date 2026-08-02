@@ -46,6 +46,26 @@ crate-level README with its scope and a usage example:
 | [`net-lattice-backend-windows`](crates/net-lattice-backend-windows/README.md) | Windows IP Helper backend |
 | [`net-lattice-backend-darwin`](crates/net-lattice-backend-darwin/README.md) | macOS BSD/PF_ROUTE backend |
 
+## The Lattice ecosystem
+
+Net Lattice is the first crate in a wider Lattice family of composable,
+cross-platform Rust networking libraries. The other crates are in the
+bootstrap stage — repository workflow and packaging scaffolding exist, but no
+implementation or public API has shipped yet — and are being designed to
+compose with Net Lattice rather than duplicate it.
+
+| Crate | Purpose |
+|---|---|
+| [net-lattice](https://github.com/F000NKKK/net-lattice) | OS networking inspection and configuration (routes, DNS, interfaces) |
+| [tunnel-lattice](https://github.com/F000NKKK/tunnel-lattice) | TUN/TAP tunnel interfaces |
+| [dns-lattice](https://github.com/F000NKKK/dns-lattice) | Programmable DNS control plane |
+| [flow-lattice](https://github.com/F000NKKK/flow-lattice) | Policy compiler: rules -> platform-neutral network plans |
+| [sdk-lattice](https://github.com/F000NKKK/sdk-lattice) | Application-facing SDK composing the crates above |
+
+Cross-repository dependency direction and API boundaries have not been
+decided yet; they will be recorded in each repository's architecture
+documents and ADRs as that design work happens.
+
 ## Motivation
 
 Cross-platform networking tooling in the Rust ecosystem is fragmented. Existing solutions are frequently platform-specific, incomplete, or built around shelling out to system utilities such as `ip`, `netsh`, or `route`. This is fragile, hard to test, and unsuitable for building robust, production-grade network management software.

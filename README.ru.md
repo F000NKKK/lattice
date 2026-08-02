@@ -47,6 +47,26 @@ README с назначением и примером использования:
 | [`net-lattice-backend-windows`](crates/net-lattice-backend-windows/README.md) | Windows IP Helper backend |
 | [`net-lattice-backend-darwin`](crates/net-lattice-backend-darwin/README.md) | macOS BSD/PF_ROUTE backend |
 
+## Экосистема Lattice
+
+Net Lattice — первый crate в более широком семействе Lattice: композируемых,
+кроссплатформенных Rust-библиотек для сети. Остальные репозитории находятся
+на стадии инициализации — служебная инфраструктура и упаковка уже есть, но
+реализации и публичного API ещё нет — и проектируются так, чтобы дополнять
+Net Lattice, а не дублировать его.
+
+| Crate | Назначение |
+|---|---|
+| [net-lattice](https://github.com/F000NKKK/net-lattice) | Инспекция и настройка сетевого стека ОС (маршруты, DNS, интерфейсы) |
+| [tunnel-lattice](https://github.com/F000NKKK/tunnel-lattice) | TUN/TAP туннельные интерфейсы |
+| [dns-lattice](https://github.com/F000NKKK/dns-lattice) | Программируемый DNS control plane |
+| [flow-lattice](https://github.com/F000NKKK/flow-lattice) | Компилятор политик: правила -> платформенно-нейтральные сетевые планы |
+| [sdk-lattice](https://github.com/F000NKKK/sdk-lattice) | Прикладной SDK, объединяющий crate'ы выше |
+
+Направление зависимостей между репозиториями и границы API ещё не определены;
+они будут зафиксированы в архитектурных документах и ADR каждого репозитория
+по мере того, как эта проработка будет происходить.
+
 ## Мотивация
 
 Кроссплатформенные сетевые инструменты в экосистеме Rust фрагментированы. Существующие решения зачастую платформо-специфичны, неполны или построены на вызове системных утилит, таких как `ip`, `netsh` или `route`. Это хрупко, сложно тестировать и не подходит для создания надёжного, production-grade программного обеспечения для управления сетью.

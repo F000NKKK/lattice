@@ -34,6 +34,26 @@ net-lattice/
 └── index.md                     This project map
 ```
 
+## Lattice ecosystem
+
+Net Lattice is the first crate in a wider Lattice family of composable,
+cross-platform Rust networking libraries:
+
+```text
+net-lattice      OS networking inspection/configuration (routes, DNS, interfaces) — this repo
+tunnel-lattice   TUN/TAP tunnel interfaces
+dns-lattice      Programmable DNS control plane
+flow-lattice     Policy compiler: rules -> platform-neutral network plans
+sdk-lattice      Application-facing SDK composing the crates above
+```
+
+The other four repositories (https://github.com/F000NKKK/{tunnel,dns,flow,sdk}-lattice)
+are in the bootstrap stage: repository workflow and packaging scaffolding
+exist, ported from this repo, but no implementation or public API has shipped
+yet. Cross-repository dependency direction and API boundaries have not been
+decided; they will be recorded as ADRs once that design work happens. Do not
+assume any of these repositories track this repo's roadmap stage.
+
 ## Dependency direction
 
 Arrows mean “depends on”.
