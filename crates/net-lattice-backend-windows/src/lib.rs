@@ -33,10 +33,7 @@ use net_lattice_platform::{
 };
 #[cfg(feature = "async")]
 use net_lattice_platform::{TokioEventProvider, TokioEventReceiver, TokioEventSender};
-use windows::Win32::Foundation::{
-    ERROR_ACCESS_DENIED, ERROR_NOT_FOUND, ERROR_NOT_SUPPORTED, ERROR_OBJECT_ALREADY_EXISTS, HANDLE,
-    WIN32_ERROR,
-};
+use windows::Win32::Foundation::{ERROR_NOT_FOUND, HANDLE};
 use windows::Win32::NetworkManagement::IpHelper::{
     CancelMibChangeNotify2, ConvertInterfaceLuidToIndex, CreateIpForwardEntry2,
     CreateUnicastIpAddressEntry, DNS_INTERFACE_SETTINGS, DNS_INTERFACE_SETTINGS_VERSION1,
@@ -1767,6 +1764,9 @@ impl DnsMutator for WindowsBackend {
 mod tests {
     use super::*;
     use net_lattice_ip::{Ipv4Address, Ipv4Network, Ipv4PrefixLength};
+    use windows::Win32::Foundation::{
+        ERROR_ACCESS_DENIED, ERROR_NOT_SUPPORTED, ERROR_OBJECT_ALREADY_EXISTS, WIN32_ERROR,
+    };
     use windows::Win32::NetworkManagement::IpHelper::MibParameterNotification;
 
     /// Serializes ignored native tests in this module. Each one mutates or
