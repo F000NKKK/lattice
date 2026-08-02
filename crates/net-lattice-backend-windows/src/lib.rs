@@ -33,7 +33,10 @@ use net_lattice_platform::{
 };
 #[cfg(feature = "async")]
 use net_lattice_platform::{TokioEventProvider, TokioEventReceiver, TokioEventSender};
-use windows::Win32::Foundation::{ERROR_NOT_FOUND, HANDLE};
+use windows::Win32::Foundation::{
+    ERROR_ACCESS_DENIED, ERROR_NOT_FOUND, ERROR_NOT_SUPPORTED, ERROR_OBJECT_ALREADY_EXISTS, HANDLE,
+    WIN32_ERROR,
+};
 use windows::Win32::NetworkManagement::IpHelper::{
     CancelMibChangeNotify2, ConvertInterfaceLuidToIndex, CreateIpForwardEntry2,
     CreateUnicastIpAddressEntry, DNS_INTERFACE_SETTINGS, DNS_INTERFACE_SETTINGS_VERSION1,
@@ -1812,6 +1815,43 @@ mod tests {
         }
     }
 
+    /// Maps a `CreateIpNetEntry2`/`DeleteIpNetEntry2` native status to the
+    /// shared `Error` model. It is test-local feasibility evidence only:
+    /// Stage 0.17 has not accepted a production neighbor-mutator contract
+    /// and neither native function is called from this crate yet.
+    ///
+    /// Per Microsoft Learn (accessed 2026-08-02):
+    /// - `CreateIpNetEntry2`:
+    ///   <https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-createipnetentry2>
+    ///   documents `ERROR_ACCESS_DENIED` (caller lacks the required
+    ///   privilege), `ERROR_INVALID_PARAMETER`, `ERROR_NOT_FOUND` (the
+    ///   interface was not found), `ERROR_NOT_SUPPORTED` (the address
+    ///   family's stack is not present on the interface), and
+    ///   `ERROR_OBJECT_ALREADY_EXISTS` (a neighbor entry for that address
+    ///   already exists on the interface).
+    /// - `DeleteIpNetEntry2`:
+    ///   <https://learn.microsoft.com/en-us/windows/win32/api/netioapi/nf-netioapi-deleteipnetentry2>
+    ///   documents `ERROR_ACCESS_DENIED`, `ERROR_INVALID_PARAMETER`,
+    ///   `ERROR_NOT_FOUND` (the *interface* was not found — this page does
+    ///   not document `ERROR_NOT_FOUND` for a missing neighbor entry), and
+    ///   `ERROR_NOT_SUPPORTED`. It does not document
+    ///   `ERROR_OBJECT_ALREADY_EXISTS` at all, since that condition cannot
+    ///   arise on delete. The actual native behavior when deleting a
+    ///   nonexistent entry is not asserted here beyond what this page
+    ///   states.
+    ///
+    /// Any status not covered by the above falls back to
+    /// `Error::Platform(PlatformErrorCode::Windows(status.0))`.
+    fn map_static_neighbor_status(status: WIN32_ERROR) -> Error {
+        match status {
+            ERROR_ACCESS_DENIED => Error::PermissionDenied,
+            ERROR_NOT_FOUND => Error::NotFound,
+            ERROR_OBJECT_ALREADY_EXISTS => Error::AlreadyExists,
+            ERROR_NOT_SUPPORTED => Error::Unsupported,
+            other => Error::Platform(PlatformErrorCode::Windows(other.0)),
+        }
+    }
+
     #[test]
     fn interface_configuration_uses_legacy_admin_status_values() {
         assert_eq!(
@@ -1867,6 +1907,35 @@ mod tests {
             Some(ipv6)
         );
         assert_eq!(ipv6_delete.PhysicalAddressLength, 0);
+    }
+
+    #[test]
+    fn static_neighbor_status_maps_documented_create_delete_errors() {
+        assert!(matches!(
+            map_static_neighbor_status(ERROR_ACCESS_DENIED),
+            Error::PermissionDenied
+        ));
+        assert!(matches!(
+            map_static_neighbor_status(ERROR_NOT_FOUND),
+            Error::NotFound
+        ));
+        assert!(matches!(
+            map_static_neighbor_status(ERROR_OBJECT_ALREADY_EXISTS),
+            Error::AlreadyExists
+        ));
+        assert!(matches!(
+            map_static_neighbor_status(ERROR_NOT_SUPPORTED),
+            Error::Unsupported
+        ));
+    }
+
+    #[test]
+    fn static_neighbor_status_falls_back_to_platform_code_for_unmapped_status() {
+        let unmapped = WIN32_ERROR(87); // ERROR_INVALID_PARAMETER: not a dedicated Error variant here.
+        match map_static_neighbor_status(unmapped) {
+            Error::Platform(PlatformErrorCode::Windows(code)) => assert_eq!(code, 87),
+            other => panic!("expected Error::Platform(Windows(87)), got {other:?}"),
+        }
     }
 
     #[test]
