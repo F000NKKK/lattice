@@ -256,10 +256,12 @@ Provider-traits, по одному на возможность, а не один
   входной тип, `StaticNeighbor`, отделён от `NeighborEntry`: он не содержит ни
   синтезированного `NeighborId`, ни наблюдаемого `NeighborState`, и требует
   MAC-адрес, поскольку на этом этапе создаются только статические L2-записи.
-  По состоянию на Stage 0.17 Slice B этот трейт и `Capability::NEIGHBOR_MUTATION`
-  определены только на уровне model/platform: ни один backend их ещё не
-  реализует, а facade не выполняет прямую передачу вызовов (см. ADR-0001,
-  статус всё ещё `proposed`).
+  По состоянию на Stage 0.17 Slice C `net-lattice-backend-linux` реализует
+  этот трейт (`RTM_NEWNEIGH`/`RTM_DELNEIGH` через `rtnetlink`,
+  `NUD_PERMANENT`, защита от удаления не-`Permanent` записи) и заявляет
+  `Capability::NEIGHBOR_MUTATION`; Windows и macOS его ещё не реализуют, а
+  facade `net-lattice` не выполняет прямую передачу вызовов ни на одной
+  платформе (см. ADR-0001, статус всё ещё `proposed`).
 - `DnsProvider` — чтение/запись конфигурации DNS-резолвера.
 - `AddressProvider` — список IP-адресов, назначенных интерфейсам.
 - `AddressMutator` — назначение и удаление IP-адресов. Его входной тип

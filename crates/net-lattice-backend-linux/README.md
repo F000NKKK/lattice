@@ -7,9 +7,15 @@ It implements native inspection, mutation, and monitoring behind the generic
 ## What it provides
 
 - interface, address, route, neighbor, and resolver inspection;
-- route, address, resolver, and interface MTU/administrative-state mutation;
+- route, address, resolver, interface MTU/administrative-state, and static
+  ARP/NDP neighbor mutation;
 - Netlink change subscriptions and optional native async delivery;
 - translation of native errors and state into portable Net Lattice types.
+
+Static neighbor mutation (`NeighborMutator`, `Capability::NEIGHBOR_MUTATION`)
+submits real `RTM_NEWNEIGH`/`RTM_DELNEIGH` requests and is implemented in this
+backend, but it is not yet reachable through the public `net-lattice` facade
+(that wiring is a separate, not-yet-implemented stage).
 
 Applications should normally use the `net-lattice` facade, which selects this
 backend automatically on Linux. Direct use is intended for backend integration
@@ -32,10 +38,13 @@ fn main() -> net_lattice_core::Result<()> {
 ## Privileges and safety
 
 Read-only operations generally require no elevated privilege. Interface,
-address, and route changes require `CAP_NET_ADMIN`; resolver replacement also
-depends on filesystem permissions and the host resolver manager. An interface
-configuration request may carry MTU and administrative-state changes together,
-which Linux can reject after applying one field, so callers must re-read state
-after an error and use explicit transaction compensation if restoration is
-required. Privileged tests are ignored in ordinary test runs and restore the
-observed interface configuration on every exit path.
+address, route, and static neighbor changes require `CAP_NET_ADMIN`; resolver
+replacement also depends on filesystem permissions and the host resolver
+manager. An interface configuration request may carry MTU and
+administrative-state changes together, which Linux can reject after applying
+one field, so callers must re-read state after an error and use explicit
+transaction compensation if restoration is required. Removing a static
+neighbor first re-reads the neighbor table and refuses to delete a present
+but dynamically learned (non-`Permanent`) entry, returning `InvalidState`
+instead. Privileged tests are ignored in ordinary test runs and restore the
+observed interface configuration/neighbor state on every exit path.

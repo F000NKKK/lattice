@@ -21,13 +21,13 @@ use net_lattice_model::interface::{
     AdminState, DesiredAdminState, Interface, InterfaceConfig, InterfaceKind, OperationalState,
 };
 use net_lattice_model::mac::MacAddress;
-use net_lattice_model::neighbor::{NeighborEntry, NeighborId, NeighborState};
+use net_lattice_model::neighbor::{NeighborEntry, NeighborId, NeighborState, StaticNeighbor};
 use net_lattice_model::route::{Route, RouteId};
 use net_lattice_model::{IpAddress, Network};
 use net_lattice_platform::{
     AddressMutator, AddressProvider, Capability, CapabilityProvider, DnsMutator, DnsProvider,
-    EventProvider, EventReceiver, InterfaceMutator, InterfaceProvider, NeighborProvider,
-    RouteProvider,
+    EventProvider, EventReceiver, InterfaceMutator, InterfaceProvider, NeighborMutator,
+    NeighborProvider, RouteProvider,
 };
 #[cfg(feature = "async")]
 use net_lattice_platform::{TokioEventProvider, TokioEventReceiver};
@@ -85,6 +85,34 @@ fn rtnetlink_error_code(err: &rtnetlink::Error) -> PlatformErrorCode {
             PlatformErrorCode::Linux(message.code.map(i32::from).unwrap_or(0))
         }
         _ => PlatformErrorCode::Linux(0),
+    }
+}
+
+/// Maps an `RTM_NEWNEIGH`/`RTM_DELNEIGH` Netlink failure to a semantic
+/// [`Error`], per ADR-0001's static-neighbor mutation contract.
+///
+/// Unlike [`rtnetlink_error_code`] (used by the address/route/interface
+/// mutators, which deliberately pass the raw errno through as
+/// `Error::Platform` — see
+/// `rtnetlink_error_code_passes_through_raw_errno_without_semantic_mapping`),
+/// `NeighborMutator` requires a caller-facing distinction between "already
+/// exists", "no such destination/interface", and "permission denied" so a
+/// plan-level compensator can react to the specific failure ADR-0001 calls
+/// out. `EEXIST` (`errno` 17) maps to [`Error::AlreadyExists`]; `ENOENT`
+/// (`errno` 2, missing destination) and `ENODEV` (`errno` 19, missing
+/// interface) map to [`Error::NotFound`]; `EPERM`/`EACCES` (`errno` 1/13)
+/// map to [`Error::PermissionDenied`]. Any other Netlink error, or a
+/// non-`NetlinkError` transport failure, falls back to `Error::Platform`
+/// with the raw code, matching every other mutator in this backend.
+fn neighbor_mutation_error(err: rtnetlink::Error) -> Error {
+    match &err {
+        rtnetlink::Error::NetlinkError(message) => match message.code.map(i32::from) {
+            Some(-17) => Error::AlreadyExists,
+            Some(-2) | Some(-19) => Error::NotFound,
+            Some(-1) | Some(-13) => Error::PermissionDenied,
+            _ => Error::Platform(rtnetlink_error_code(&err)),
+        },
+        _ => Error::Platform(rtnetlink_error_code(&err)),
     }
 }
 
@@ -665,6 +693,109 @@ impl NeighborProvider for LinuxBackend {
     }
 }
 
+/// Builds the `ndmsg` payload used to select an existing entry for
+/// `RTM_DELNEIGH`. Per `rtnetlink(7)`, `RTM_DELNEIGH` selects by
+/// family/ifindex/`NDA_DST` and does not require `NDA_LLADDR`, so this
+/// deliberately omits the link-layer address attribute that
+/// `NeighbourHandle::add` sets.
+/// Guards `remove_static_neighbor` against deleting a present but
+/// dynamically learned (non-permanent) ARP/NDP cache entry: this is the
+/// safety property ADR-0001 exists for. Only a currently `Permanent` entry
+/// may proceed to `RTM_DELNEIGH`.
+fn ensure_removable_static_neighbor_state(state: NeighborState) -> Result<()> {
+    if state == NeighborState::Permanent {
+        Ok(())
+    } else {
+        Err(Error::InvalidState)
+    }
+}
+
+fn static_neighbor_del_message(interface_index: u32, destination: IpAddr) -> NeighbourMessage {
+    let mut message = NeighbourMessage::default();
+    message.header.family = match destination {
+        IpAddr::V4(_) => rtnetlink::packet_route::AddressFamily::Inet,
+        IpAddr::V6(_) => rtnetlink::packet_route::AddressFamily::Inet6,
+    };
+    message.header.ifindex = interface_index;
+    message.attributes = vec![NeighbourAttribute::Destination(match destination {
+        IpAddr::V4(address) => NeighbourAddress::Inet(address),
+        IpAddr::V6(address) => NeighbourAddress::Inet6(address),
+    })];
+    message
+}
+
+impl NeighborMutator for LinuxBackend {
+    type StaticNeighbor = StaticNeighbor;
+    type NeighborEntry = NeighborEntry;
+
+    /// Submits `RTM_NEWNEIGH` with `NUD_PERMANENT` and `NDA_LLADDR` via
+    /// `rtnetlink 0.21`'s `neighbours().add(index, destination)` builder,
+    /// then re-reads the neighbor table so the returned entry reflects what
+    /// the kernel now actually holds (`ReadAfterWrite`, per ADR-0001) rather
+    /// than a synthesized guess. `EEXIST` maps to [`Error::AlreadyExists`],
+    /// `ENODEV`/`ENOENT` to [`Error::NotFound`], and `EPERM`/`EACCES` to
+    /// [`Error::PermissionDenied`]; any other Netlink failure surfaces as
+    /// `Error::Platform` with the raw errno.
+    fn add_static_neighbor(&self, neighbor: Self::StaticNeighbor) -> Result<Self::NeighborEntry> {
+        let interface_index =
+            u32::try_from(neighbor.interface_id.value()).map_err(|_| Error::NotFound)?;
+        let destination = ip_address_to_std(neighbor.address);
+        let mac = neighbor.mac.octets();
+
+        self.runtime.block_on(async {
+            self.handle
+                .neighbours()
+                .add(interface_index, destination)
+                .link_layer_address(&mac)
+                .execute()
+                .await
+                .map_err(neighbor_mutation_error)
+        })?;
+
+        self.neighbors()?
+            .into_iter()
+            .find(|entry| {
+                entry.interface_index == interface_index && entry.address == neighbor.address
+            })
+            .ok_or(Error::InvalidState)
+    }
+
+    /// Deletes a static entry through `RTM_DELNEIGH`, but only after
+    /// confirming through [`NeighborProvider::neighbors`] that a matching
+    /// `(interface_id, address)` entry currently exists and is
+    /// `NeighborState::Permanent`. This is the safety property ADR-0001
+    /// exists for: a present but dynamically learned (non-permanent)
+    /// ARP/NDP cache entry is never deleted by this call. A missing target
+    /// returns [`Error::NotFound`]; a present but non-permanent target
+    /// returns [`Error::InvalidState`].
+    fn remove_static_neighbor(&self, neighbor: Self::StaticNeighbor) -> Result<()> {
+        let interface_index =
+            u32::try_from(neighbor.interface_id.value()).map_err(|_| Error::NotFound)?;
+
+        let observed = self
+            .neighbors()?
+            .into_iter()
+            .find(|entry| {
+                entry.interface_index == interface_index && entry.address == neighbor.address
+            })
+            .ok_or(Error::NotFound)?;
+
+        ensure_removable_static_neighbor_state(observed.state)?;
+
+        let destination = ip_address_to_std(neighbor.address);
+        let message = static_neighbor_del_message(interface_index, destination);
+
+        self.runtime.block_on(async {
+            self.handle
+                .neighbours()
+                .del(message)
+                .execute()
+                .await
+                .map_err(neighbor_mutation_error)
+        })
+    }
+}
+
 /// Parses the `nameserver`/`search`/`domain` directives out of a
 /// `resolv.conf`-format file (`man 5 resolv.conf`) — the same format on
 /// Linux and BSD/macOS, so this parser is shared verbatim by
@@ -733,13 +864,18 @@ impl CapabilityProvider for LinuxBackend {
     /// `MONITORING` capability. `VRF`/`NAMESPACES` are left unset — Linux
     /// genuinely supports both at the kernel level, but Net Lattice doesn't
     /// implement either yet, and a `Capability` this backend can't actually
-    /// act on would be a lie to the caller.
+    /// act on would be a lie to the caller. `NEIGHBOR_MUTATION` is now
+    /// truthful too: `NeighborMutator` submits real `RTM_NEWNEIGH`/
+    /// `RTM_DELNEIGH` requests (see `impl NeighborMutator for LinuxBackend`).
+    /// This capability is not yet reachable through the public `net-lattice`
+    /// facade — that wiring is Stage 0.17 Slice D, not this backend.
     fn capabilities(&self) -> Capability {
         Capability::IPV6
             | Capability::MONITORING
             | Capability::DNS_MUTATION
             | Capability::INTERFACE_ADMIN_STATE
             | Capability::INTERFACE_MTU
+            | Capability::NEIGHBOR_MUTATION
     }
 }
 
@@ -935,10 +1071,13 @@ mod tests {
     use net_lattice_ip::{Ipv4Address, Ipv4Network, Ipv4PrefixLength};
     use std::sync::{Mutex, MutexGuard, OnceLock};
 
-    /// Builds the `ndmsg` payload shape that rtnetlink 0.21's
-    /// `neighbours().add(index, destination)` starts with before adding its
-    /// `NDA_LLADDR` attribute. This is deliberately test-local: Stage 0.17
-    /// has not accepted a public static-neighbor mutation contract yet.
+    /// Builds the same `ndmsg` payload shape that
+    /// `impl NeighborMutator for LinuxBackend`'s `add_static_neighbor`
+    /// produces via `rtnetlink 0.21`'s `neighbours().add(index,
+    /// destination).link_layer_address(...)` builder. Reconstructed here
+    /// (rather than calling `NeighbourAddRequest` directly, whose
+    /// constructor is `pub(crate)` inside `rtnetlink`) so this deterministic
+    /// test can assert the exact wire shape without a live Netlink socket.
     fn static_neighbour_add_fixture(
         interface_index: u32,
         destination: IpAddr,
@@ -958,27 +1097,6 @@ mod tests {
             }),
             NeighbourAttribute::LinkLayerAddress(mac.to_vec()),
         ];
-        message
-    }
-
-    /// Builds the `ndmsg` payload `rtnetlink 0.21`'s `NeighbourHandle::del`
-    /// expects (it takes a caller-built `NeighbourMessage` directly, unlike
-    /// `add`). Per `rtnetlink(7)`, `RTM_DELNEIGH` selects by
-    /// family/ifindex/`NDA_DST` and does not require `NDA_LLADDR`, so this
-    /// fixture deliberately omits the link-layer address attribute the ADD
-    /// fixture sets. Deliberately test-local, same rationale as
-    /// `static_neighbour_add_fixture`.
-    fn static_neighbour_del_fixture(interface_index: u32, destination: IpAddr) -> NeighbourMessage {
-        let mut message = NeighbourMessage::default();
-        message.header.family = match destination {
-            IpAddr::V4(_) => rtnetlink::packet_route::AddressFamily::Inet,
-            IpAddr::V6(_) => rtnetlink::packet_route::AddressFamily::Inet6,
-        };
-        message.header.ifindex = interface_index;
-        message.attributes = vec![NeighbourAttribute::Destination(match destination {
-            IpAddr::V4(address) => NeighbourAddress::Inet(address),
-            IpAddr::V6(address) => NeighbourAddress::Inet6(address),
-        })];
         message
     }
 
@@ -1093,6 +1211,7 @@ mod tests {
         assert!(capabilities.contains(Capability::DNS_MUTATION));
         assert!(capabilities.contains(Capability::INTERFACE_ADMIN_STATE));
         assert!(capabilities.contains(Capability::INTERFACE_MTU));
+        assert!(capabilities.contains(Capability::NEIGHBOR_MUTATION));
     }
 
     #[test]
@@ -1466,9 +1585,9 @@ mod tests {
     }
 
     #[test]
-    fn static_neighbour_del_fixtures_select_by_destination_without_lladdr() {
+    fn static_neighbor_del_message_selects_by_destination_without_lladdr() {
         let ipv4 =
-            static_neighbour_del_fixture(7, IpAddr::V4(std::net::Ipv4Addr::new(192, 0, 2, 17)));
+            static_neighbor_del_message(7, IpAddr::V4(std::net::Ipv4Addr::new(192, 0, 2, 17)));
         assert_eq!(
             ipv4.header.family,
             rtnetlink::packet_route::AddressFamily::Inet
@@ -1488,7 +1607,7 @@ mod tests {
             "RTM_DELNEIGH selection does not require NDA_LLADDR"
         );
 
-        let ipv6 = static_neighbour_del_fixture(
+        let ipv6 = static_neighbor_del_message(
             9,
             IpAddr::V6("2001:db8:0:17::1".parse().expect("valid IPv6 NDP address")),
         );
@@ -1524,6 +1643,59 @@ mod tests {
         eacces_message.code = std::num::NonZeroI32::new(-13);
         let eacces = rtnetlink::Error::NetlinkError(eacces_message);
         assert_eq!(rtnetlink_error_code(&eacces), PlatformErrorCode::Linux(-13));
+    }
+
+    fn netlink_error_with_code(code: i32) -> rtnetlink::Error {
+        let mut message = rtnetlink::packet_core::ErrorMessage::default();
+        message.code = std::num::NonZeroI32::new(code);
+        rtnetlink::Error::NetlinkError(message)
+    }
+
+    #[test]
+    fn neighbor_mutation_error_maps_eexist_enoent_enodev_eperm_and_eacces() {
+        assert!(matches!(
+            neighbor_mutation_error(netlink_error_with_code(-17)),
+            Error::AlreadyExists
+        ));
+        assert!(matches!(
+            neighbor_mutation_error(netlink_error_with_code(-2)),
+            Error::NotFound
+        ));
+        assert!(matches!(
+            neighbor_mutation_error(netlink_error_with_code(-19)),
+            Error::NotFound
+        ));
+        assert!(matches!(
+            neighbor_mutation_error(netlink_error_with_code(-1)),
+            Error::PermissionDenied
+        ));
+        assert!(matches!(
+            neighbor_mutation_error(netlink_error_with_code(-13)),
+            Error::PermissionDenied
+        ));
+        assert!(matches!(
+            neighbor_mutation_error(netlink_error_with_code(-22)),
+            Error::Platform(PlatformErrorCode::Linux(-22))
+        ));
+    }
+
+    #[test]
+    fn ensure_removable_static_neighbor_state_rejects_non_permanent_entries() {
+        assert!(ensure_removable_static_neighbor_state(NeighborState::Permanent).is_ok());
+        for dynamic_state in [
+            NeighborState::Incomplete,
+            NeighborState::Reachable,
+            NeighborState::Stale,
+            NeighborState::Delay,
+            NeighborState::Probe,
+            NeighborState::Failed,
+            NeighborState::Unknown,
+        ] {
+            assert!(matches!(
+                ensure_removable_static_neighbor_state(dynamic_state),
+                Err(Error::InvalidState)
+            ));
+        }
     }
 
     #[test]
@@ -2130,6 +2302,125 @@ mod tests {
             absent,
             "removed IPv6 address was still present in addresses() afterward"
         );
+    }
+
+    /// Exercises the complete static-neighbor mutation path against the real
+    /// kernel for an IPv4 ARP entry: add a permanent entry on `lo`, confirm
+    /// it reads back as `NeighborState::Permanent` with the requested MAC
+    /// (`ReadAfterWrite`), confirm the non-permanent-target guard rejects a
+    /// mismatched-state removal attempt is unreachable here (this entry is
+    /// permanent by construction), then remove it and confirm it is gone.
+    /// Uses TEST-NET-2 (RFC 5737 `198.51.100.0/24`), distinct from the
+    /// address/route tests' TEST-NET-1/TEST-NET-3 ranges so concurrent
+    /// kernel state never overlaps.
+    #[test]
+    #[ignore = "requires CAP_NET_ADMIN; run with `sudo -E cargo test -p net-lattice-backend-linux add_then_remove_static_neighbor_round_trips_through_the_kernel -- --ignored`"]
+    fn add_then_remove_static_neighbor_round_trips_through_the_kernel() {
+        let _guard = kernel_test_guard();
+        let backend = LinuxBackend::new().expect("failed to open a Netlink connection");
+        let interface_index = loopback_interface_index(&backend);
+        let interface_id = Id::new(interface_index as u64);
+        let address = IpAddress::from(Ipv4Address::new(198, 51, 100, 77));
+        let mac = MacAddress::new([0x02, 0x00, 0x00, 0x00, 0x00, 0x77]);
+        let neighbor = StaticNeighbor::new(interface_id, address, mac);
+
+        // Recover from an interrupted prior run before attempting the add.
+        let _ = backend.remove_static_neighbor(neighbor);
+
+        let added = backend
+            .add_static_neighbor(neighbor)
+            .expect("add_static_neighbor failed - are you running with CAP_NET_ADMIN?");
+        assert_eq!(added.interface_index, interface_index);
+        assert_eq!(added.address, address);
+        assert_eq!(added.mac, Some(mac));
+        assert_eq!(added.state, NeighborState::Permanent);
+
+        let present = backend
+            .neighbors()
+            .expect("neighbors() failed after add_static_neighbor")
+            .into_iter()
+            .any(|entry| entry.interface_index == interface_index && entry.address == address);
+
+        backend
+            .remove_static_neighbor(neighbor)
+            .expect("remove_static_neighbor failed after successful add_static_neighbor");
+        let absent = !backend
+            .neighbors()
+            .expect("neighbors() failed after remove_static_neighbor")
+            .into_iter()
+            .any(|entry| entry.interface_index == interface_index && entry.address == address);
+
+        assert!(
+            present,
+            "added static neighbor was not present in neighbors() afterward"
+        );
+        assert!(
+            absent,
+            "removed static neighbor was still present in neighbors() afterward"
+        );
+        assert!(matches!(
+            backend.remove_static_neighbor(neighbor),
+            Err(Error::NotFound)
+        ));
+    }
+
+    /// Exercises the complete static-neighbor mutation path against the real
+    /// kernel for an IPv6 NDP entry, mirroring
+    /// `add_then_remove_static_neighbor_round_trips_through_the_kernel`.
+    /// Uses `2001:db8:5::1` (RFC 3849 documentation prefix), a subnet
+    /// distinct from every other IPv6 subnet used by the other ignored
+    /// tests in this module.
+    #[test]
+    #[ignore = "requires CAP_NET_ADMIN; run with `sudo -E cargo test -p net-lattice-backend-linux add_then_remove_ipv6_static_neighbor_round_trips_through_the_kernel -- --ignored`"]
+    fn add_then_remove_ipv6_static_neighbor_round_trips_through_the_kernel() {
+        let _guard = kernel_test_guard();
+        let backend = LinuxBackend::new().expect("failed to open a Netlink connection");
+        let interface_index = loopback_interface_index(&backend);
+        let interface_id = Id::new(interface_index as u64);
+        let address = IpAddress::from(net_lattice_ip::Ipv6Address::new([
+            0x2001, 0xdb8, 5, 0, 0, 0, 0, 1,
+        ]));
+        let mac = MacAddress::new([0x02, 0x00, 0x00, 0x00, 0x05, 0x01]);
+        let neighbor = StaticNeighbor::new(interface_id, address, mac);
+
+        // Recover from an interrupted prior run before attempting the add.
+        let _ = backend.remove_static_neighbor(neighbor);
+
+        let added = backend
+            .add_static_neighbor(neighbor)
+            .expect("add_static_neighbor failed - are you running with CAP_NET_ADMIN?");
+        assert_eq!(added.interface_index, interface_index);
+        assert_eq!(added.address, address);
+        assert_eq!(added.mac, Some(mac));
+        assert_eq!(added.state, NeighborState::Permanent);
+
+        let present = backend
+            .neighbors()
+            .expect("neighbors() failed after add_static_neighbor")
+            .into_iter()
+            .any(|entry| entry.interface_index == interface_index && entry.address == address);
+
+        backend
+            .remove_static_neighbor(neighbor)
+            .expect("remove_static_neighbor failed after successful add_static_neighbor");
+        let absent = !backend
+            .neighbors()
+            .expect("neighbors() failed after remove_static_neighbor")
+            .into_iter()
+            .any(|entry| entry.interface_index == interface_index && entry.address == address);
+
+        assert!(
+            present,
+            "added IPv6 static neighbor was not present in neighbors() afterward"
+        );
+        assert!(
+            absent,
+            "removed IPv6 static neighbor was still present in neighbors() afterward"
+        );
+        assert!(matches!(
+            backend.remove_static_neighbor(neighbor),
+            Err(Error::NotFound)
+        ));
     }
 
     /// Exercises the interface-configuration path without inventing a test

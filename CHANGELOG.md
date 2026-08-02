@@ -13,8 +13,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `proposed`): `StaticNeighbor` desired-neighbor intent, `Mutation::{AddStaticNeighbor,
   RemoveStaticNeighbor}` with their semantics, `MutationSnapshot::Neighbor`,
   the `NeighborMutator` associated-type trait, and `Capability::NEIGHBOR_MUTATION`.
-  No backend implements `NeighborMutator` yet and the facade does not forward
-  to it; native backend wiring and facade/executor integration remain
+- Stage 0.17 Linux native static-neighbor mutation: `net-lattice-backend-linux`
+  implements `NeighborMutator` (`RTM_NEWNEIGH`/`RTM_DELNEIGH` via `rtnetlink`,
+  `NUD_PERMANENT`, `NDA_LLADDR`, IPv4 and IPv6) and truthfully advertises
+  `Capability::NEIGHBOR_MUTATION`. Removal first re-reads the neighbor table
+  and refuses to delete a present but non-`Permanent` (dynamically learned)
+  entry, returning `InvalidState`; a missing target returns `NotFound`, and
+  native `EEXIST`/`EPERM`/`EACCES` map to `AlreadyExists`/`PermissionDenied`.
+  Windows and macOS do not implement `NeighborMutator` yet, and the
+  `net-lattice` facade does not forward to it on any platform; native backend
+  wiring for the other two platforms and facade/executor integration remain
   separate follow-up slices.
 - Stage 0.16 interface configuration: `InterfaceConfig` partial desired
   patches and `DesiredAdminState`, explicitly separate from observed
