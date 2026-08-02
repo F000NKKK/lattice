@@ -1672,6 +1672,7 @@ fn push_mac_gateway(
 fn static_neighbor_add_request(
     destination: IpAddr,
     interface_index: u32,
+    sdl_type: libc::c_uchar,
     mac: [u8; 6],
     seq: libc::c_int,
 ) -> Vec<u8> {
@@ -1686,10 +1687,42 @@ fn static_neighbor_add_request(
     hdr.rtm_seq = seq;
     let mut offset = mem::size_of::<libc::rt_msghdr>();
     offset += push_sockaddr(&mut buf, offset, destination);
-    offset += push_mac_gateway(&mut buf, offset, interface_index, mac);
+    offset += push_mac_gateway(&mut buf, offset, interface_index, sdl_type, mac);
     hdr.rtm_msglen = offset as u16;
     buf.truncate(offset);
     buf
+}
+
+/// Reads the real link type (`IFT_ETHER`, `IFT_LOOP`, ...) for `interface_index`
+/// directly from `getifaddrs`'s `AF_LINK` entry — the same source
+/// `interfaces()`/`link_entry_to_interface` already read `sdl_type` from via
+/// `ift_type_to_kind`. Returns `0` if the interface has no `AF_LINK` entry
+/// (should not happen for a real, currently-existing interface, but this is
+/// a best-effort lookup, not a hard failure path — `static_neighbor_add_request`
+/// callers should treat a `0` result as a signal something is already wrong
+/// with the target interface rather than silently proceeding).
+fn interface_sdl_type(interface_index: u32) -> libc::c_uchar {
+    let mut head: *mut libc::ifaddrs = std::ptr::null_mut();
+    unsafe {
+        if libc::getifaddrs(&mut head) != 0 {
+            return 0;
+        }
+        let mut cursor = head;
+        let mut result = 0;
+        while !cursor.is_null() {
+            let sa = (*cursor).ifa_addr;
+            if !sa.is_null() && (*sa).sa_family as i32 == libc::AF_LINK {
+                let sdl = &*(sa as *const libc::sockaddr_dl);
+                if sdl.sdl_index as u32 == interface_index {
+                    result = sdl.sdl_type;
+                    break;
+                }
+            }
+            cursor = (*cursor).ifa_next;
+        }
+        libc::freeifaddrs(head);
+        result
+    }
 }
 
 /// Builds a self-contained `RTM_GET` static-ARP/NDP lookup request: the
