@@ -1,24 +1,25 @@
 # Claude Code entry point
 
-This repository's durable workflow is defined in `AGENTS.md` (repo root) and
-`.codex/` (README, `rules/`, `agents/`, `templates/`). That documentation was
-written for Codex but applies to any agent working in this repo, including
-Claude Code. Read it before making changes:
+This repository's durable workflow for Claude Code lives natively under
+`.claude/` (`README.md`, `rules/`, `agents/`, `templates/`), ported from the
+Codex-oriented `AGENTS.md`/`.codex/` documentation so both agents follow the
+same role pipeline and rules without Claude Code needing to read Codex's
+files directly. Read before making changes:
 
 1. `index.md` — workspace map and dependency direction.
 2. `ARCHITECTURE.md` / `ARCHITECTURE.ru.md` — relevant roadmap sections.
-3. `.codex/README.md`, `.codex/rules/*.md`, and the matching role profile in
-   `.codex/agents/` (`researcher.md`, `architect.md`, `implementer.md`,
+3. `.claude/README.md`, `.claude/rules/*.md`, and the matching role profile
+   in `.claude/agents/` (`researcher.md`, `architect.md`, `implementer.md`,
    `reviewer.md`).
 4. The active task workspace at `.ai/<task-name>/` (currently `.ai/0.17/`):
-   its `plan.md`, `AUDIT.md`, and `adr/` records. `.ai/` is gitignored —
-   intentional local agent context, not published crate content.
+   its `plan.md`, `AUDIT.md`, and `adr/` records, scaffolded from
+   `.claude/templates/`. `.ai/` is gitignored — intentional local agent
+   context, not published crate content.
 
 ## Role pipeline
 
 Run bounded tasks through the four role subagents defined in
-`.claude/agents/` — ported from `.codex/agents/` with the same rules folded
-in from `.codex/rules/`:
+`.claude/agents/`:
 
 ```text
 researcher   → .claude/agents/researcher.md   (read-only: maps code/tests/docs)

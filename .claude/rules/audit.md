@@ -1,7 +1,5 @@
 # Audit and task decomposition rules
 
-Ported from `.codex/rules/audit.md`.
-
 - Start from one plan checkbox and decompose it into the applicable model,
   platform, facade, backend, test, CI, documentation, and packaging subtasks.
 - Every subtask must name its files, public API impact, platform
