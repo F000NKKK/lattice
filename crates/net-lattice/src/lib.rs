@@ -1428,6 +1428,240 @@ mod tests {
             )),
             Ok(MutationSnapshot::Interface(Some(_)))
         ));
+        assert!(matches!(
+            lattice.snapshot_for_mutation(&Mutation::AddStaticNeighbor(static_neighbor())),
+            Ok(MutationSnapshot::Neighbor(None))
+        ));
+        assert!(matches!(
+            lattice
+                .snapshot_for_mutation(&Mutation::RemoveStaticNeighbor(existing_static_neighbor())),
+            Ok(MutationSnapshot::Neighbor(Some(_)))
+        ));
+    }
+
+    #[test]
+    fn facade_rejects_static_neighbor_plan_without_neighbor_mutation_capability() {
+        let lattice = lattice(Capability::empty());
+        let plan = MutationPlan::from_operations([Mutation::AddStaticNeighbor(static_neighbor())]);
+
+        assert!(matches!(
+            lattice.validate_plan(&plan),
+            Err(Error::Unsupported)
+        ));
+        let mut options = ExecutionOptions::default();
+        let report = lattice.execute_plan(&plan, &mut options);
+        assert!(matches!(
+            report.outcome(0),
+            Some(MutationOutcome::Failed {
+                error: Error::Unsupported,
+                may_have_applied: false,
+            })
+        ));
+        assert!(matches!(
+            report.operation_reports()[0].stop_reason,
+            Some(MutationStopReason::ValidationFailed)
+        ));
+    }
+
+    #[test]
+    fn facade_validates_static_neighbor_preconditions() {
+        let lattice = lattice(Capability::NEIGHBOR_MUTATION);
+
+        // Missing interface.
+        assert!(matches!(
+            lattice.validate_plan(&MutationPlan::from_operations([
+                Mutation::AddStaticNeighbor(StaticNeighbor::new(
+                    InterfaceId::new(99),
+                    IpAddress::from(Ipv4Address::new(192, 0, 2, 9)),
+                    MacAddress::new([0x02, 0x00, 0x00, 0x00, 0x00, 0x09]),
+                ))
+            ])),
+            Err(Error::NotFound)
+        ));
+
+        // Duplicate target (IPv4 and IPv6): the target already exists.
+        assert!(matches!(
+            lattice.validate_plan(&MutationPlan::from_operations([
+                Mutation::AddStaticNeighbor(existing_static_neighbor())
+            ])),
+            Err(Error::AlreadyExists)
+        ));
+        assert!(matches!(
+            lattice.validate_plan(&MutationPlan::from_operations([
+                Mutation::AddStaticNeighbor(existing_ipv6_static_neighbor())
+            ])),
+            Err(Error::AlreadyExists)
+        ));
+
+        // Absent target: nothing to remove.
+        assert!(matches!(
+            lattice.validate_plan(&MutationPlan::from_operations([
+                Mutation::RemoveStaticNeighbor(static_neighbor())
+            ])),
+            Err(Error::NotFound)
+        ));
+
+        // Valid plans.
+        lattice
+            .validate_plan(&MutationPlan::from_operations([
+                Mutation::AddStaticNeighbor(static_neighbor()),
+            ]))
+            .expect("new static neighbor is addable");
+        lattice
+            .validate_plan(&MutationPlan::from_operations([
+                Mutation::RemoveStaticNeighbor(existing_static_neighbor()),
+            ]))
+            .expect("existing static neighbor is removable");
+        lattice
+            .validate_plan(&MutationPlan::from_operations([
+                Mutation::RemoveStaticNeighbor(existing_ipv6_static_neighbor()),
+            ]))
+            .expect("existing ipv6 static neighbor is removable");
+    }
+
+    #[test]
+    fn facade_executes_static_neighbor_plan_and_preserves_report_indices() {
+        let lattice = lattice(Capability::NEIGHBOR_MUTATION);
+        let plan = MutationPlan::from_operations([
+            Mutation::AddStaticNeighbor(static_neighbor()),
+            Mutation::AddRoute(planned_route()),
+        ]);
+
+        let mut options = ExecutionOptions::default();
+        let report = lattice.execute_plan(&plan, &mut options);
+
+        assert_eq!(report.len(), plan.len());
+        assert!(report.is_success());
+        assert_eq!(report.applied_count(), 2);
+        assert!(matches!(report.outcome(0), Some(MutationOutcome::Applied)));
+        assert!(matches!(report.outcome(1), Some(MutationOutcome::Applied)));
+        assert!(matches!(report.rollback(), RollbackStatus::NotNeeded));
+    }
+
+    #[test]
+    fn facade_cancellation_stops_static_neighbor_plan_at_an_operation_boundary() {
+        let lattice = lattice(Capability::NEIGHBOR_MUTATION);
+        let plan = MutationPlan::from_operations([
+            Mutation::AddStaticNeighbor(static_neighbor()),
+            Mutation::RemoveStaticNeighbor(existing_static_neighbor()),
+        ]);
+
+        let mut cancelled = |index, _: &Mutation| index == 1;
+        let mut options = ExecutionOptions::default().cancellation(&mut cancelled);
+        let report = lattice.execute_plan(&plan, &mut options);
+
+        assert_eq!(report.applied_count(), 1);
+        assert_eq!(report.not_attempted_count(), 1);
+        assert!(matches!(report.outcome(0), Some(MutationOutcome::Applied)));
+        assert!(matches!(
+            report.outcome(1),
+            Some(MutationOutcome::NotAttempted)
+        ));
+        assert!(matches!(
+            report.operation_reports()[1].stop_reason,
+            Some(MutationStopReason::Cancelled)
+        ));
+        assert!(matches!(report.rollback(), RollbackStatus::NotAttempted));
+    }
+
+    #[test]
+    /// Contract test: `AddStaticNeighbor`/`RemoveStaticNeighbor` are
+    /// `may_partially_apply = false` per ADR-0001, so a native failure is
+    /// reported without the partial-application caveat `SetDnsConfig`/
+    /// `SetInterfaceConfig` carry.
+    fn facade_reports_no_partial_application_on_failed_static_neighbor_operation() {
+        let lattice = Lattice {
+            backend: TestBackend {
+                capabilities: Capability::NEIGHBOR_MUTATION,
+                fail_events: false,
+                fail_mutations: true,
+            },
+        };
+        let add_plan =
+            MutationPlan::from_operations([Mutation::AddStaticNeighbor(static_neighbor())]);
+        let mut options = ExecutionOptions::default();
+        let report = lattice.execute_plan(&add_plan, &mut options);
+        assert!(matches!(
+            report.outcome(0),
+            Some(MutationOutcome::Failed {
+                may_have_applied: false,
+                ..
+            })
+        ));
+        assert!(matches!(report.rollback(), RollbackStatus::NotAttempted));
+
+        let remove_plan = MutationPlan::from_operations([Mutation::RemoveStaticNeighbor(
+            existing_static_neighbor(),
+        )]);
+        let mut options = ExecutionOptions::default();
+        let report = lattice.execute_plan(&remove_plan, &mut options);
+        assert!(matches!(
+            report.outcome(0),
+            Some(MutationOutcome::Failed {
+                may_have_applied: false,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn facade_executes_and_compensates_a_static_neighbor_plan() {
+        let lattice = lattice(Capability::NEIGHBOR_MUTATION);
+        let neighbor = static_neighbor();
+        let observed = NeighborEntry::new(
+            NeighborId::new(1),
+            neighbor.interface_id.value() as u32,
+            neighbor.address,
+        )
+        .with_mac(neighbor.mac)
+        .with_state(NeighborState::Permanent);
+        let plan = MutationPlan::from_operations([
+            Mutation::AddStaticNeighbor(neighbor.clone()),
+            Mutation::RemoveStaticNeighbor(StaticNeighbor::new(
+                neighbor.interface_id,
+                observed.address,
+                neighbor.mac,
+            )),
+        ]);
+        lattice
+            .validate_plan(&plan)
+            .expect("static neighbor plan is valid before execution");
+
+        let mut snapshots = Vec::new();
+        let mut compensated = Vec::new();
+        let mut cancellation = |index, _: &Mutation| index == 1;
+        let mut snapshot = |index, operation: &Mutation| {
+            snapshots.push((index, operation.clone()));
+            lattice.snapshot_for_mutation(operation)
+        };
+        let mut compensate = |index, operation: &Mutation, prior: Option<&MutationSnapshot>| {
+            compensated.push((index, operation.clone(), prior.cloned()));
+            Ok(())
+        };
+        let mut options = ExecutionOptions::default()
+            .cancellation(&mut cancellation)
+            .snapshot(&mut snapshot)
+            .compensation(&mut compensate);
+        let report = lattice.execute_plan(&plan, &mut options);
+
+        assert!(matches!(report.outcome(0), Some(MutationOutcome::Applied)));
+        assert!(matches!(
+            report.outcome(1),
+            Some(MutationOutcome::NotAttempted)
+        ));
+        assert!(matches!(report.rollback(), RollbackStatus::Completed));
+        assert_eq!(
+            snapshots,
+            vec![(0, Mutation::AddStaticNeighbor(neighbor.clone()))]
+        );
+        assert_eq!(
+            compensated,
+            vec![(
+                0,
+                Mutation::AddStaticNeighbor(neighbor),
+                Some(MutationSnapshot::Neighbor(None))
+            )]
+        );
     }
 
     /// Restores the observed interface configuration through the same public
