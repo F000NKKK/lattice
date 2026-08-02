@@ -1886,17 +1886,22 @@ impl NeighborMutator for DarwinBackend {
     /// the neighbor table via [`NeighborProvider::neighbors`] for a genuine
     /// read-after-write (`ReadAfterWrite` per ADR-0001) rather than trusting
     /// the ack alone — the same shape as `LinuxBackend`'s and
-    /// `WindowsBackend`'s `add_static_neighbor`.
+    /// `WindowsBackend`'s `add_static_neighbor`. The gateway's `sdl_type` is
+    /// looked up from the real interface via [`interface_sdl_type`], not
+    /// synthesized as `0` — see [`push_mac_gateway`]'s doc comment for why a
+    /// zero `sdl_type` was the confirmed cause of a live elevated-CI failure.
     fn add_static_neighbor(&self, neighbor: Self::StaticNeighbor) -> Result<Self::NeighborEntry> {
         let interface_index =
             u32::try_from(neighbor.interface_id.value()).map_err(|_| Error::NotFound)?;
         let destination = ip_address_to_std(neighbor.address);
         let mac = neighbor.mac.octets();
+        let sdl_type = interface_sdl_type(interface_index);
 
         self.runtime.block_on(async {
             let message = static_neighbor_add_request(
                 destination,
                 interface_index,
+                sdl_type,
                 mac,
                 RTM_SEQ_NEIGHBOR_ADD,
             );
@@ -2556,7 +2561,7 @@ mod tests {
     fn static_neighbor_add_request_fixture_matches_arp_and_ndp_abi_for_ipv4() {
         let destination: IpAddr = "192.0.2.7".parse().expect("valid IPv4 address");
         let mac = [0x02, 0x00, 0x00, 0x00, 0x00, 0x11];
-        let buf = static_neighbor_add_request(destination, 9, mac, FIXTURE_SEQ);
+        let buf = static_neighbor_add_request(destination, 9, IFT_ETHER, mac, FIXTURE_SEQ);
 
         let hdr = unsafe { &*(buf.as_ptr() as *const libc::rt_msghdr) };
         assert_eq!(hdr.rtm_type, RTM_ADD);
@@ -2592,7 +2597,7 @@ mod tests {
     fn static_neighbor_add_request_fixture_matches_arp_and_ndp_abi_for_ipv6() {
         let destination: IpAddr = "2001:db8::7".parse().expect("valid IPv6 address");
         let mac = [0x02, 0x00, 0x00, 0x00, 0x00, 0x22];
-        let buf = static_neighbor_add_request(destination, 9, mac, FIXTURE_SEQ);
+        let buf = static_neighbor_add_request(destination, 9, IFT_ETHER, mac, FIXTURE_SEQ);
 
         let hdr = unsafe { &*(buf.as_ptr() as *const libc::rt_msghdr) };
         assert_eq!(hdr.rtm_type, RTM_ADD);
@@ -2661,7 +2666,7 @@ mod tests {
         // deterministic gateway slice, mirroring what
         // `extract_gateway_bytes` would read out of a live kernel reply.
         let mut gateway_buf = vec![0u8; RTM_MAXSIZE];
-        let gateway_len = push_mac_gateway(&mut gateway_buf, 0, 9, mac);
+        let gateway_len = push_mac_gateway(&mut gateway_buf, 0, 9, IFT_ETHER, mac);
         let gateway = &gateway_buf[..gateway_len];
         let buf = static_neighbor_delete_request(destination, 9, gateway, FIXTURE_SEQ);
 
@@ -2718,7 +2723,7 @@ mod tests {
         let destination: IpAddr = "2001:db8::7".parse().expect("valid IPv6 address");
         let mac = [0x02, 0x00, 0x00, 0x00, 0x00, 0x44];
         let mut gateway_buf = vec![0u8; RTM_MAXSIZE];
-        let gateway_len = push_mac_gateway(&mut gateway_buf, 0, 9, mac);
+        let gateway_len = push_mac_gateway(&mut gateway_buf, 0, 9, IFT_ETHER, mac);
         let gateway = &gateway_buf[..gateway_len];
         let buf = static_neighbor_delete_request(destination, 9, gateway, FIXTURE_SEQ);
 
