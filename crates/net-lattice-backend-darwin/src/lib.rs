@@ -1860,18 +1860,27 @@ fn ensure_removable_static_neighbor_state(state: NeighborState) -> Result<()> {
 /// `static_neighbor_*_request` fixture tests (confirmed against a real
 /// macOS CI run for the request-shape half). But a real elevated macOS CI
 /// run of the ignored round-trip test found `add_static_neighbor` itself
-/// fails: `RTM_ADD`'s reply reports `rtm_errno == 0` (no native error), yet
-/// the immediate `neighbors()` re-read that follows does not find the added
-/// entry, returning `Error::InvalidState`. The root cause is not yet
-/// diagnosed — this needs interactive macOS host access, not another guess
-/// from a sandbox that cannot even link a Darwin test binary. Accordingly,
-/// `DarwinBackend::capabilities()` does **not** advertise
-/// `Capability::NEIGHBOR_MUTATION` yet, and the live two-message
+/// failed: `RTM_ADD`'s reply reported `rtm_errno == 0` (no native error), yet
+/// the immediate `neighbors()` re-read that followed did not find the added
+/// entry, returning `Error::InvalidState`. A likely root cause: the gateway
+/// `sockaddr_dl` synthesized `sdl_type: 0` instead of the target interface's
+/// real link type. Apple's own `arp.c` `set()` (lines 380-460) never sends a
+/// zero `sdl_type` — it always issues a preliminary `RTM_GET` specifically to
+/// learn it first. This backend instead reads the real `sdl_type` directly
+/// via [`interface_sdl_type`] (from `getifaddrs`'s own `AF_LINK` entry for
+/// the target interface — simpler than mimicking `arp.c`'s destination-route
+/// probe since the interface is already caller-known here). **This fix has
+/// not itself been executed anywhere yet** — this sandbox cannot link a
+/// Darwin test binary at all, and no elevated macOS CI run has re-tried this
+/// test since the fix landed. Accordingly,
+/// `DarwinBackend::capabilities()` still does **not** advertise
+/// `Capability::NEIGHBOR_MUTATION`, and the live two-message
 /// `RTM_GET`-then-`RTM_DELETE` round trip `remove_static_neighbor` performs
 /// has never been exercised against a real kernel at all (every real CI run
 /// so far failed before reaching it). Do not trust this implementation
 /// until a real elevated macOS CI run demonstrates the full round trip
-/// green.
+/// green — if it still fails, this hypothesis was wrong and needs real
+/// interactive host access to diagnose further, not a third guess.
 impl NeighborMutator for DarwinBackend {
     type StaticNeighbor = StaticNeighbor;
     type NeighborEntry = NeighborEntry;
