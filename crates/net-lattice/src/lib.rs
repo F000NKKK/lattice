@@ -1642,7 +1642,7 @@ mod tests {
         .with_mac(neighbor.mac)
         .with_state(NeighborState::Permanent);
         let plan = MutationPlan::from_operations([
-            Mutation::AddStaticNeighbor(neighbor.clone()),
+            Mutation::AddStaticNeighbor(neighbor),
             Mutation::RemoveStaticNeighbor(StaticNeighbor::new(
                 neighbor.interface_id,
                 observed.address,
@@ -1676,10 +1676,7 @@ mod tests {
             Some(MutationOutcome::NotAttempted)
         ));
         assert!(matches!(report.rollback(), RollbackStatus::Completed));
-        assert_eq!(
-            snapshots,
-            vec![(0, Mutation::AddStaticNeighbor(neighbor.clone()))]
-        );
+        assert_eq!(snapshots, vec![(0, Mutation::AddStaticNeighbor(neighbor))]);
         assert_eq!(
             compensated,
             vec![(
