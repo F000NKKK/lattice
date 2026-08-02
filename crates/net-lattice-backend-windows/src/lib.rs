@@ -1468,6 +1468,10 @@ impl EventProvider for WindowsBackend {
         }
         let (sender, receiver) = EventReceiver::bounded();
         let state = Box::into_raw(Box::new(WindowsWatchState { sender, filter }));
+        // Three registrations below, so three `MibInitialNotification`
+        // confirmations are expected before this watcher is considered
+        // live. See `RegistrationReadiness` for the full rationale.
+        let readiness = register_readiness(state.cast(), 3);
         let mut route = HANDLE::default();
         let mut interface = HANDLE::default();
         let mut address = HANDLE::default();
@@ -1477,12 +1481,15 @@ impl EventProvider for WindowsBackend {
                 AF_UNSPEC,
                 Some(route_change_callback),
                 state.cast(),
-                false,
+                true,
                 &mut route,
             )
         };
         if status.0 != 0 {
-            unsafe { drop(Box::from_raw(state)) };
+            unsafe {
+                unregister_readiness(state.cast());
+                drop(Box::from_raw(state));
+            }
             return Err(Error::Platform(PlatformErrorCode::Windows(status.0)));
         }
 
@@ -1491,13 +1498,14 @@ impl EventProvider for WindowsBackend {
                 AF_UNSPEC,
                 Some(interface_change_callback),
                 Some(state.cast()),
-                false,
+                true,
                 &mut interface,
             )
         };
         if status.0 != 0 {
             unsafe {
                 WindowsWatch::cancel(route);
+                unregister_readiness(state.cast());
                 drop(Box::from_raw(state));
             }
             return Err(Error::Platform(PlatformErrorCode::Windows(status.0)));
@@ -1508,7 +1516,7 @@ impl EventProvider for WindowsBackend {
                 AF_UNSPEC,
                 Some(address_change_callback),
                 Some(state.cast()),
-                false,
+                true,
                 &mut address,
             )
         };
@@ -1516,10 +1524,23 @@ impl EventProvider for WindowsBackend {
             unsafe {
                 WindowsWatch::cancel(route);
                 WindowsWatch::cancel(interface);
+                unregister_readiness(state.cast());
                 drop(Box::from_raw(state));
             }
             return Err(Error::Platform(PlatformErrorCode::Windows(status.0)));
         }
+
+        if !readiness.wait(REGISTRATION_READY_TIMEOUT) {
+            unsafe {
+                WindowsWatch::cancel(route);
+                WindowsWatch::cancel(interface);
+                WindowsWatch::cancel(address);
+                unregister_readiness(state.cast());
+                drop(Box::from_raw(state));
+            }
+            return Err(Error::Platform(PlatformErrorCode::Windows(ERROR_TIMEOUT)));
+        }
+        unregister_readiness(state.cast());
 
         Ok(receiver.with_subscription(WindowsWatch {
             state,
@@ -1544,6 +1565,10 @@ impl TokioEventProvider for WindowsBackend {
         }
         let (sender, receiver) = TokioEventReceiver::bounded();
         let state = Box::into_raw(Box::new(WindowsTokioWatchState { sender, filter }));
+        // Three registrations below, so three `MibInitialNotification`
+        // confirmations are expected before this watcher is considered
+        // live. See `RegistrationReadiness` for the full rationale.
+        let readiness = register_readiness(state.cast(), 3);
         let mut route = HANDLE::default();
         let mut interface = HANDLE::default();
         let mut address = HANDLE::default();
@@ -1552,12 +1577,13 @@ impl TokioEventProvider for WindowsBackend {
                 AF_UNSPEC,
                 Some(tokio_route_change_callback),
                 state.cast(),
-                false,
+                true,
                 &mut route,
             )
         };
         if status.0 != 0 {
             unsafe {
+                unregister_readiness(state.cast());
                 drop(Box::from_raw(state));
             }
             return Err(Error::Platform(PlatformErrorCode::Windows(status.0)));
@@ -1567,13 +1593,14 @@ impl TokioEventProvider for WindowsBackend {
                 AF_UNSPEC,
                 Some(tokio_interface_change_callback),
                 Some(state.cast()),
-                false,
+                true,
                 &mut interface,
             )
         };
         if status.0 != 0 {
             unsafe {
                 WindowsWatch::cancel(route);
+                unregister_readiness(state.cast());
                 drop(Box::from_raw(state));
             }
             return Err(Error::Platform(PlatformErrorCode::Windows(status.0)));
@@ -1583,7 +1610,7 @@ impl TokioEventProvider for WindowsBackend {
                 AF_UNSPEC,
                 Some(tokio_address_change_callback),
                 Some(state.cast()),
-                false,
+                true,
                 &mut address,
             )
         };
@@ -1591,10 +1618,24 @@ impl TokioEventProvider for WindowsBackend {
             unsafe {
                 WindowsWatch::cancel(route);
                 WindowsWatch::cancel(interface);
+                unregister_readiness(state.cast());
                 drop(Box::from_raw(state));
             }
             return Err(Error::Platform(PlatformErrorCode::Windows(status.0)));
         }
+
+        if !readiness.wait(REGISTRATION_READY_TIMEOUT) {
+            unsafe {
+                WindowsWatch::cancel(route);
+                WindowsWatch::cancel(interface);
+                WindowsWatch::cancel(address);
+                unregister_readiness(state.cast());
+                drop(Box::from_raw(state));
+            }
+            return Err(Error::Platform(PlatformErrorCode::Windows(ERROR_TIMEOUT)));
+        }
+        unregister_readiness(state.cast());
+
         Ok(receiver.with_subscription(WindowsTokioWatch {
             state,
             route,
