@@ -2185,12 +2185,16 @@ impl CapabilityProvider for DarwinBackend {
     /// dedicated reader. `NEIGHBOR_MUTATION` is deliberately **not**
     /// advertised yet: `impl NeighborMutator for DarwinBackend` exists
     /// (`PF_ROUTE`-based static ARP/NDP add/delete) but a real elevated
-    /// macOS CI run found `add_static_neighbor` itself fails against a real
-    /// kernel with an as-yet-undiagnosed `Error::InvalidState` (see that
-    /// impl's doc comment) — advertising this capability while it is
-    /// confirmed broken would violate ADR-0001's own principle that a claim
-    /// requires proven native
-    /// behavior, not just a type-checked implementation. Re-add this bit
+    /// macOS CI run found `add_static_neighbor` itself failed against a real
+    /// kernel with `Error::InvalidState`. A likely root cause was since
+    /// identified and fixed (`push_mac_gateway`/`interface_sdl_type` — the
+    /// `RTM_ADD` gateway was synthesizing `sdl_type: 0` instead of the
+    /// interface's real link type, unlike Apple's own `arp.c`), but that fix
+    /// has itself **not yet run against real hardware** in this
+    /// environment. Advertising this capability before a live elevated run
+    /// confirms the fix would violate ADR-0001's own principle that a claim
+    /// requires proven native behavior, not just a type-checked
+    /// implementation or a well-evidenced hypothesis. Re-add this bit only
     /// once a real elevated macOS CI run demonstrates the full round trip
     /// green. `VRF`/`NAMESPACES` are left unset: BSD/macOS has no direct
     /// equivalent and Net Lattice does not implement either domain.
