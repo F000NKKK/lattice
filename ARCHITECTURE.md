@@ -265,10 +265,15 @@ force every backend to stub out methods for features it doesn't have:
   requires a MAC address because this stage only creates static L2 mappings.
   As of Stage 0.17 Slice C, `net-lattice-backend-linux` implements this trait
   (`RTM_NEWNEIGH`/`RTM_DELNEIGH` via `rtnetlink`, `NUD_PERMANENT`, a
-  non-`Permanent`-entry deletion guard) and advertises
-  `Capability::NEIGHBOR_MUTATION`; Windows and macOS do not implement it yet,
-  and the `net-lattice` facade does not forward to it on any platform (see
-  ADR-0001, still `proposed`).
+  non-`Permanent`-entry deletion guard) and `net-lattice-backend-windows`
+  implements it (`CreateIpNetEntry2`/`DeleteIpNetEntry2` over
+  `MIB_IPNET_ROW2`, `NlnsPermanent`, the same non-`Permanent`-entry deletion
+  guard); both advertise `Capability::NEIGHBOR_MUTATION`. The Windows
+  implementation is unverified against a live elevated host in this
+  repository's development environment (only deterministic fixtures and a
+  cross-compiled type check have run; see `.ai/0.17/AUDIT.md`). macOS does
+  not implement it yet, and the `net-lattice` facade does not forward to it
+  on any platform (see ADR-0001, still `proposed`).
 - `DnsProvider` — read/write DNS resolver configuration.
 - `AddressProvider` — list IP addresses assigned to interfaces.
 - `AddressMutator` — assign and remove IP addresses. Its input is distinct

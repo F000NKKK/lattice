@@ -258,8 +258,14 @@ Provider-traits, по одному на возможность, а не один
   MAC-адрес, поскольку на этом этапе создаются только статические L2-записи.
   По состоянию на Stage 0.17 Slice C `net-lattice-backend-linux` реализует
   этот трейт (`RTM_NEWNEIGH`/`RTM_DELNEIGH` через `rtnetlink`,
-  `NUD_PERMANENT`, защита от удаления не-`Permanent` записи) и заявляет
-  `Capability::NEIGHBOR_MUTATION`; Windows и macOS его ещё не реализуют, а
+  `NUD_PERMANENT`, защита от удаления не-`Permanent` записи), а
+  `net-lattice-backend-windows` реализует его через
+  `CreateIpNetEntry2`/`DeleteIpNetEntry2` над `MIB_IPNET_ROW2` (`NlnsPermanent`,
+  та же защита от удаления не-`Permanent` записи); оба заявляют
+  `Capability::NEIGHBOR_MUTATION`. Реализация для Windows не проверена на
+  реальном хосте с повышенными привилегиями в среде разработки этого
+  репозитория (выполнены только детерминированные фикстуры и кросс-компиляция
+  с проверкой типов; см. `.ai/0.17/AUDIT.md`). macOS его ещё не реализует, а
   facade `net-lattice` не выполняет прямую передачу вызовов ни на одной
   платформе (см. ADR-0001, статус всё ещё `proposed`).
 - `DnsProvider` — чтение/запись конфигурации DNS-резолвера.

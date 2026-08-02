@@ -20,10 +20,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and refuses to delete a present but non-`Permanent` (dynamically learned)
   entry, returning `InvalidState`; a missing target returns `NotFound`, and
   native `EEXIST`/`EPERM`/`EACCES` map to `AlreadyExists`/`PermissionDenied`.
-  Windows and macOS do not implement `NeighborMutator` yet, and the
-  `net-lattice` facade does not forward to it on any platform; native backend
-  wiring for the other two platforms and facade/executor integration remain
-  separate follow-up slices.
+- Stage 0.17 Windows native static-neighbor mutation: `net-lattice-backend-windows`
+  implements `NeighborMutator` (`CreateIpNetEntry2`/`DeleteIpNetEntry2` over
+  `MIB_IPNET_ROW2`, `NlnsPermanent`, IPv4 and IPv6) and advertises
+  `Capability::NEIGHBOR_MUTATION`. Removal first re-reads the neighbor table
+  and refuses to delete a present but non-`Permanent` (dynamically learned)
+  entry, returning `InvalidState`; a missing target returns `NotFound`, and
+  native `ERROR_ACCESS_DENIED`/`ERROR_OBJECT_ALREADY_EXISTS`/`ERROR_NOT_SUPPORTED`
+  map to `PermissionDenied`/`AlreadyExists`/`Unsupported`. This implementation
+  has not been exercised against a live elevated Windows host in this
+  repository's development environment; only deterministic fixtures and a
+  cross-compiled type/lint/doc check have run (see `.ai/0.17/AUDIT.md`).
+  macOS does not implement `NeighborMutator` yet, and the `net-lattice`
+  facade does not forward to it on any platform; macOS native backend wiring
+  and facade/executor integration remain separate follow-up slices.
 - Stage 0.16 interface configuration: `InterfaceConfig` partial desired
   patches and `DesiredAdminState`, explicitly separate from observed
   `Interface` state.
