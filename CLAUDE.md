@@ -36,26 +36,19 @@ resolved. For small, tightly-scoped work it's fine to fold a role into your
 own turn instead of spawning a subagent, but still write the audit entry as
 if that role had run.
 
-## Translating remaining Codex-specific instructions
+These rules apply to you directly too, not just inside a subagent. Ported
+into `.claude/rules/` (native Claude Code auto-loaded imports below) so they
+live as real files, not inlined prose:
 
-A few conventions in `AGENTS.md`/`.codex/rules/` referred to Codex-only
-tooling; the subagents above already use Claude Code's tools instead, but
-keep these in mind wherever you edit directly:
+@.claude/rules/audit.md
+@.claude/rules/ci.md
+@.claude/rules/research.md
+@.claude/rules/files.md
+@.claude/rules/git.md
 
-- "Use `apply_patch` for edits" → use the `Edit`/`Write` tools; never edit via
-  shell redirection, heredocs, or ad-hoc scripts.
-- Never use destructive Git commands (`reset --hard`, `clean`, force-push,
-  amend/rebase) unless the user explicitly asks.
-- Keep `.ai/`, `.codex/`, root `AGENTS.md`, and `index.md` as local context;
-  never force-add them or change `.gitignore` policy without an explicit ask.
-
-## Documentation and packaging discipline
-
-After any repository change, review affected `*.md` files (English and
-Russian counterparts together), `CHANGELOG.md`, `SUPPORT.md`, `SECURITY.md`,
-`CONTRIBUTING.md`, crate `Cargo.toml` metadata, CI YAML, and scripts — per
-`.codex/rules/files.md`. Record what was reviewed in the active task's
-`AUDIT.md`, even when no edit was needed.
+The destructive-command restrictions in `git.md` are additionally enforced
+mechanically via `permissions.deny` in `.claude/settings.json` — not just
+requested in text.
 
 ## Verification
 
