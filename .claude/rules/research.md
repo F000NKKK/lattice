@@ -1,8 +1,5 @@
 # Research and tool-use rules
 
-Ported from `.codex/rules/research.md` (Codex's `rg`/`sed`/`awk` mapped to
-Claude Code's `Grep`/`Glob`/`Read`).
-
 - Prefer `Grep`/`Glob` for repository search and targeted reads for context.
 - Use `cargo metadata --no-deps --format-version 1` to inspect package
   relationships and `cargo package -p <crate> --allow-dirty --list` to verify

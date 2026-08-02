@@ -1,7 +1,5 @@
 # Test and CI rules
 
-Ported from `.codex/rules/ci.md`.
-
 - Ordinary tests must be deterministic, non-privileged, and non-destructive.
 - Privileged tests must be `#[ignore]` or isolated in privileged CI jobs,
   save original state, and restore it on every exit path.
