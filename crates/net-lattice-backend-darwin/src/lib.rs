@@ -3164,6 +3164,23 @@ mod tests {
         );
     }
 
+    /// Documents the degenerate `/32` case
+    /// `pick_in_subnet_probe_address`'s own doc comment warns about: with no
+    /// host bits at all, every candidate — including the fallback — reduces
+    /// to `own` itself. This is a likely root cause for a real elevated CI
+    /// run's `add_static_neighbor ... InvalidState` failure (a macOS
+    /// `utun*`/VPN interface commonly carries a `/32` address); this test
+    /// pins down the exact behavior being guarded against by
+    /// `add_then_remove_static_neighbor_round_trips_through_the_kernel`'s
+    /// `prefix().value() > 30` interface filter, so a future change to
+    /// either cannot silently drop that protection without a deterministic
+    /// test noticing.
+    #[test]
+    fn pick_in_subnet_probe_address_degenerates_to_own_for_a_slash_32() {
+        let own: std::net::Ipv4Addr = "198.51.100.7".parse().expect("valid IPv4 address");
+        assert_eq!(pick_in_subnet_probe_address(own, 32), own);
+    }
+
     #[test]
     fn ensure_removable_static_neighbor_state_rejects_non_permanent_entries() {
         assert!(ensure_removable_static_neighbor_state(NeighborState::Permanent).is_ok());
