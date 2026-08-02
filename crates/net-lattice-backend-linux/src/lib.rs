@@ -1069,6 +1069,7 @@ impl DnsMutator for LinuxBackend {
 mod tests {
     use super::*;
     use net_lattice_ip::{Ipv4Address, Ipv4Network, Ipv4PrefixLength};
+    use rtnetlink::LinkDummy;
     use std::sync::{Mutex, MutexGuard, OnceLock};
 
     /// Builds the same `ndmsg` payload shape that
@@ -2043,6 +2044,104 @@ mod tests {
             .expect("this test environment has no `lo` interface")
     }
 
+    /// A dedicated `dummy` interface for privileged neighbor-mutation tests.
+    ///
+    /// IPv4 ARP entries cannot be `NUD_PERMANENT` on `lo`: the kernel's ARP
+    /// constructor (`net/ipv4/arp.c`) forces every neighbor entry on an
+    /// `IFF_LOOPBACK` device to `NUD_NOARP`, silently overriding the
+    /// requested state, so a freshly added static entry never appears as a
+    /// matching `(interface_index, address)` row in a subsequent
+    /// `RTM_GETNEIGH` dump and `add_static_neighbor`'s read-after-write
+    /// lookup returns `Error::InvalidState`. IPv6 NDP has no equivalent
+    /// loopback override, which is why the sibling IPv6 test tolerates `lo`.
+    /// A `dummy` link (always available via the in-kernel `dummy` driver,
+    /// no kernel module install required) has real `header_ops` and is not
+    /// `IFF_LOOPBACK`, so it supports genuine `NUD_PERMANENT` ARP/NDP
+    /// entries. `Drop` removes the link on every exit path, including test
+    /// panics, per this repository's isolated-topology cleanup rule.
+    struct DummyLinkFixture<'a> {
+        backend: &'a LinuxBackend,
+        index: u32,
+    }
+
+    impl<'a> DummyLinkFixture<'a> {
+        fn new(backend: &'a LinuxBackend, name: &str) -> Self {
+            let leftover = backend.runtime.block_on(async {
+                let mut links = backend
+                    .handle
+                    .link()
+                    .get()
+                    .match_name(name.into())
+                    .execute();
+                links.try_next().await.ok().flatten()
+            });
+            if let Some(leftover) = leftover {
+                // Recover from an interrupted prior run before attempting to
+                // create a same-named interface.
+                let _ = backend.runtime.block_on(async {
+                    backend
+                        .handle
+                        .link()
+                        .del(leftover.header.index)
+                        .execute()
+                        .await
+                });
+            }
+
+            backend
+                .runtime
+                .block_on(async {
+                    backend
+                        .handle
+                        .link()
+                        .add(LinkDummy::new(name).build())
+                        .execute()
+                        .await
+                })
+                .expect(
+                    "failed to create the dummy test interface - are you running with CAP_NET_ADMIN?",
+                );
+
+            let index = backend
+                .runtime
+                .block_on(async {
+                    let mut links = backend
+                        .handle
+                        .link()
+                        .get()
+                        .match_name(name.into())
+                        .execute();
+                    links.try_next().await.ok().flatten()
+                })
+                .map(|link| link.header.index)
+                .expect("dummy test interface disappeared immediately after creation");
+
+            let mut up = LinkMessage::default();
+            up.header.index = index;
+            up.header.change_mask = LinkFlags::Up;
+            up.header.flags = LinkFlags::Up;
+            backend
+                .runtime
+                .block_on(async { backend.handle.link().set(up).execute().await })
+                .expect("failed to bring the dummy test interface up");
+
+            Self { backend, index }
+        }
+
+        fn index(&self) -> u32 {
+            self.index
+        }
+    }
+
+    impl Drop for DummyLinkFixture<'_> {
+        fn drop(&mut self) {
+            let _ = self
+                .backend
+                .runtime
+                .block_on(async { self.backend.handle.link().del(self.index).execute().await });
+        }
+    }
+
     fn restore_config(interface: &Interface) -> InterfaceConfig {
         let admin_state = match interface.admin_state {
             AdminState::Up => DesiredAdminState::Up,
@@ -2305,20 +2404,25 @@ mod tests {
     }
 
     /// Exercises the complete static-neighbor mutation path against the real
-    /// kernel for an IPv4 ARP entry: add a permanent entry on `lo`, confirm
-    /// it reads back as `NeighborState::Permanent` with the requested MAC
-    /// (`ReadAfterWrite`), confirm the non-permanent-target guard rejects a
-    /// mismatched-state removal attempt is unreachable here (this entry is
-    /// permanent by construction), then remove it and confirm it is gone.
-    /// Uses TEST-NET-2 (RFC 5737 `198.51.100.0/24`), distinct from the
+    /// kernel for an IPv4 ARP entry: add a permanent entry on a dedicated
+    /// `dummy` test interface, confirm it reads back as
+    /// `NeighborState::Permanent` with the requested MAC (`ReadAfterWrite`),
+    /// confirm the non-permanent-target guard rejects a mismatched-state
+    /// removal attempt is unreachable here (this entry is permanent by
+    /// construction), then remove it and confirm it is gone. Uses
+    /// TEST-NET-2 (RFC 5737 `198.51.100.0/24`), distinct from the
     /// address/route tests' TEST-NET-1/TEST-NET-3 ranges so concurrent
-    /// kernel state never overlaps.
+    /// kernel state never overlaps. Runs on `DummyLinkFixture`, not `lo`:
+    /// the kernel's IPv4 ARP constructor forces `NUD_NOARP` on every
+    /// `IFF_LOOPBACK` device, so a requested `NUD_PERMANENT` entry on `lo`
+    /// never appears in a `neighbors()` read-after-write lookup.
     #[test]
     #[ignore = "requires CAP_NET_ADMIN; run with `sudo -E cargo test -p net-lattice-backend-linux add_then_remove_static_neighbor_round_trips_through_the_kernel -- --ignored`"]
     fn add_then_remove_static_neighbor_round_trips_through_the_kernel() {
         let _guard = kernel_test_guard();
         let backend = LinuxBackend::new().expect("failed to open a Netlink connection");
-        let interface_index = loopback_interface_index(&backend);
+        let link = DummyLinkFixture::new(&backend, "nl-test-arp0");
+        let interface_index = link.index();
         let interface_id = Id::new(interface_index as u64);
         let address = IpAddress::from(Ipv4Address::new(198, 51, 100, 77));
         let mac = MacAddress::new([0x02, 0x00, 0x00, 0x00, 0x00, 0x77]);
@@ -2369,13 +2473,17 @@ mod tests {
     /// `add_then_remove_static_neighbor_round_trips_through_the_kernel`.
     /// Uses `2001:db8:5::1` (RFC 3849 documentation prefix), a subnet
     /// distinct from every other IPv6 subnet used by the other ignored
-    /// tests in this module.
+    /// tests in this module. Runs on `DummyLinkFixture` for the same
+    /// isolated-topology reason as the IPv4 test, even though `lo` happens
+    /// not to force NDP entries to a non-permanent state the way it does
+    /// for ARP.
     #[test]
     #[ignore = "requires CAP_NET_ADMIN; run with `sudo -E cargo test -p net-lattice-backend-linux add_then_remove_ipv6_static_neighbor_round_trips_through_the_kernel -- --ignored`"]
     fn add_then_remove_ipv6_static_neighbor_round_trips_through_the_kernel() {
         let _guard = kernel_test_guard();
         let backend = LinuxBackend::new().expect("failed to open a Netlink connection");
-        let interface_index = loopback_interface_index(&backend);
+        let link = DummyLinkFixture::new(&backend, "nl-test-ndp0");
+        let interface_index = link.index();
         let interface_id = Id::new(interface_index as u64);
         let address = IpAddress::from(net_lattice_ip::Ipv6Address::new([
             0x2001, 0xdb8, 5, 0, 0, 0, 0, 1,
