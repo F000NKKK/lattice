@@ -1597,6 +1597,102 @@ mod tests {
         restore.route = None;
     }
 
+    /// Exercises the complete facade transaction path against the native
+    /// backend for an IPv6 interface address: add via `execute_plan`, read
+    /// back the observed record through the public facade, then remove via
+    /// `execute_plan` and confirm absence. Mirrors the backend-level
+    /// `add_then_remove_ipv6_address_round_trips_through_the_kernel` test's
+    /// shape and the facade-level `RouteRestore`/`execute_plan`/
+    /// `snapshot_for_mutation` idiom used by
+    /// `native_facade_ipv6_route_transaction_round_trip`. Uses the IPv6
+    /// documentation prefix (RFC 3849, `2001:db8::/32`) scoped to the
+    /// loopback interface, distinct from the route test's destination.
+    /// Intentionally ignored because address mutation requires
+    /// root/CAP_NET_ADMIN/Administrator and changes the host address table.
+    #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+    #[test]
+    #[ignore = "requires native networking privilege; run with \
+                `cargo test -p net-lattice native_facade_ipv6_address_transaction_round_trip -- --ignored`"]
+    fn native_facade_ipv6_address_transaction_round_trip() {
+        #[cfg(target_os = "linux")]
+        let _guard = native_facade_linux_guard();
+
+        let lattice = Lattice::connect().expect("failed to connect native backend");
+        let interface = lattice
+            .interfaces()
+            .expect("failed to list interfaces")
+            .into_iter()
+            .find(|interface| matches!(interface.kind, InterfaceKind::Loopback))
+            .or_else(|| {
+                lattice
+                    .interfaces()
+                    .ok()
+                    .and_then(|mut interfaces| interfaces.pop())
+            })
+            .expect("native backend reported no interfaces");
+        let network = Network::from(Ipv6Network::new(
+            Ipv6Address::new([0x2001, 0xdb8, 3, 0, 0, 0, 0, 9]),
+            Ipv6PrefixLength::new(64).expect("valid IPv6 prefix"),
+        ));
+
+        // A prior interrupted ignored-test run must not turn this run into a
+        // false duplicate; best-effort remove any matching leftover before
+        // asserting, matching the backend-level test's cleanup idiom.
+        if let Some(existing) = lattice
+            .addresses()
+            .expect("failed to list addresses before add")
+            .into_iter()
+            .find(|address| {
+                address.interface_index == interface.index && address.address == network
+            })
+        {
+            let _ = lattice.remove_address(existing);
+        }
+
+        let requested = NewInterfaceAddress::new(interface.id, network);
+        let add_plan = MutationPlan::from_operations([Mutation::AddAddress(requested)]);
+        let mut snapshot = |_, operation: &Mutation| lattice.snapshot_for_mutation(operation);
+        let mut options = ExecutionOptions::default().snapshot(&mut snapshot);
+        let add_report = lattice.execute_plan(&add_plan, &mut options);
+        assert!(
+            add_report.is_success(),
+            "ipv6 address add report: {add_report:?}"
+        );
+
+        let observed_address = lattice
+            .addresses()
+            .expect("failed to read addresses after adding one")
+            .into_iter()
+            .find(|address| {
+                address.interface_index == interface.index && address.address == network
+            })
+            .expect("added ipv6 address was not observed");
+        let mut restore = AddressRestore {
+            lattice: &lattice,
+            address: Some(observed_address.clone()),
+        };
+
+        let remove_plan =
+            MutationPlan::from_operations([Mutation::RemoveAddress(observed_address.clone())]);
+        let mut options = ExecutionOptions::default();
+        let remove_report = lattice.execute_plan(&remove_plan, &mut options);
+        assert!(
+            remove_report.is_success(),
+            "ipv6 address remove report: {remove_report:?}"
+        );
+        restore.address = None;
+
+        let absent = !lattice
+            .addresses()
+            .expect("failed to read addresses after removal")
+            .into_iter()
+            .any(|address| address.id == observed_address.id);
+        assert!(
+            absent,
+            "removed ipv6 address was still present in addresses() afterward"
+        );
+    }
+
     /// Exercises native first-failure stopping and reverse-order compensation
     /// without leaving the test route behind.
     #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
