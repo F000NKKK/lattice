@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Stage 0.17 static-neighbor model and platform contracts (ADR-0001, still
+  `proposed`): `StaticNeighbor` desired-neighbor intent, `Mutation::{AddStaticNeighbor,
+  RemoveStaticNeighbor}` with their semantics, `MutationSnapshot::Neighbor`,
+  the `NeighborMutator` associated-type trait, and `Capability::NEIGHBOR_MUTATION`.
+  No backend implements `NeighborMutator` yet and the facade does not forward
+  to it; native backend wiring and facade/executor integration remain
+  separate follow-up slices.
 - Stage 0.16 interface configuration: `InterfaceConfig` partial desired
   patches and `DesiredAdminState`, explicitly separate from observed
   `Interface` state.

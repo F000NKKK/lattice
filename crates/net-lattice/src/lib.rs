@@ -51,15 +51,15 @@ pub use net_lattice_model::mutation::{
     MutationPrecondition, MutationPreflight, MutationPrivilege, MutationReversibility,
     MutationSemantics, MutationSnapshot, MutationStopReason, RollbackStatus,
 };
-pub use net_lattice_model::neighbor::{NeighborEntry, NeighborId, NeighborState};
+pub use net_lattice_model::neighbor::{NeighborEntry, NeighborId, NeighborState, StaticNeighbor};
 pub use net_lattice_model::route::{Route, RouteId};
 pub use net_lattice_model::{IpAddress, Network};
 #[cfg(feature = "async")]
 pub use net_lattice_platform::TokioEventProvider;
 pub use net_lattice_platform::{
     AddressMutator, AddressProvider, Capability, CapabilityProvider, DnsMutator, DnsProvider,
-    EventProvider, EventReceiver, InterfaceMutator, InterfaceProvider, NeighborProvider,
-    RouteProvider,
+    EventProvider, EventReceiver, InterfaceMutator, InterfaceProvider, NeighborMutator,
+    NeighborProvider, RouteProvider,
 };
 
 #[cfg(test)]
@@ -77,7 +77,7 @@ pub mod backend {
     pub use net_lattice_platform::{
         AddressMutator, AddressProvider, CapabilityProvider, DnsMutator, DnsProvider,
         EventProvider, EventReceiver, EventSender, InterfaceMutator, InterfaceProvider,
-        NeighborProvider, RouteProvider,
+        NeighborMutator, NeighborProvider, RouteProvider,
     };
     #[cfg(feature = "async")]
     pub use net_lattice_platform::{TokioEventProvider, TokioEventReceiver, TokioEventSender};
