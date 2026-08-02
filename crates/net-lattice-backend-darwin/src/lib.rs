@@ -2753,19 +2753,13 @@ mod tests {
                 .collect::<Vec<_>>(),
             &mac
         );
-        // `push_mac_gateway` writes only the significant `sockaddr_dl`
-        // header-plus-MAC length (8 + 6 = 14 bytes), rounded up to the next
-        // 4-byte boundary (16), not `mem::size_of::<libc::sockaddr_dl>()`
-        // (20 bytes: it pads its unused `sdl_data` array to the worst-case
-        // 12 bytes). This is the same convention `push_link_gateway`'s doc
-        // comment documents and `golang.org/x/net/route`'s `LinkAddr`
-        // marshaling uses; asserting against the padded `sizeof` here
-        // overcounts by exactly 4 bytes, which is what a real macOS CI run
-        // caught.
-        const GATEWAY_SPACE: usize = (8 + 6 + 3) & !3;
+        assert_eq!(sdl.sdl_len as usize, mem::size_of::<libc::sockaddr_dl>());
+
         assert_eq!(
             buf.len(),
-            mem::size_of::<libc::rt_msghdr>() + mem::size_of::<libc::sockaddr_in>() + GATEWAY_SPACE
+            mem::size_of::<libc::rt_msghdr>()
+                + mem::size_of::<libc::sockaddr_in>()
+                + mem::size_of::<libc::sockaddr_dl>()
         );
     }
 
@@ -2806,16 +2800,13 @@ mod tests {
                 .collect::<Vec<_>>(),
             &mac
         );
-        // See the IPv4 sibling test's comment: `push_mac_gateway` encodes
-        // only the significant, 4-byte-rounded `sockaddr_dl` length (16
-        // bytes here too — the gateway shape doesn't depend on the
-        // destination's address family), not the padded `mem::size_of`.
-        const GATEWAY_SPACE: usize = (8 + 6 + 3) & !3;
+        assert_eq!(sdl.sdl_len as usize, mem::size_of::<libc::sockaddr_dl>());
+
         assert_eq!(
             buf.len(),
             mem::size_of::<libc::rt_msghdr>()
                 + mem::size_of::<libc::sockaddr_in6>()
-                + GATEWAY_SPACE
+                + mem::size_of::<libc::sockaddr_dl>()
         );
     }
 
