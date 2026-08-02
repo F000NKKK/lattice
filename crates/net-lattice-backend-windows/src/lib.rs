@@ -44,14 +44,15 @@ use windows::Win32::NetworkManagement::IpHelper::{
     DeleteIpForwardEntry2, DeleteIpNetEntry2, DeleteUnicastIpAddressEntry, FreeMibTable,
     GAA_FLAG_SKIP_ANYCAST, GAA_FLAG_SKIP_FRIENDLY_NAME, GAA_FLAG_SKIP_MULTICAST,
     GAA_FLAG_SKIP_UNICAST, GetAdaptersAddresses, GetIfEntry, GetIfEntry2, GetIfTable2,
-    GetIpForwardTable2, GetIpInterfaceEntry, GetIpNetTable2, GetUnicastIpAddressEntry,
-    GetUnicastIpAddressTable, IP_ADAPTER_ADDRESSES_LH, InitializeIpForwardEntry,
-    InitializeUnicastIpAddressEntry, MIB_IF_ADMIN_STATUS_DOWN, MIB_IF_ADMIN_STATUS_UP, MIB_IF_ROW2,
-    MIB_IF_TABLE2, MIB_IFROW, MIB_IPFORWARD_ROW2, MIB_IPFORWARD_TABLE2, MIB_IPINTERFACE_ROW,
-    MIB_IPNET_ROW2, MIB_IPNET_TABLE2, MIB_NOTIFICATION_TYPE, MIB_UNICASTIPADDRESS_ROW,
-    MIB_UNICASTIPADDRESS_TABLE, MibAddInstance, MibDeleteInstance, MibInitialNotification,
-    NotifyIpInterfaceChange, NotifyRouteChange2, NotifyUnicastIpAddressChange, SetDnsSettings,
-    SetIfEntry, SetInterfaceDnsSettings, SetIpInterfaceEntry,
+    GetIpForwardTable2, GetIpInterfaceEntry, GetIpNetEntry2, GetIpNetTable2,
+    GetUnicastIpAddressEntry, GetUnicastIpAddressTable, IP_ADAPTER_ADDRESSES_LH,
+    InitializeIpForwardEntry, InitializeUnicastIpAddressEntry, MIB_IF_ADMIN_STATUS_DOWN,
+    MIB_IF_ADMIN_STATUS_UP, MIB_IF_ROW2, MIB_IF_TABLE2, MIB_IFROW, MIB_IPFORWARD_ROW2,
+    MIB_IPFORWARD_TABLE2, MIB_IPINTERFACE_ROW, MIB_IPNET_ROW2, MIB_IPNET_TABLE2,
+    MIB_NOTIFICATION_TYPE, MIB_UNICASTIPADDRESS_ROW, MIB_UNICASTIPADDRESS_TABLE, MibAddInstance,
+    MibDeleteInstance, MibInitialNotification, NotifyIpInterfaceChange, NotifyRouteChange2,
+    NotifyUnicastIpAddressChange, SetDnsSettings, SetIfEntry, SetInterfaceDnsSettings,
+    SetIpInterfaceEntry,
 };
 use windows::Win32::NetworkManagement::Ndis::{
     IfOperStatusDormant, IfOperStatusDown, IfOperStatusLowerLayerDown, IfOperStatusUp,
@@ -1136,15 +1137,20 @@ impl NeighborMutator for WindowsBackend {
     type NeighborEntry = NeighborEntry;
 
     /// Submits a static ARP/NDP entry via `CreateIpNetEntry2` with
-    /// `State: NlnsPermanent`, then re-reads the neighbor table so the
-    /// returned entry reflects what IP Helper actually holds
-    /// (`ReadAfterWrite`, per ADR-0001) rather than a synthesized guess.
-    /// `ERROR_ACCESS_DENIED` maps to [`Error::PermissionDenied`],
-    /// `ERROR_NOT_FOUND` (missing interface) to [`Error::NotFound`],
-    /// `ERROR_OBJECT_ALREADY_EXISTS` to [`Error::AlreadyExists`], and
-    /// `ERROR_NOT_SUPPORTED` (address family stack absent on the interface)
-    /// to [`Error::Unsupported`]; any other status surfaces as
-    /// `Error::Platform` with the raw code.
+    /// `State: NlnsPermanent`, then re-reads that exact row via
+    /// `GetIpNetEntry2` so the returned entry reflects what IP Helper
+    /// actually holds (`ReadAfterWrite`, per ADR-0001) rather than a
+    /// synthesized guess. This deliberately queries the single row instead
+    /// of scanning a `GetIpNetTable2` dump: an elevated CI run showed the
+    /// full-table snapshot can omit the physical address of a row created
+    /// moments earlier, while `GetIpNetEntry2` keyed on the same
+    /// interface/address the entry was just created with is authoritative
+    /// for that row. `ERROR_ACCESS_DENIED` maps to
+    /// [`Error::PermissionDenied`], `ERROR_NOT_FOUND` (missing interface) to
+    /// [`Error::NotFound`], `ERROR_OBJECT_ALREADY_EXISTS` to
+    /// [`Error::AlreadyExists`], and `ERROR_NOT_SUPPORTED` (address family
+    /// stack absent on the interface) to [`Error::Unsupported`]; any other
+    /// status surfaces as `Error::Platform` with the raw code.
     fn add_static_neighbor(&self, neighbor: Self::StaticNeighbor) -> Result<Self::NeighborEntry> {
         let interface_index = neighbor.interface_id.value() as u32;
         let address = ip_address_to_std(neighbor.address);
@@ -1155,12 +1161,12 @@ impl NeighborMutator for WindowsBackend {
             return Err(static_neighbor_mutation_error(status));
         }
 
-        self.neighbors()?
-            .into_iter()
-            .find(|entry| {
-                entry.interface_index == interface_index && entry.address == neighbor.address
-            })
-            .ok_or(Error::InvalidState)
+        let mut readback = static_neighbor_delete_row(interface_index, address);
+        let status = unsafe { GetIpNetEntry2(&mut readback) };
+        if status.0 != 0 {
+            return Err(Error::InvalidState);
+        }
+        row_to_neighbor(&readback).ok_or(Error::InvalidState)
     }
 
     /// Deletes a static entry through `DeleteIpNetEntry2`, but only after
