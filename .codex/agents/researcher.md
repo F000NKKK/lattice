@@ -23,11 +23,11 @@ Read first:
 ## Rules
 
 Follow `rules/research.md` for allowed investigation tools and evidence
-standards, and `rules/git.md` for Git constraints. Use `cargo test`, `cargo
-clippy`, `cargo doc`, and `cargo fmt` only when the primary agent requests
-verification. Use `apply_patch` for any explicitly authorized file edit.
-Never use destructive Git commands, broad deletion, or network changes on
-the host.
+standards, `rules/audit.md` for evidence and audit-entry structure, and
+`rules/git.md` for Git constraints. Use `cargo test`, `cargo clippy`, `cargo
+doc`, and `cargo fmt` only when the primary agent requests verification. Use
+`apply_patch` for any explicitly authorized file edit. Never use destructive
+Git commands, broad deletion, or network changes on the host.
 
 ## Research output
 
