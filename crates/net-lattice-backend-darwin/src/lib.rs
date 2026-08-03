@@ -1879,7 +1879,7 @@ impl NeighborMutator for DarwinBackend {
     /// carrying `RTF_HOST | RTF_STATIC` and an `AF_LINK` gateway naming
     /// `neighbor.mac`, waits for the kernel's own reply
     /// (`send_route_request`, which maps a non-zero `rtm_errno` the same way
-    /// `RouteProvider::add_route` already does — `EEXIST` ->
+    /// `RouteMutator::add_route` already does — `EEXIST` ->
     /// [`Error::AlreadyExists`], `EPERM`/`EACCES` ->
     /// [`Error::PermissionDenied`], see `route_socket_error`), then re-reads
     /// the neighbor table via [`NeighborProvider::neighbors`] for a genuine
@@ -2188,6 +2188,7 @@ impl CapabilityProvider for DarwinBackend {
         Capability::IPV6
             | Capability::MONITORING
             | Capability::NEIGHBOR_MUTATION
+            | Capability::ROUTE_MUTATION
             | Capability::DNS_MUTATION
             | Capability::INTERFACE_ADMIN_STATE
             | Capability::INTERFACE_MTU
@@ -2908,6 +2909,7 @@ mod tests {
         assert!(capabilities.contains(Capability::DNS_MUTATION));
         assert!(capabilities.contains(Capability::INTERFACE_ADMIN_STATE));
         assert!(capabilities.contains(Capability::INTERFACE_MTU));
+        assert!(capabilities.contains(Capability::ROUTE_MUTATION));
     }
 
     #[test]
