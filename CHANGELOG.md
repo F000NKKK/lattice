@@ -29,25 +29,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   native `ERROR_ACCESS_DENIED`/`ERROR_OBJECT_ALREADY_EXISTS`/`ERROR_NOT_SUPPORTED`
   map to `PermissionDenied`/`AlreadyExists`/`Unsupported`. This implementation
   has been confirmed on a live elevated Windows CI run.
-- Stage 0.17 macOS native static-neighbor mutation (in progress, **not yet
-  advertised**): `net-lattice-backend-darwin` implements `NeighborMutator`
-  over `PF_ROUTE` (`RTM_ADD` for add; a two-message `RTM_GET`-then-
-  `RTM_DELETE` sequence for remove, reusing the kernel's own `RTM_GET`
-  reply's `sockaddr_dl` gateway, mirroring Apple's own
-  `arp.tproj/arp.c`/`ndp.tproj/ndp.c`), with removal refusing to delete a
-  present but non-`Permanent` (dynamically learned) entry
-  (`InvalidState`), a missing target returning `NotFound`, and native
+- Stage 0.17 macOS native static-neighbor mutation: `net-lattice-backend-darwin`
+  implements `NeighborMutator` over `PF_ROUTE` (`RTM_ADD` for add, encoding a
+  complete `sockaddr_dl` gateway with the real interface's link type read via
+  `getifaddrs`; a two-message `RTM_GET`-then-`RTM_DELETE` sequence for
+  remove, reusing the kernel's own `RTM_GET` reply's `sockaddr_dl` gateway,
+  mirroring Apple's own `arp.tproj/arp.c`/`ndp.tproj/ndp.c`), with removal
+  refusing to delete a present but non-`Permanent` (dynamically learned)
+  entry (`InvalidState`), a missing target returning `NotFound`, and native
   `EEXIST`/`ESRCH`/`ENOENT`/`EPERM`/`EACCES` mapped to
-  `AlreadyExists`/`NotFound`/`PermissionDenied`. A real elevated macOS CI run
-  found `add_static_neighbor` itself currently fails against a real kernel
-  with an as-yet-undiagnosed `InvalidState`, so
-  `DarwinBackend::capabilities()` deliberately does **not** advertise
-  `Capability::NEIGHBOR_MUTATION` yet — this repository's development
-  sandbox cannot link a Darwin test binary at all (no macOS SDK/Xcode), so
-  only deterministic fixtures and a cross-compiled type/lint/doc check have
-  run here. The `net-lattice` facade does not forward to `NeighborMutator` on
-  any platform yet; facade/executor integration remains a separate follow-up slice
-  (Slice D), and ADR-0001 remains `proposed`.
+  `AlreadyExists`/`NotFound`/`PermissionDenied`. Confirmed on a live elevated
+  macOS CI run (add/read/remove round trip); `DarwinBackend::capabilities()`
+  now advertises `Capability::NEIGHBOR_MUTATION`. The `net-lattice` facade
+  forwards `NeighborMutator` on every backend through
+  `Lattice::add_static_neighbor`/`remove_static_neighbor` and
+  `Mutation::{AddStaticNeighbor, RemoveStaticNeighbor}` executor dispatch.
+- Split `net-lattice-platform`'s `RouteProvider` into a read-only
+  `RouteProvider` (`routes()`) and a new `RouteMutator` (`add_route()`,
+  `remove_route()`), matching the provider/mutator split already used by
+  every other domain (ADR-0002). Added `Capability::ROUTE_MUTATION`,
+  truthfully advertised by all three backends, and `Lattice::validate_plan`
+  now rejects `Mutation::AddRoute`/`RemoveRoute` before submission when the
+  connected backend does not advertise it — closing a capability-preflight
+  gap that previously let route mutations reach the backend unchecked.
 - Stage 0.16 interface configuration: `InterfaceConfig` partial desired
   patches and `DesiredAdminState`, explicitly separate from observed
   `Interface` state.
@@ -71,6 +75,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ADDRESS_MONITORING`; `MONITORING` is their all-domain aggregate. Windows
   now rejects neighbor and unfiltered all-domain watchers instead of silently
   returning a stream without neighbor events.
+- **Breaking (pre-1.0):** `RouteProvider::add_route`/`remove_route` moved to
+  a new `RouteMutator` trait; a third-party backend implementing
+  `RouteProvider` must now also implement `RouteMutator` to satisfy
+  `LatticeBackend`. `Lattice::add_route`/`remove_route` are unaffected at
+  the call site.
 
 ### Documentation
 
