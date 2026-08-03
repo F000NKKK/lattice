@@ -17,6 +17,11 @@
   `Stage` — Stage transitions in this workflow are role-gated (reviewer
   confirmation required before `Done`, see `.codex/rules/youtrack.md`) and
   must stay explicit tool calls, not a side effect of a commit message.
+- If the change implements or follows a decision recorded in a YouTrack
+  knowledge-base Article (an ADR under `NL-A-1`, e.g. `NL-A-7`), also name
+  that Article ID in the commit message alongside the issue ID(s) — a diff
+  that exists because of an ADR must be traceable back to it from the commit,
+  not only from the issue description.
 - Keep patches narrow and reviewable. Separate model/API, backend, tests, and
   documentation changes when practical.
 - `.codex/`, root `AGENTS.md`, and `index.md` may be intentionally ignored

@@ -24,3 +24,5 @@ contradicts an accepted decision.
 
 If the user has asked for a commit, name the active Task's `NL-*` ID (and any
 other `NL-*` ID it relates to) per `rules/git.md` — never commit without it.
+If you are applying a decision recorded in an ADR Article (`NL-A-*` under
+`NL-A-1`), also name that Article ID in the commit message.

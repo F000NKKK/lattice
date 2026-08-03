@@ -32,4 +32,5 @@ Implementation is not complete until:
 
 Every commit you create must name the active Task's `NL-*` ID (and any other
 `NL-*` ID it relates to) per `@.claude/rules/git.md` — never commit without
-it.
+it. If you are applying a decision recorded in an ADR Article (`NL-A-*`
+under `NL-A-1`), also name that Article ID in the commit message.

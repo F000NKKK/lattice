@@ -32,6 +32,11 @@ via `permissions.deny` in `.claude/settings.json`, not just as prose here.
   confirmation required before `Done`, see `@.claude/rules/youtrack.md`) and
   must stay explicit `mcp__youtrack__update_issue` calls, not a side effect
   of a commit message.
+- If the change implements or follows a decision recorded in a YouTrack
+  knowledge-base Article (an ADR under `NL-A-1`, e.g. `NL-A-7`), also name
+  that Article ID in the commit message alongside the issue ID(s) — a diff
+  that exists because of an ADR must be traceable back to it from the commit,
+  not only from the issue description.
 - Auto-commits still respect every other restriction in this file: no
   amend/rebase/force-push, no destructive staging, no committing `.codex/`,
   root `AGENTS.md`, or `index.md`.
