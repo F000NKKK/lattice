@@ -19,9 +19,12 @@ analysis, and typed execution-report and compensation-boundary contracts for
 the existing route, address, and DNS operations on Linux, Windows, and macOS.
 Stage 0.16 interface configuration is verified by privileged Linux, Windows,
 and macOS CI and is part of the published support surface. It remains a
-partial imperative patch rather than a declarative desired-state model. DNS
-family parity and isolated destructive topology testing are planned for Stage
-0.17.
+partial imperative patch rather than a declarative desired-state model. Stage
+0.17's IPv6 DNS parity, static ARP/NDP neighbor mutation, and isolated
+destructive topology testing (route/address/neighbor CRUD, transaction
+compensation, filtered events, and async delivery) are implemented and
+verified on privileged Linux, Windows, and macOS CI, but not yet released;
+the current published support surface remains Stage 0.16 until that release.
 The Stage 0.15 executor provides ordered submission, runtime preflight,
 operation-boundary cancellation, typed prior-state snapshot capture, phase and
 timing reports, and an explicit compensator callback. Usage support is limited
