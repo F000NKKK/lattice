@@ -29,3 +29,7 @@ Implementation is not complete until:
 - commands run and remaining platform/privilege gaps are posted as a comment
   on the active YouTrack Task; advance its `Stage` field only as far as
   `Test`/`Review` — leave `Done` to the reviewer's confirmation.
+
+Every commit you create must name the active Task's `NL-*` ID (and any other
+`NL-*` ID it relates to) per `@.claude/rules/git.md` — never commit without
+it.

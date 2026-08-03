@@ -41,3 +41,7 @@ defect that needs its own tracked fix, file it yourself: search first with
 `mcp__youtrack__create_issue`, and link it `relates to` the Task with
 `mcp__youtrack__link_issues` — do not leave filing a confirmed defect to the
 primary agent.
+
+If you are assigned a fix and commit it, name the relevant `NL-*` ID(s) (the
+Task and, if you filed one, the Bug) in the commit message per
+`@.claude/rules/git.md` — never commit without it.

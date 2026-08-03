@@ -21,3 +21,6 @@ Implementation is not complete until:
 
 Stop and request an ADR if implementation requires a new public contract or
 contradicts an accepted decision.
+
+If the user has asked for a commit, name the active Task's `NL-*` ID (and any
+other `NL-*` ID it relates to) per `rules/git.md` — never commit without it.

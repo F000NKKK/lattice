@@ -27,3 +27,7 @@ needing its own tracked fix, file it yourself over the REST API: search
 first (avoid duplicates), `POST /api/issues` to create the `Bug`, and link
 it `relates to` the Task — do not leave filing a confirmed defect to the
 primary agent.
+
+If assigned a fix and the user has asked for a commit, name the relevant
+`NL-*` ID(s) (the Task and, if filed, the Bug) in the commit message per
+`rules/git.md` — never commit without it.
