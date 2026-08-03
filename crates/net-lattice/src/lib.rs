@@ -2020,15 +2020,29 @@ mod tests {
         restore.neighbor = None;
     }
 
-    /// Exercises native first-failure stopping and reverse-order compensation
-    /// for a static-neighbor plan without leaving the test entry behind.
-    /// Mirrors `native_facade_compensates_after_second_route_operation_fails`;
-    /// the second operation targets `InterfaceId::new(u32::MAX as u64)`,
-    /// which no real backend reports, so the native add fails.
+    /// Exercises reverse-order compensation for a static-neighbor plan
+    /// against the native backend, verified through a real native
+    /// read-after-compensation check.
+    ///
+    /// Unlike routes, `validate_plan` checks interface existence for
+    /// `AddStaticNeighbor`/`RemoveStaticNeighbor` up front, for the whole
+    /// plan, before any operation executes (`AddRoute`'s validation has no
+    /// such check, which is what lets
+    /// `native_facade_compensates_after_second_route_operation_fails` force
+    /// a second-operation *execution* failure via a bogus interface id). A
+    /// bogus interface anywhere in a static-neighbor plan is therefore
+    /// rejected atomically before anything is submitted natively — confirmed
+    /// by an earlier version of this test, which used that same bogus-
+    /// interface trick and got `rollback: NotNeeded` (nothing ever applied)
+    /// instead of the intended per-operation compensation. This version
+    /// triggers compensation the same way the deterministic
+    /// `facade_executes_and_compensates_a_static_neighbor_plan` test does:
+    /// cancelling the second operation, which still exercises the real
+    /// native `remove_static_neighbor` compensation call for the first.
     #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
     #[test]
     #[ignore = "requires native networking privilege; run with the platform privileged test job"]
-    fn native_facade_compensates_after_second_static_neighbor_operation_fails() {
+    fn native_facade_compensates_after_cancelled_static_neighbor_operation() {
         let _guard = native_facade_privileged_guard();
 
         let lattice = Lattice::connect().expect("failed to connect native backend");
@@ -2042,20 +2056,19 @@ mod tests {
             target,
             MacAddress::new([0x02, 0x00, 0x00, 0x00, 0x00, 0xfb]),
         );
-        let failed_neighbor = StaticNeighbor::new(
-            InterfaceId::new(u32::MAX as u64),
-            IpAddress::from(Ipv4Address::new(192, 0, 2, 252)),
-            MacAddress::new([0x02, 0x00, 0x00, 0x00, 0x00, 0xfc]),
-        );
 
         // Recover from an interrupted prior run before attempting the add.
         let _ = lattice.remove_static_neighbor(neighbor);
 
         let plan = MutationPlan::from_operations([
             Mutation::AddStaticNeighbor(neighbor),
-            Mutation::AddStaticNeighbor(failed_neighbor),
+            Mutation::RemoveStaticNeighbor(neighbor),
         ]);
+        lattice
+            .validate_plan(&plan)
+            .expect("add-then-remove of the same target is a valid plan");
 
+        let mut cancellation = |index, _: &Mutation| index == 1;
         let mut snapshot = |_, operation: &Mutation| lattice.snapshot_for_mutation(operation);
         let mut compensate = |_, operation: &Mutation, _: Option<&MutationSnapshot>| match operation
         {
@@ -2063,6 +2076,7 @@ mod tests {
             _ => Ok(()),
         };
         let mut options = ExecutionOptions::default()
+            .cancellation(&mut cancellation)
             .snapshot(&mut snapshot)
             .compensation(&mut compensate);
         let report = lattice.execute_plan(&plan, &mut options);
@@ -2073,9 +2087,19 @@ mod tests {
         );
         assert!(matches!(
             report.outcome(1),
-            Some(MutationOutcome::Failed { .. })
+            Some(MutationOutcome::NotAttempted)
         ));
         assert!(matches!(report.rollback(), RollbackStatus::Completed));
+
+        let absent = !lattice
+            .neighbors()
+            .expect("failed to read neighbors after compensation")
+            .into_iter()
+            .any(|entry| entry.interface_index == interface.index && entry.address == target);
+        assert!(
+            absent,
+            "compensation reported success but the static neighbor is still present"
+        );
     }
 
     /// Exercises interface configuration through the complete public facade:
