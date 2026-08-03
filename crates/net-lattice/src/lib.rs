@@ -59,7 +59,7 @@ pub use net_lattice_platform::TokioEventProvider;
 pub use net_lattice_platform::{
     AddressMutator, AddressProvider, Capability, CapabilityProvider, DnsMutator, DnsProvider,
     EventProvider, EventReceiver, InterfaceMutator, InterfaceProvider, NeighborMutator,
-    NeighborProvider, RouteProvider,
+    NeighborProvider, RouteMutator, RouteProvider,
 };
 
 #[cfg(test)]
@@ -77,7 +77,7 @@ pub mod backend {
     pub use net_lattice_platform::{
         AddressMutator, AddressProvider, CapabilityProvider, DnsMutator, DnsProvider,
         EventProvider, EventReceiver, EventSender, InterfaceMutator, InterfaceProvider,
-        NeighborMutator, NeighborProvider, RouteProvider,
+        NeighborMutator, NeighborProvider, RouteMutator, RouteProvider,
     };
     #[cfg(feature = "async")]
     pub use net_lattice_platform::{TokioEventProvider, TokioEventReceiver, TokioEventSender};
@@ -98,6 +98,7 @@ pub mod backend {
 /// not domain objects — so it's required as-is.
 pub trait LatticeBackend:
     RouteProvider<Route = Route>
+    + RouteMutator<Route = Route>
     + InterfaceProvider<Interface = Interface>
     + InterfaceMutator<Interface = Interface, InterfaceConfig = InterfaceConfig>
     + DnsMutator<NewDnsConfig = NewDnsConfig, DnsConfig = DnsConfig>
@@ -112,6 +113,7 @@ pub trait LatticeBackend:
 
 impl<B> LatticeBackend for B where
     B: RouteProvider<Route = Route>
+        + RouteMutator<Route = Route>
         + InterfaceProvider<Interface = Interface>
         + InterfaceMutator<Interface = Interface, InterfaceConfig = InterfaceConfig>
         + DnsMutator<NewDnsConfig = NewDnsConfig, DnsConfig = DnsConfig>
@@ -139,10 +141,16 @@ impl<B: LatticeBackend> Lattice<B> {
         self.backend.routes()
     }
 
+    /// Adds a route. Requires [`Capability::ROUTE_MUTATION`]; use
+    /// [`Self::execute_plan`] with [`Mutation::AddRoute`] for
+    /// capability/precondition checks and compensation support.
     pub fn add_route(&self, route: Route) -> Result<()> {
         self.backend.add_route(route)
     }
 
+    /// Removes a route. Requires [`Capability::ROUTE_MUTATION`]; use
+    /// [`Self::execute_plan`] with [`Mutation::RemoveRoute`] for
+    /// capability/precondition checks and compensation support.
     pub fn remove_route(&self, route: Route) -> Result<()> {
         self.backend.remove_route(route)
     }
@@ -234,6 +242,11 @@ impl<B: LatticeBackend> Lattice<B> {
             }
             if executor::requires_neighbor_capability(operation)
                 && !self.supports(Capability::NEIGHBOR_MUTATION)
+            {
+                return Err(Error::Unsupported);
+            }
+            if executor::requires_route_capability(operation)
+                && !self.supports(Capability::ROUTE_MUTATION)
             {
                 return Err(Error::Unsupported);
             }

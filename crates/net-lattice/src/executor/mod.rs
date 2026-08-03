@@ -74,6 +74,12 @@ pub(crate) fn requires_neighbor_capability(operation: &Mutation) -> bool {
     )
 }
 
+/// Returns whether an operation requires the route mutation capability, per
+/// ADR-0002.
+pub(crate) fn requires_route_capability(operation: &Mutation) -> bool {
+    matches!(operation, Mutation::AddRoute(_) | Mutation::RemoveRoute(_))
+}
+
 /// Builds the complete report for a plan rejected before native submission.
 pub(crate) fn unsupported_plan_report(plan: &MutationPlan, error: Error) -> MutationPlanReport {
     let mut outcomes = Vec::with_capacity(plan.len());
