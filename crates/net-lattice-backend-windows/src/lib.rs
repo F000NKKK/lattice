@@ -1629,7 +1629,9 @@ impl CapabilityProvider for WindowsBackend {
     /// `CreateIpNetEntry2`/`DeleteIpNetEntry2` now back a real
     /// `NeighborMutator` implementation (ADR-0001); this does not imply a
     /// native neighbor-change watcher, which IP Helper still does not
-    /// provide.
+    /// provide. `ROUTE_MUTATION` is advertised because
+    /// `CreateIpForwardEntry2`/`DeleteIpForwardEntry2` back a real
+    /// `RouteMutator` implementation (ADR-0002).
     fn capabilities(&self) -> Capability {
         Capability::IPV6
             | Capability::ROUTE_MONITORING
@@ -1639,6 +1641,7 @@ impl CapabilityProvider for WindowsBackend {
             | Capability::INTERFACE_ADMIN_STATE
             | Capability::INTERFACE_MTU
             | Capability::NEIGHBOR_MUTATION
+            | Capability::ROUTE_MUTATION
     }
 }
 
@@ -2461,6 +2464,7 @@ mod tests {
         assert!(capabilities.contains(Capability::INTERFACE_ADMIN_STATE));
         assert!(capabilities.contains(Capability::INTERFACE_MTU));
         assert!(capabilities.contains(Capability::NEIGHBOR_MUTATION));
+        assert!(capabilities.contains(Capability::ROUTE_MUTATION));
     }
 
     #[test]
