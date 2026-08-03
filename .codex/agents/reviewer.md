@@ -19,6 +19,11 @@ Report findings in severity order with exact file/symbol evidence. Separate:
 - optional improvement.
 
 Post the review and commands as a comment on the active YouTrack Task.
-Advance its `Stage` field to `Done` only when no confirmed defect remains;
-otherwise leave it at `Review`/`Test` and file a `Bug` issue (linked
-`relates to` the Task) for any confirmed defect needing its own tracked fix.
+Advance its `Stage` field to `Done` only when no confirmed defect remains
+and every applicable verification command has been run (see
+`rules/youtrack.md`'s Stage-ownership section — use `Test` instead of `Done`
+if verification is incomplete for this session). For any confirmed defect
+needing its own tracked fix, file it yourself over the REST API: search
+first (avoid duplicates), `POST /api/issues` to create the `Bug`, and link
+it `relates to` the Task — do not leave filing a confirmed defect to the
+primary agent.
