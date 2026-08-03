@@ -1702,6 +1702,74 @@ mod tests {
         );
     }
 
+    #[test]
+    fn facade_reports_snapshot_failure_for_static_neighbor_operation() {
+        let lattice = lattice(Capability::NEIGHBOR_MUTATION);
+        let plan = MutationPlan::from_operations([Mutation::AddStaticNeighbor(static_neighbor())]);
+
+        let mut snapshot = |_, _: &Mutation| Err(Error::InvalidState);
+        let mut options = ExecutionOptions::default().snapshot(&mut snapshot);
+        let report = lattice.execute_plan(&plan, &mut options);
+
+        assert!(matches!(
+            report.outcome(0),
+            Some(MutationOutcome::Failed {
+                error: Error::InvalidState,
+                may_have_applied: false,
+            })
+        ));
+        assert!(matches!(
+            report.operation_reports()[0].stop_reason,
+            Some(MutationStopReason::SnapshotFailed)
+        ));
+        assert!(matches!(report.rollback(), RollbackStatus::NotAttempted));
+    }
+
+    #[test]
+    fn facade_executes_static_neighbor_add_and_remove_dispatch() {
+        let lattice = lattice(Capability::NEIGHBOR_MUTATION);
+        let plan = MutationPlan::from_operations([
+            Mutation::AddStaticNeighbor(static_neighbor()),
+            Mutation::RemoveStaticNeighbor(existing_static_neighbor()),
+        ]);
+        lattice
+            .validate_plan(&plan)
+            .expect("add and remove target distinct neighbors");
+
+        let mut options = ExecutionOptions::default();
+        let report = lattice.execute_plan(&plan, &mut options);
+
+        assert_eq!(report.applied_count(), 2);
+        assert!(matches!(report.outcome(0), Some(MutationOutcome::Applied)));
+        assert!(matches!(report.outcome(1), Some(MutationOutcome::Applied)));
+        assert!(matches!(report.rollback(), RollbackStatus::NotNeeded));
+    }
+
+    #[test]
+    fn facade_executes_ipv6_static_neighbor_add_and_remove_dispatch() {
+        let lattice = lattice(Capability::NEIGHBOR_MUTATION);
+        let neighbor = StaticNeighbor::new(
+            InterfaceId::new(1),
+            IpAddress::from(Ipv6Address::new([0x2001, 0xdb8, 0, 0x17, 0, 0, 0, 1])),
+            MacAddress::new([0x02, 0x00, 0x00, 0x00, 0x00, 0x17]),
+        );
+        let plan = MutationPlan::from_operations([
+            Mutation::AddStaticNeighbor(neighbor),
+            Mutation::RemoveStaticNeighbor(existing_ipv6_static_neighbor()),
+        ]);
+        lattice
+            .validate_plan(&plan)
+            .expect("add and remove target distinct ipv6 neighbors");
+
+        let mut options = ExecutionOptions::default();
+        let report = lattice.execute_plan(&plan, &mut options);
+
+        assert_eq!(report.applied_count(), 2);
+        assert!(matches!(report.outcome(0), Some(MutationOutcome::Applied)));
+        assert!(matches!(report.outcome(1), Some(MutationOutcome::Applied)));
+        assert!(matches!(report.rollback(), RollbackStatus::NotNeeded));
+    }
+
     /// Restores the observed interface configuration through the same public
     /// facade a consumer uses. The privileged acceptance test arms this before
     /// its first native submission so a panic cannot leave an attempted
