@@ -13,9 +13,10 @@ It implements native inspection, mutation, and monitoring behind the generic
 - translation of native errors and state into portable Net Lattice types.
 
 Static neighbor mutation (`NeighborMutator`, `Capability::NEIGHBOR_MUTATION`)
-submits real `RTM_NEWNEIGH`/`RTM_DELNEIGH` requests and is implemented in this
-backend, but it is not yet reachable through the public `net-lattice` facade
-(that wiring is a separate, not-yet-implemented stage).
+submits real `RTM_NEWNEIGH`/`RTM_DELNEIGH` requests and is reachable through
+the public `net-lattice` facade via `Lattice::add_static_neighbor`/
+`remove_static_neighbor` and `Mutation::{AddStaticNeighbor,
+RemoveStaticNeighbor}`.
 
 Applications should normally use the `net-lattice` facade, which selects this
 backend automatically on Linux. Direct use is intended for backend integration

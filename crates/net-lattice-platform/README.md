@@ -5,11 +5,11 @@ public facade and native platform backends.
 
 ## What it provides
 
-- generic inspection and mutation provider traits using associated types,
-  including `InterfaceMutator` for desired administrative-state and MTU
-  patches, and `NeighborMutator` for static ARP/NDP entry add/remove intent
-  (defined at the model/platform layer only as of Stage 0.17 Slice B; no
-  backend implements it yet and the facade does not forward to it);
+- generic inspection and mutation provider traits using associated types:
+  `RouteProvider`/`RouteMutator`, `InterfaceProvider`/`InterfaceMutator`
+  (desired administrative-state and MTU patches), `DnsProvider`/
+  `DnsMutator`, `NeighborProvider`/`NeighborMutator` (static ARP/NDP entry
+  add/remove intent), and `AddressProvider`/`AddressMutator`;
 - runtime `Capability` reporting;
 - synchronous event sender/receiver contracts;
 - optional native Tokio watcher contracts behind the `async` feature.
@@ -45,4 +45,6 @@ mean that the backend has a native delivery path for that domain.
 can be constructed.
 
 `Capability::NEIGHBOR_MUTATION` gates static ARP/NDP add/remove support and is
-distinct from `NEIGHBOR_MONITORING`. It is not advertised by any backend yet.
+distinct from `NEIGHBOR_MONITORING`. `Capability::ROUTE_MUTATION` gates route
+add/remove support and is distinct from `ROUTE_MONITORING`. All three shipped
+backends (Linux, Windows, macOS) advertise both.
