@@ -1824,6 +1824,159 @@ mod tests {
         }
     }
 
+    /// Removes a submitted native test static neighbor if a later assertion
+    /// exits the test before its explicit remove plan succeeds. Mirrors
+    /// `RouteRestore`'s shape for `StaticNeighbor`.
+    #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+    struct StaticNeighborRestore<'a, B: LatticeBackend> {
+        lattice: &'a Lattice<B>,
+        neighbor: Option<StaticNeighbor>,
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+    impl<B: LatticeBackend> Drop for StaticNeighborRestore<'_, B> {
+        fn drop(&mut self) {
+            if let Some(neighbor) = self.neighbor.take() {
+                let _ = self.lattice.remove_static_neighbor(neighbor);
+            }
+        }
+    }
+
+    /// Picks a non-loopback interface for native static-neighbor tests.
+    /// Static ARP/NDP entries are an L2-resolution mechanism; unlike routes
+    /// and addresses (which the other native facade tests deliberately
+    /// prefer on loopback for stability), loopback interfaces do not
+    /// participate in L2 neighbor resolution the same way and at least one
+    /// backend is known to force ARP entries on `lo` to a non-`Permanent`
+    /// state. Falls back to whatever the backend reports if every interface
+    /// happens to be loopback.
+    #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+    fn native_neighbor_test_interface<B: LatticeBackend>(lattice: &Lattice<B>) -> Interface {
+        let interfaces = lattice.interfaces().expect("failed to list interfaces");
+        interfaces
+            .iter()
+            .find(|interface| !matches!(interface.kind, InterfaceKind::Loopback))
+            .or_else(|| interfaces.first())
+            .cloned()
+            .expect("native backend reported no interfaces")
+    }
+
+    /// Exercises the complete facade transaction path for a static ARP entry
+    /// against the native backend: capability-gated `execute_plan` add,
+    /// read-after-write observation, and `execute_plan` remove. Intentionally
+    /// ignored because static-neighbor mutation requires root/CAP_NET_ADMIN/
+    /// Administrator and changes the host neighbor table.
+    #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+    #[test]
+    #[ignore = "requires native networking privilege; run with \
+                `cargo test -p net-lattice native_facade_static_neighbor_transaction_round_trip -- --ignored`"]
+    fn native_facade_static_neighbor_transaction_round_trip() {
+        let _guard = native_facade_privileged_guard();
+
+        let lattice = Lattice::connect().expect("failed to connect native backend");
+        assert!(
+            lattice.supports(Capability::NEIGHBOR_MUTATION),
+            "native backend does not advertise NEIGHBOR_MUTATION"
+        );
+        let interface = native_neighbor_test_interface(&lattice);
+        let neighbor = StaticNeighbor::new(
+            interface.id,
+            IpAddress::from(Ipv4Address::new(192, 0, 2, 250)),
+            MacAddress::new([0x02, 0x00, 0x00, 0x00, 0x00, 0xfa]),
+        );
+
+        // Recover from an interrupted prior run before attempting the add.
+        let _ = lattice.remove_static_neighbor(neighbor);
+
+        let add_plan = MutationPlan::from_operations([Mutation::AddStaticNeighbor(neighbor)]);
+        let mut snapshot = |_, operation: &Mutation| lattice.snapshot_for_mutation(operation);
+        let mut options = ExecutionOptions::default().snapshot(&mut snapshot);
+        let add_report = lattice.execute_plan(&add_plan, &mut options);
+        assert!(
+            add_report.is_success(),
+            "static neighbor add report: {add_report:?}"
+        );
+        let mut restore = StaticNeighborRestore {
+            lattice: &lattice,
+            neighbor: Some(neighbor),
+        };
+
+        let observed = lattice
+            .neighbors()
+            .expect("failed to read neighbors after adding one")
+            .into_iter()
+            .find(|entry| {
+                entry.interface_index == interface.index && entry.address == neighbor.address
+            })
+            .expect("added static neighbor was not observed");
+        assert_eq!(observed.state, NeighborState::Permanent);
+        assert_eq!(observed.mac, Some(neighbor.mac));
+
+        let remove_plan = MutationPlan::from_operations([Mutation::RemoveStaticNeighbor(neighbor)]);
+        let mut options = ExecutionOptions::default();
+        let remove_report = lattice.execute_plan(&remove_plan, &mut options);
+        assert!(
+            remove_report.is_success(),
+            "static neighbor remove report: {remove_report:?}"
+        );
+        restore.neighbor = None;
+    }
+
+    /// Exercises native first-failure stopping and reverse-order compensation
+    /// for a static-neighbor plan without leaving the test entry behind.
+    /// Mirrors `native_facade_compensates_after_second_route_operation_fails`;
+    /// the second operation targets `InterfaceId::new(u32::MAX as u64)`,
+    /// which no real backend reports, so the native add fails.
+    #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+    #[test]
+    #[ignore = "requires native networking privilege; run with the platform privileged test job"]
+    fn native_facade_compensates_after_second_static_neighbor_operation_fails() {
+        let _guard = native_facade_privileged_guard();
+
+        let lattice = Lattice::connect().expect("failed to connect native backend");
+        assert!(
+            lattice.supports(Capability::NEIGHBOR_MUTATION),
+            "native backend does not advertise NEIGHBOR_MUTATION"
+        );
+        let interface = native_neighbor_test_interface(&lattice);
+        let neighbor = StaticNeighbor::new(
+            interface.id,
+            IpAddress::from(Ipv4Address::new(192, 0, 2, 251)),
+            MacAddress::new([0x02, 0x00, 0x00, 0x00, 0x00, 0xfb]),
+        );
+        let failed_neighbor = StaticNeighbor::new(
+            InterfaceId::new(u32::MAX as u64),
+            IpAddress::from(Ipv4Address::new(192, 0, 2, 252)),
+            MacAddress::new([0x02, 0x00, 0x00, 0x00, 0x00, 0xfc]),
+        );
+
+        // Recover from an interrupted prior run before attempting the add.
+        let _ = lattice.remove_static_neighbor(neighbor);
+
+        let plan = MutationPlan::from_operations([
+            Mutation::AddStaticNeighbor(neighbor),
+            Mutation::AddStaticNeighbor(failed_neighbor),
+        ]);
+
+        let mut snapshot = |_, operation: &Mutation| lattice.snapshot_for_mutation(operation);
+        let mut compensate = |_, operation: &Mutation, _: Option<&MutationSnapshot>| match operation
+        {
+            Mutation::AddStaticNeighbor(neighbor) => lattice.remove_static_neighbor(*neighbor),
+            _ => Ok(()),
+        };
+        let mut options = ExecutionOptions::default()
+            .snapshot(&mut snapshot)
+            .compensation(&mut compensate);
+        let report = lattice.execute_plan(&plan, &mut options);
+
+        assert!(matches!(report.outcome(0), Some(MutationOutcome::Applied)));
+        assert!(matches!(
+            report.outcome(1),
+            Some(MutationOutcome::Failed { .. })
+        ));
+        assert!(matches!(report.rollback(), RollbackStatus::Completed));
+    }
+
     /// Exercises interface configuration through the complete public facade:
     /// capability checks, direct admin-only/MTU-only/combined read-after-write
     /// submissions, transaction-plan dispatch with a public snapshot callback,
