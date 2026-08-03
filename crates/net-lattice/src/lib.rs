@@ -878,6 +878,10 @@ mod tests {
         fn routes(&self) -> Result<Vec<Self::Route>> {
             Ok(vec![route()])
         }
+    }
+
+    impl RouteMutator for TestBackend {
+        type Route = Route;
 
         fn add_route(&self, _route: Self::Route) -> Result<()> {
             if self.fail_mutations {
