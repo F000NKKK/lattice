@@ -6,6 +6,9 @@
   published file contents.
 - Use `git diff`, `git log`, and `git status` as evidence, not as a
   substitute for reading source and tests.
+- Use `mcp__youtrack__search_issues`/`mcp__youtrack__get_issue` to check
+  prior evidence recorded on the active Epic/Story/Task before re-deriving
+  it; see `@.claude/rules/youtrack.md`.
 - Inspect all three backend implementations before claiming platform parity.
 - Separate compile-time provider contracts, runtime capabilities, native
   privilege requirements, and eventual event delivery in findings.

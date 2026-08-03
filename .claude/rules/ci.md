@@ -10,7 +10,7 @@
   partial application, read-after-write, cancellation, snapshot failure,
   compensation, and relevant event filtering.
 - Run formatting, workspace tests, clippy, docs, package listing, and diff
-  checks before marking a roadmap checkbox complete.
+  checks before advancing a YouTrack Task's `Stage` field to `Done`.
 - Run package listings for every crate whose manifest, README, features, or
   public dependencies changed; verify the archive contains its local README.
 - Never relax coverage or lint policy as a substitute for missing behavior;
