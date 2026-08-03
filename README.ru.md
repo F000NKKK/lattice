@@ -118,16 +118,16 @@ Net Lattice призвана закрыть этот пробел, предос�
 
 ## Текущий статус
 
-Реализация этапа 0.16 плана поэтапной поставки из
+Реализация этапа 0.17 плана поэтапной поставки из
 [архитектуры](ARCHITECTURE.ru.md) проверена privileged CI-задачами:
 
 - `net-lattice-core`, `net-lattice-ip`
-- модули `route`, `mac`, `interface`, `dns`, `neighbor`, `ifaddr`, `event` и `mutation` в `net-lattice-model`; `NewInterfaceAddress` и `NewDnsConfig` выражают намерение изменения отдельно от наблюдаемого состояния
-- `RouteProvider`, `InterfaceProvider`, `InterfaceMutator`, `DnsProvider`, `DnsMutator`, `NeighborProvider`, `AddressProvider`, `AddressMutator`, `CapabilityProvider`, синхронные `EventProvider`/bounded `EventReceiver` и опциональная async-поддержка мониторинга в `net-lattice-platform`
+- модули `route`, `mac`, `interface`, `dns`, `neighbor`, `ifaddr`, `event` и `mutation` в `net-lattice-model`; `NewInterfaceAddress`, `NewDnsConfig` и `StaticNeighbor` выражают намерение изменения отдельно от наблюдаемого состояния
+- `RouteProvider`, `RouteMutator`, `InterfaceProvider`, `InterfaceMutator`, `DnsProvider`, `DnsMutator`, `NeighborProvider`, `NeighborMutator`, `AddressProvider`, `AddressMutator`, `CapabilityProvider`, синхронные `EventProvider`/bounded `EventReceiver` и опциональная async-поддержка мониторинга в `net-lattice-platform`
 - `net-lattice-async`, предоставляющий единый runtime-agnostic тип `EventStream`
-- фасад `net-lattice`, включая `Lattice::add_address()`, `Lattice::remove_address()`, `Lattice::set_dns_config()`, `Lattice::set_interface_config()`, `Lattice::capabilities()`, `Lattice::supports()`, `Lattice::watch()`, `Lattice::watch_filtered()`, `Lattice::execute_plan()` и feature-gated `Lattice::watch_async()`
+- фасад `net-lattice`, включая `Lattice::add_address()`, `Lattice::remove_address()`, `Lattice::set_dns_config()`, `Lattice::set_interface_config()`, `Lattice::add_static_neighbor()`, `Lattice::remove_static_neighbor()`, `Lattice::capabilities()`, `Lattice::supports()`, `Lattice::watch()`, `Lattice::watch_filtered()`, `Lattice::execute_plan()` и feature-gated `Lattice::watch_async()`
 
-Это даёт реальное управление маршрутами и IP-адресами интерфейсов, desired-патчи `InterfaceConfig` для administrative state и MTU, просмотр интерфейсов, просмотр и изменение DNS-конфигурации резолвера, чтение таблиц соседей (ARP/NDP), inspectable планы mutation-операций, упорядоченное исполнение транзакций и bounded-мониторинг сетевых изменений на Linux, Windows и macOS. `InterfaceConfig` не переиспользует observed `Interface`: он выбирает один интерфейс и запрашивает одно или оба поддерживаемых свойства. Для каждого свойства проверяйте `Capability::INTERFACE_ADMIN_STATE` и `Capability::INTERFACE_MTU`. Native backend может применять свойства разными вызовами, поэтому ошибка combined patch может означать partial application; перечитайте состояние и при необходимости используйте явный compensator executor'а. Создание адреса принимает `NewInterfaceAddress` и возвращает результирующий наблюдаемый `InterfaceAddress`; замена конфигурации резолвера принимает `NewDnsConfig` и возвращает результирующий наблюдаемый `DnsConfig`. `MutationPlan` — только данные, а `Lattice::execute_plan` исполняет его через единый `ExecutionOptions` с runtime-проверками, cancellation на границах операций, типизированными snapshots, явной compensation и фазовыми отчётами. `EventFilter` сочетает селекторы доменов (`routes()`) и объектов (`route(route_id)`); каждый backend применяет filter до помещения обычного события в очередь. Перед watching проверяйте capability каждого выбранного filter-домена; `Capability::MONITORING` означает, что доступны все текущие домены. Feature `async` в Net Lattice использует и реэкспортирует реализацию `EventStream` из `net-lattice-async`; приложению достаточно включить эту feature фасада. Это всё ещё не полноценная библиотека: VLAN, VRF, namespaces, интеграция с firewall, декларативная настройка сети и другие продвинутые возможности ещё впереди; см. [ARCHITECTURE.ru.md](ARCHITECTURE.ru.md) для поэтапной дорожной карты и [CHANGELOG.md](CHANGELOG.md) для того, что реально вышло.
+Это даёт реальное управление маршрутами, IP-адресами интерфейсов и статическими записями ARP/NDP, desired-патчи `InterfaceConfig` для administrative state и MTU, просмотр интерфейсов, просмотр и изменение DNS-конфигурации резолвера, чтение таблиц соседей (ARP/NDP), inspectable планы mutation-операций, упорядоченное исполнение транзакций и bounded-мониторинг сетевых изменений на Linux, Windows и macOS. `InterfaceConfig` не переиспользует observed `Interface`: он выбирает один интерфейс и запрашивает одно или оба поддерживаемых свойства. Для каждого свойства проверяйте `Capability::INTERFACE_ADMIN_STATE` и `Capability::INTERFACE_MTU`. Native backend может применять свойства разными вызовами, поэтому ошибка combined patch может означать partial application; перечитайте состояние и при необходимости используйте явный compensator executor'а. Создание адреса принимает `NewInterfaceAddress` и возвращает результирующий наблюдаемый `InterfaceAddress`; замена конфигурации резолвера принимает `NewDnsConfig` и возвращает результирующий наблюдаемый `DnsConfig`. Создание статической записи соседа принимает `StaticNeighbor` (отдельный от `NeighborEntry` тип: без синтезированного ID или наблюдаемого состояния, MAC-адрес обязателен) и возвращает результирующий наблюдаемый `NeighborEntry`; сначала проверяйте `Capability::NEIGHBOR_MUTATION`, а удаление присутствующей, но не `Permanent` (динамически изученной) записи отклоняется с `Error::InvalidState`, а не молча её вытесняет. `MutationPlan` — только данные, а `Lattice::execute_plan` исполняет его через единый `ExecutionOptions` с runtime-проверками, cancellation на границах операций, типизированными snapshots, явной compensation и фазовыми отчётами. `EventFilter` сочетает селекторы доменов (`routes()`) и объектов (`route(route_id)`); каждый backend применяет filter до помещения обычного события в очередь. Перед watching проверяйте capability каждого выбранного filter-домена; `Capability::MONITORING` означает, что доступны все текущие домены. Feature `async` в Net Lattice использует и реэкспортирует реализацию `EventStream` из `net-lattice-async`; приложению достаточно включить эту feature фасада. Это всё ещё не полноценная библиотека: VLAN, VRF, namespaces, интеграция с firewall, декларативная настройка сети и другие продвинутые возможности ещё впереди; см. [ARCHITECTURE.ru.md](ARCHITECTURE.ru.md) для поэтапной дорожной карты и [CHANGELOG.md](CHANGELOG.md) для того, что реально вышло.
 
 | Возможность | Linux | Windows | macOS |
 |---|:---:|:---:|:---:|
@@ -138,6 +138,7 @@ Net Lattice призвана закрыть этот пробел, предос�
 | Просмотр адресов интерфейсов | ✅ | ✅ | ✅ |
 | Изменение адресов интерфейсов | ✅ | ✅ | ✅ |
 | Просмотр таблицы соседей | ✅ | ✅ | ✅ |
+| Изменение статических записей соседей (ARP/NDP) | ✅ | ✅ | ✅ |
 | Просмотр DNS-резолвера | ✅ | ✅ | ✅ |
 | Изменение DNS-резолвера | ✅ | ✅ | ✅ |
 | Мониторинг изменений маршрутов/интерфейсов/адресов | ✅ | ✅ | ✅ |
@@ -145,6 +146,11 @@ Net Lattice призвана закрыть этот пробел, предос�
 | Мониторинг всех доменов (`watch()`) | ✅ | — | ✅ |
 | Async-мониторинг маршрутов/интерфейсов/адресов | ✅ | ✅ | ✅ |
 | Async-мониторинг соседей/всех доменов | ✅ | — | ✅ |
+
+Изменение статических соседей — это native-вызов запрос/ответ
+(`RTM_NEWNEIGH`/`RTM_DELNEIGH`, `CreateIpNetEntry2`/`DeleteIpNetEntry2`,
+`RTM_ADD` через `PF_ROUTE`), а не подписка на события, поэтому для него нет
+отдельной строки в таблице мониторинга выше — наблюдать там нечего.
 
 ### Доставка событий
 
@@ -186,6 +192,7 @@ if lattice.supports(Capability::ROUTE_MONITORING) {
 | Нативная async-доставка | [`async_monitor`](crates/net-lattice/examples/async_monitor.rs) | capability-gated `watch_async`, `EventStream` |
 | Жизненный цикл адреса | [`address_assignment`](crates/net-lattice/examples/address_assignment.rs) | `NewInterfaceAddress`, `add_address`, `remove_address` |
 | Жизненный цикл маршрута | [`route_mutation`](crates/net-lattice/examples/route_mutation.rs) | `Route`, `add_route`, `remove_route` |
+| Жизненный цикл статического соседа | [`static_neighbor_mutation`](crates/net-lattice/examples/static_neighbor_mutation.rs) | `StaticNeighbor`, `Capability::NEIGHBOR_MUTATION`, `add_static_neighbor`, `remove_static_neighbor` |
 | Замена конфигурации резолвера | [`dns_mutation`](crates/net-lattice/examples/dns_mutation.rs) | `NewDnsConfig`, `set_dns_config`, read-after-write verification |
 | Настройка интерфейса | [`interface_configuration`](crates/net-lattice/examples/interface_configuration.rs) | `InterfaceConfig`, `DesiredAdminState`, capability checks, `set_interface_config` |
 | Просмотр mutation | [`mutation_plan`](crates/net-lattice/examples/mutation_plan.rs) | все варианты `Mutation`, `Mutation::semantics`, `MutationPlan` |
