@@ -128,7 +128,13 @@ use std::time::Instant;
 /// These traits are a supported extension API. A backend must preserve the
 /// documented read, mutation, event-delivery, and cancellation semantics of
 /// each trait it implements. The root re-exports remain available for
-/// compatibility; new backend code may import from this module.
+/// compatibility; new backend code may import from this module. Application
+/// code that only consumes [`Lattice`] should keep importing from the crate
+/// root or the [`model`], [`mutation`], and [`monitoring`] modules, while
+/// this module exists specifically so third-party backend implementers can
+/// see, in one place, every provider, mutator, and event trait
+/// [`LatticeBackend`] requires, without hunting through the larger
+/// root-level (now domain-modules-augmented) item lists.
 pub mod backend {
     pub use crate::LatticeBackend;
     pub use net_lattice_platform::{
