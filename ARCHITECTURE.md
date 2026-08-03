@@ -223,7 +223,13 @@ trait RouteProvider {
     type Route;
 
     fn routes(&self) -> Result<Vec<Self::Route>, Error>;
+}
+
+trait RouteMutator {
+    type Route;
+
     fn add_route(&self, route: Self::Route) -> Result<(), Error>;
+    fn remove_route(&self, route: Self::Route) -> Result<(), Error>;
 }
 
 trait InterfaceProvider {
@@ -253,7 +259,11 @@ The provider traits, one per capability rather than one large trait, for
 the same reason as before — a monolithic trait covering every domain would
 force every backend to stub out methods for features it doesn't have:
 
-- `RouteProvider` — list/add/remove routes.
+- `RouteProvider` — list routes.
+- `RouteMutator` — add and remove routes (ADR-0002). `Route` is reused as
+  both mutation input and provider output: unlike `NeighborEntry`, it
+  carries no OS-synthesized identity or observation-only field that intent
+  must not accept.
 - `InterfaceProvider` — list observed interfaces.
 - `InterfaceMutator` — apply a partial desired interface configuration and
   return the read-after-write observed interface. It is separate from listing
@@ -360,7 +370,13 @@ impl RouteProvider for LinuxBackend {
     type Route = net_lattice_model::route::Route;
 
     fn routes(&self) -> Result<Vec<Self::Route>, Error> { /* netlink */ }
+}
+
+impl RouteMutator for LinuxBackend {
+    type Route = net_lattice_model::route::Route;
+
     fn add_route(&self, route: Self::Route) -> Result<(), Error> { /* netlink */ }
+    fn remove_route(&self, route: Self::Route) -> Result<(), Error> { /* netlink */ }
 }
 ```
 
@@ -408,6 +424,7 @@ but by constraining the associated types to equal the concrete
 ```rust
 pub trait LatticeBackend:
     RouteProvider<Route = net_lattice_model::route::Route>
+    + RouteMutator<Route = net_lattice_model::route::Route>
     + InterfaceProvider<Interface = net_lattice_model::interface::Interface>
 {
 }
@@ -585,11 +602,11 @@ operation metadata before a transaction API can make stronger promises.
 
 | Domain | Current mutation contract | Required normalization before declarative apply |
 |---|---|---|
-| Routes | `RouteProvider` adds and removes through native acknowledgements. `Route` is currently both the observed record and mutation input; deletion matching is platform-specific. | Introduce a distinct route intent and an operation precondition/match rule. Define duplicate, absent, and ambiguous-match outcomes. |
+| Routes | `RouteMutator` adds and removes through native acknowledgements, gated by `Capability::ROUTE_MUTATION` (ADR-0002); `Route` is still both the observed record and mutation input, and deletion matching is platform-specific. | Introduce a distinct route intent and an operation precondition/match rule. Define duplicate, absent, and ambiguous-match outcomes. |
 | Interface addresses | `AddressMutator::add_address` returns a re-read `InterfaceAddress`; removal accepts that observed record. IDs are synthesized from interface and network rather than kernel-issued stable identities. | Record identity scope, collision assumptions, and removal preconditions in the operation model. |
 | DNS | `DnsMutator` replaces the portable resolver view and re-reads `DnsConfig`. Unix rewrites the active resolver file and drops directives outside the portable model; Windows changes global search settings and each enumerated adapter through separate calls. | Surface scope, manager ownership, persistence, and partial-application results in the operation report. Do not promise atomic DNS replacement or automatic rollback. |
 | Interface configuration | `InterfaceConfig` is a partial desired patch; `InterfaceMutator` updates administrative state and/or MTU and returns an observed readback. Combined native writes may partially apply. | Retain explicit compensation and eventual native event delivery; broader declarative interface state belongs to later stages. |
-| Neighbors | Read-only today. | Add distinct static-neighbor intent and lifecycle semantics before exposing mutation. |
+| Neighbors | `NeighborMutator` adds and removes static ARP/NDP entries through `StaticNeighbor` intent, gated by `Capability::NEIGHBOR_MUTATION` (ADR-0001); removal refuses a present but non-`Permanent` entry. | Extend the same intent/mutation pattern to any future neighbor-domain fields; no further normalization required for static entries. |
 
 Every future mutation operation must state: its target identity and matching
 rule; preconditions; idempotent result; required privilege; whether the OS
