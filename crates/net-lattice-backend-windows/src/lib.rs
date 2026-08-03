@@ -372,6 +372,10 @@ impl RouteProvider for WindowsBackend {
             Ok(routes)
         })
     }
+}
+
+impl RouteMutator for WindowsBackend {
+    type Route = Route;
 
     fn add_route(&self, route: Self::Route) -> Result<()> {
         self.runtime.block_on(async move {
