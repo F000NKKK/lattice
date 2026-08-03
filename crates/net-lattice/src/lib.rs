@@ -1264,7 +1264,7 @@ mod tests {
 
     #[test]
     fn facade_executes_ordered_plan_and_preserves_report_indices() {
-        let lattice = lattice(Capability::DNS_MUTATION);
+        let lattice = lattice(Capability::DNS_MUTATION | Capability::ROUTE_MUTATION);
         let plan = MutationPlan::from_operations([
             Mutation::AddRoute(planned_route()),
             Mutation::SetDnsConfig(NewDnsConfig::new()),
@@ -1288,7 +1288,7 @@ mod tests {
 
     #[test]
     fn facade_cancellation_stops_at_an_operation_boundary() {
-        let lattice = lattice(Capability::empty());
+        let lattice = lattice(Capability::ROUTE_MUTATION);
         let plan = MutationPlan::from_operations([
             Mutation::AddRoute(planned_route()),
             Mutation::RemoveRoute(planned_route()),
