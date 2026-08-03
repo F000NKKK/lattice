@@ -5,7 +5,7 @@
 //! DNS configuration, and neighbor tables; perform supported mutations; or
 //! subscribe to network change events.
 //!
-//! # Example
+//! # Quick start
 //!
 //! ```no_run
 //! use net_lattice::{Lattice, Result};
@@ -19,6 +19,123 @@
 //! }
 //! ```
 //!
+//! # Inspection
+//!
+//! [`Lattice::interfaces`], [`Lattice::routes`], [`Lattice::addresses`],
+//! [`Lattice::neighbors`], and [`Lattice::dns_config`] read the connected
+//! backend's current observed state; these calls are generally unprivileged.
+//! The observed/desired-state domain objects they return, plus their
+//! read/inspection provider traits, are also reachable through the [`model`]
+//! module for domain-scoped browsing — [`Interface`], [`Route`],
+//! [`NeighborEntry`], [`InterfaceAddress`], and [`DnsConfig`] all resolve
+//! identically whether imported from the crate root or from `model`.
+//!
+//! # Direct mutations
+//!
+//! Imperative single-operation calls such as [`Lattice::add_route`],
+//! [`Lattice::set_interface_config`], and [`Lattice::add_static_neighbor`]
+//! apply immediately against the connected backend and require the matching
+//! runtime [`Capability`] (checked with [`Lattice::supports`]) before
+//! submission. Mutation intent types (for example [`StaticNeighbor`] and
+//! [`InterfaceConfig`]) are distinct from the observed state they produce; a
+//! successful mutation returns a fresh read-after-write observation. These
+//! types and the mutator traits a backend implements are also reachable
+//! through the [`mutation`] module.
+//!
+//! ```no_run
+//! use net_lattice::{Capability, IpAddress, Ipv4Address, Lattice, MacAddress, Result, StaticNeighbor};
+//!
+//! fn main() -> Result<()> {
+//!     let lattice = Lattice::connect()?;
+//!     if lattice.supports(Capability::NEIGHBOR_MUTATION) {
+//!         // Select an interface at runtime rather than hardcoding an index:
+//!         // a hardcoded value risks clobbering an arbitrary or critical
+//!         // real interface if this snippet is copy-pasted verbatim.
+//!         if let Some(interface) = lattice.interfaces()?.into_iter().next() {
+//!             let neighbor = StaticNeighbor::new(
+//!                 interface.id,
+//!                 IpAddress::from(Ipv4Address::new(192, 0, 2, 250)),
+//!                 MacAddress::new([0x02, 0x00, 0x00, 0x00, 0x00, 0xfa]),
+//!             );
+//!             let observed = lattice.add_static_neighbor(neighbor)?;
+//!             println!("{observed:?}");
+//!         }
+//!     }
+//!     Ok(())
+//! }
+//! ```
+//!
+//! # Transaction plans
+//!
+//! [`MutationPlan`] batches operations as data, independent of any backend.
+//! Build a plan, check it against the connected backend with
+//! [`Lattice::validate_plan`], execute it with [`Lattice::execute_plan`] and
+//! an [`ExecutionOptions`] value, then inspect the returned
+//! [`MutationPlanReport`], which preserves plan indices and distinguishes
+//! validation, snapshot, execution, cancellation, and compensation
+//! boundaries. This machinery, plus the mutator traits above, is also
+//! reachable through the [`mutation`] module.
+//!
+//! ```no_run
+//! use net_lattice::{
+//!     ExecutionOptions, Ipv4Address, Ipv4Network, Ipv4PrefixLength, Lattice, Mutation,
+//!     MutationPlan, Network, Result, Route, RouteId,
+//! };
+//!
+//! fn main() -> Result<()> {
+//!     let lattice = Lattice::connect()?;
+//!     let destination = Network::from(Ipv4Network::new(
+//!         Ipv4Address::new(198, 51, 100, 0),
+//!         Ipv4PrefixLength::new(24).expect("24 is a valid IPv4 prefix length"),
+//!     ));
+//!     // Select an interface at runtime rather than hardcoding an index: a
+//!     // hardcoded value risks clobbering an arbitrary or critical real
+//!     // interface if this snippet is copy-pasted verbatim.
+//!     let Some(interface) = lattice.interfaces()?.into_iter().next() else {
+//!         return Ok(());
+//!     };
+//!     let route = Route::new(RouteId::new(0), destination).with_interface_index(interface.index);
+//!
+//!     // Build: an add followed by its own remove is a safe, idempotent demo
+//!     // plan that leaves system state unchanged if executed.
+//!     let plan = MutationPlan::from_operations([
+//!         Mutation::AddRoute(route.clone()),
+//!         Mutation::RemoveRoute(route),
+//!     ]);
+//!
+//!     // Validate: side-effect-free capability/precondition check.
+//!     lattice.validate_plan(&plan)?;
+//!
+//!     // Execute: ordered submission, stopping after the first error.
+//!     let mut options = ExecutionOptions::default();
+//!     let report = lattice.execute_plan(&plan, &mut options);
+//!
+//!     // Report: one outcome per operation, in plan order.
+//!     println!("{report:?}");
+//!     Ok(())
+//! }
+//! ```
+//!
+//! # Monitoring
+//!
+//! [`Lattice::watch`] subscribes to every domain and requires aggregate
+//! [`Capability::MONITORING`]; [`Lattice::watch_filtered`] (and, with the
+//! `async` feature, `Lattice::watch_async`) subscribes to only the selected
+//! [`EventFilter`] domains, each gated by its own monitoring capability.
+//! Mutation support does not imply native change notifications:
+//! a backend can advertise a mutation capability without advertising the
+//! matching monitoring capability, and vice versa. Change events, filters,
+//! and monitoring provider traits are also reachable through the
+//! [`monitoring`] module.
+//!
+//! # Implementing a backend
+//!
+//! [`LatticeBackend`] is the bound a backend must satisfy to be usable with
+//! [`Lattice`]; the [`backend`] module collects every provider, mutator, and
+//! event trait it requires in one place for third-party backend authors,
+//! alongside the extension types ([`backend::EventSender`] and friends) not
+//! otherwise re-exported at the crate root.
+//!
 //! # Facade design
 //!
 //! Re-exports the types consumers need from `net-lattice-model` and
@@ -27,6 +144,15 @@
 //! provider traits are constrained here to Net Lattice's own model types,
 //! without `net-lattice-platform` ever depending on `net-lattice-model`. See
 //! ARCHITECTURE.md for the full rationale.
+//!
+//! Consumers may import every item above from either the flat crate root
+//! (unchanged, kept for compatibility with existing `use net_lattice::X;`
+//! imports) or from the domain-scoped [`model`], [`mutation`], and
+//! [`monitoring`] modules (added for docs.rs navigation), whichever is more
+//! convenient — both paths resolve to the exact same item. The three domain
+//! modules introduce no new type or trait: they are additional paths to the
+//! existing root re-exports, grouped by domain, not a replacement for the
+//! root list or a distinct API surface.
 
 /// Async event adapters, enabled by the `async` feature.
 #[cfg(feature = "async")]

@@ -7,7 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-No unreleased changes.
+### Added
+
+- `net-lattice::model`, `net-lattice::mutation`, and `net-lattice::monitoring`:
+  additive domain-scoped re-export modules for docs.rs navigation. Every item
+  was already re-exported at the crate root; these modules introduce no new
+  type, trait, or behavior, and `LatticeBackend`'s bound is unchanged.
+
+### Documentation
+
+- Rewrote the `net-lattice` crate-root rustdoc into distinct Quick start,
+  Inspection, Direct mutations, Transaction plans, Monitoring, and
+  Implementing a backend sections, including a
+  `Capability::NEIGHBOR_MUTATION` + `StaticNeighbor` mutation doctest and a
+  `MutationPlan` build/validate/execute/report transaction doctest.
+- Extended the `backend` module's doc comment to distinguish application
+  code (crate root or the `model`/`mutation`/`monitoring` modules) from
+  third-party backend implementers (`backend`).
+- Reworded the README.md/README.ru.md `NEIGHBOR_MUTATION`/
+  `NEIGHBOR_MONITORING` passage: the two are independent capabilities, and
+  mutation support does not imply native change notifications; readers are
+  pointed at the existing "Neighbor change monitoring" table row instead.
+- Documented why the `mutation_plan` example's interface index is an
+  intentional synthetic placeholder, unlike the other facade examples'
+  runtime `NET_LATTICE_INTERFACE_INDEX` selection.
 
 ## [0.17.1] - 2026-08-03
 
