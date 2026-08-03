@@ -94,7 +94,7 @@ an internal facade component until repeated reuse justifies a new crate.
 
 ## Current release and roadmap
 
-Published stage baseline: the `net-lattice 0.16` release line (see
+Published stage baseline: the `net-lattice 0.17` release line (see
 `SECURITY.md`'s supported-version table). Read the current workspace version
 from `crates/net-lattice/Cargo.toml`; do not duplicate a patch version here.
 
@@ -106,18 +106,44 @@ from `crates/net-lattice/Cargo.toml`; do not duplicate a patch version here.
 - 0.16: completed and verified by privileged Linux, Windows, and macOS CI:
   desired `InterfaceConfig`, capability-gated MTU/admin-state mutation,
   read-after-write, and executor integration on all built-in backends.
-- 0.17: neighbor mutation plus IPv6 DNS parity and isolated destructive
-  topology acceptance; detailed planning will precede implementation.
+- 0.17: completed and verified by privileged Linux, Windows, and macOS CI:
+  static ARP/NDP neighbor mutation (`NeighborMutator`,
+  `Capability::NEIGHBOR_MUTATION`), the `RouteProvider`/`RouteMutator` split
+  (`Capability::ROUTE_MUTATION`, ADR-0002), IPv6 DNS parity, and isolated
+  destructive topology acceptance for route/address/neighbor CRUD and
+  compensation.
 - 0.18: planned consistent `CurrentState` snapshots.
 - 0.19: planned `DesiredState` and inspectable diff.
 - 0.20: planned declarative apply through the transaction executor.
 - 0.21: planned pre-1.0 compatibility and hardening audit.
 
-The completed Stage 0.16 plan and audit records are maintained as internal
-working-tree evidence. The next-stage planning workspace is likewise kept
-outside the published crate documentation.
+The completed Stage 0.16/0.17 plan and audit records are maintained as
+internal working-tree evidence. The next-stage planning workspace is
+likewise kept outside the published crate documentation.
 `.codex/`, this index, and root `AGENTS.md` are intentionally local agent
 context in this checkout and are not release content.
+
+## Stage 0.17 delivered contract
+
+```text
+observed NeighborEntry                    observed Route
+        ▲                                         ▲
+        │ read-after-write                        │ native acknowledgement
+NeighborMutator ← StaticNeighbor intent    RouteMutator ← Route intent
+        │                                         │
+        └── NEIGHBOR_MUTATION capability          └── ROUTE_MUTATION capability
+```
+
+`NeighborMutator` is new (ADR-0001): its `StaticNeighbor` input is distinct
+from `NeighborEntry` (no synthesized ID or observed state), and removal
+refuses a present but non-`Permanent` (dynamically learned) entry with
+`InvalidState`. `RouteProvider` was split into `RouteProvider`/`RouteMutator`
+(ADR-0002), the last domain to gain the provider/mutator boundary already
+used everywhere else; `Route` itself is unchanged (no new intent type, since
+it carries no OS-synthesized field). Both preserve the Stage 0.15
+`ExecutionOptions` API and explicit-compensation boundary. Privileged
+shared-runner tests validate native submission/readback/removal and
+cancellation-triggered compensation on Linux, Windows, and macOS.
 
 ## Stage 0.16 delivered contract
 
