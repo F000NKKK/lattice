@@ -45,7 +45,73 @@ available in the environment. Key endpoints:
   `Cross-platform`.
 - `Sprint` — roadmap stage label (`0.16`, `0.17`, `0.18`, ...), separate
   from the `Stage` workflow-state field; set it to the stage the issue
-  belongs to.
+  belongs to. The user creates and manages Sprint entities directly in
+  YouTrack (Board → Sprints); agents only ever set the field on an issue,
+  never create a Sprint. If the target stage has no Sprint yet, ask the
+  user to create it rather than inventing one. `Sprint` is what both Agile
+  boards use to scope which issues are "in view" for a stage.
+
+## When an issue goes to `Stage: Backlog`
+
+`Backlog` is the default/starting state, not a dumping ground:
+
+- Every newly created Epic/Story/Task/Bug starts at `Stage: Backlog` unless
+  work begins immediately in the same turn (then set `Develop` directly).
+- An issue moves *back* to `Backlog` only if work is explicitly paused or
+  descoped from the current Sprint — not to "park" something half-done;
+  half-done work stays at its current `Stage` with a comment explaining
+  what's left.
+- Unresolved questions/decisions get filed as their own `Task` (or a
+  comment on the Epic) at `Stage: Backlog` — never left only in the session
+  transcript.
+
+## Picking the next Task to work
+
+Search before starting new work:
+
+```
+GET /api/issues?query=project:+NL+Sprint:+{0.18}+Type:+Task+Stage:+Backlog&fields=idReadable,summary
+```
+
+Prefer, in order: (1) a `Task` already `Stage: Develop`/`Review` with an
+owning `Role` matching the role about to run — finish in-flight work first;
+(2) the oldest unblocked `Stage: Backlog` `Task` in the active Sprint whose
+parent Story is not itself blocked; (3) file a new `Task` if the
+researcher/architect pass surfaced one that doesn't exist yet. Check
+`blocked by` links before starting — do not start a blocked Task.
+
+## Searching YouTrack
+
+Search before creating an issue (avoid duplicates) and before assuming
+information is lost (check comments/history first):
+
+- `project: NL Sprint: {0.18}` — everything in a roadmap stage.
+- `project: NL Type: Task Stage: Backlog Sprint: {0.18}` — unstarted work.
+- `project: NL Role: Implementer Stage: Develop` — Tasks mid-implementation.
+- `project: NL Type: Bug Stage: -Done` — open bugs.
+- `project: NL Platform: Windows` — Windows-specific issues.
+- Free text: `project: NL neighbor mutation` — matches summary/description/
+  comments.
+
+`GET /api/issues/<id>/comments?fields=text,author(login),created` to read
+an issue's full audit trail before adding a new comment. Search Articles
+(`GET /api/articles?query=...`) before drafting a new ADR.
+
+## Boards
+
+Two Agile boards exist on `NL`, both columned by `Stage`; they show the
+same underlying issues grouped differently:
+
+- **"Net Lattice: доска Kanban"** — swimlanes by `Epic`. Stage-level
+  progress: direct children of an Epic (Stories) show as cards; anything
+  nested deeper (a Task under a Story) does not appear here.
+- **"Net Lattice: by User Story"** — swimlanes by the nearest parent issue
+  regardless of Type, so Tasks show as cards grouped under their owning
+  Story. Use for day-to-day work on a Story's Task breakdown.
+
+Both boards are UI-configured. Codex has no board-management endpoint
+exercised in this workflow — flag a needed board change to the user instead
+of attempting a workaround via issue links.
 
 ## Audit trail — issue comments replace `AUDIT.md`
 

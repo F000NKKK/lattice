@@ -39,10 +39,91 @@ Every issue in `NL` carries:
 - `Platform` (multi-value) — `Linux` | `Windows` | `Darwin` |
   `Cross-platform`. Set on Task/Bug issues whose scope is platform-specific;
   use `Cross-platform` for model/facade-only work.
+- `Sprint` — the roadmap-stage label (`0.16`, `0.17`, `0.18`, ...). The user
+  creates and manages Sprint entities directly in YouTrack (Board → Sprints);
+  agents never create a Sprint, only set the field on an issue. Set `Sprint`
+  on every issue to the stage it belongs to — this is orthogonal to `Stage`
+  (workflow state) and to the Epic hierarchy: `Sprint` is what the two Agile
+  boards use to pick which issues are "in view" for a given roadmap stage.
+  Never leave it unset on a new issue; if the target stage has no Sprint yet,
+  ask the user to create it rather than inventing one.
 
 Check the live schema with `mcp__youtrack__get_issue_fields_schema` before
 creating issues if uncertain about current field values — the schema is the
 source of truth, not this file.
+
+## When an issue goes to `Stage: Backlog`
+
+`Backlog` is the default/starting state, not a dumping ground:
+
+- Every newly created Epic/Story/Task/Bug starts at `Stage: Backlog` unless
+  work begins immediately in the same turn (then set `Develop` directly).
+- An issue moves *back* to `Backlog` only if work on it is explicitly paused
+  or descoped from the current Sprint — not as a way to "park" something
+  half-done; half-done work stays at its current `Stage` with a comment
+  explaining what's left.
+- Unresolved questions/decisions that block a Task get filed as their own
+  `Task` (or a comment on the Epic) at `Stage: Backlog`, per "Decomposing a
+  stage" below — never left only in chat.
+
+## Picking the next Task to work
+
+Before starting new work, search rather than guess:
+
+```
+mcp__youtrack__search_issues
+  query: "project: NL Sprint: {0.18} Type: Task Stage: Backlog"
+```
+
+Prefer, in order: (1) a `Task` already `Stage: Develop`/`Review` with an
+owning `Role` matching the role you're about to run — finish in-flight work
+before starting new work; (2) the oldest unblocked `Stage: Backlog` `Task`
+in the active Sprint whose parent Story is not itself blocked; (3) file a
+new `Task` if the researcher/architect pass surfaced one that doesn't exist
+yet. Check `blocked by` links (`mcp__youtrack__get_issue`) before starting —
+do not start a Task that is blocked.
+
+## Searching YouTrack
+
+Use `mcp__youtrack__search_issues` before creating an issue (avoid
+duplicates) and before assuming information is lost (check comments/history
+first). Useful query patterns (YouTrack query language, combine with
+spaces = AND):
+
+- `project: NL Sprint: {0.18}` — everything in a roadmap stage.
+- `project: NL Type: Task Stage: Backlog Sprint: {0.18}` — unstarted work in
+  a stage.
+- `project: NL Role: Implementer Stage: Develop` — Tasks currently mid-
+  implementation.
+- `project: NL Type: Bug Stage: -Done` — open bugs.
+- `project: NL Platform: Windows` — Windows-specific issues.
+- Free text: `project: NL neighbor mutation` — matches summary/description/
+  comments.
+
+Use `mcp__youtrack__get_issue_comments` to read an issue's full audit trail
+before adding a new comment — don't re-derive evidence already recorded.
+Use `mcp__youtrack__search_articles`/`get_article` to check for an existing
+ADR before drafting a new one.
+
+## Boards
+
+Two Agile boards exist on `NL`, both driven by the `Stage` field for
+columns; pick whichever grouping answers the question at hand — they show
+the same underlying issues, just grouped differently:
+
+- **"Net Lattice: доска Kanban"** — swimlanes by `Epic`. Use this to see
+  stage-level progress: which Stories/Tasks under a given roadmap stage are
+  where. Direct children of an Epic show as swimlane rows; issues nested
+  deeper (e.g. a Task under a Story) do not appear as their own card here —
+  only the Story does.
+- **"Net Lattice: by User Story"** — swimlanes by the nearest parent issue
+  regardless of its Type, so Tasks show as cards grouped under their owning
+  Story. Use this for day-to-day work on a specific Story's Task breakdown.
+
+Both boards are UI-configured (columns/swimlanes/filters); agents cannot
+create or reconfigure boards via the available MCP tools — flag it to the
+user if a board needs a setup change instead of attempting a workaround via
+issue links.
 
 ## Audit trail — issue comments replace `AUDIT.md`
 
