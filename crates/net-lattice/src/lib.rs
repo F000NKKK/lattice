@@ -1413,7 +1413,7 @@ mod tests {
 
     #[test]
     fn facade_validates_route_and_address_preconditions() {
-        let lattice = lattice(Capability::empty());
+        let lattice = lattice(Capability::ROUTE_MUTATION);
         assert!(matches!(
             lattice.validate_plan(&MutationPlan::from_operations([
                 Mutation::AddRoute(route())
@@ -1562,7 +1562,7 @@ mod tests {
 
     #[test]
     fn facade_executes_static_neighbor_plan_and_preserves_report_indices() {
-        let lattice = lattice(Capability::NEIGHBOR_MUTATION);
+        let lattice = lattice(Capability::NEIGHBOR_MUTATION | Capability::ROUTE_MUTATION);
         let plan = MutationPlan::from_operations([
             Mutation::AddStaticNeighbor(static_neighbor()),
             Mutation::AddRoute(planned_route()),
