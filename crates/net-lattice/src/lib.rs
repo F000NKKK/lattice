@@ -62,6 +62,63 @@ pub use net_lattice_platform::{
     NeighborProvider, RouteMutator, RouteProvider,
 };
 
+/// Observed and desired-state domain objects, plus their read/inspection
+/// provider traits.
+///
+/// This module re-exports a subset of the items already re-exported at the
+/// crate root, grouped by domain, as an additional navigation entry point.
+/// It introduces no new public symbols: every item here also resolves at
+/// `net_lattice::Item` and, for platform traits, may additionally appear
+/// under [`backend`] for backend authors. The crate root remains the
+/// canonical, complete re-export list.
+pub mod model {
+    #[doc(inline)]
+    pub use crate::{
+        AddressProvider, AdminState, DnsConfig, DnsProvider, Interface, InterfaceAddress,
+        InterfaceAddressId, InterfaceId, InterfaceKind, InterfaceProvider, IpAddress, MacAddress,
+        NeighborEntry, NeighborId, NeighborProvider, NeighborState, Network, OperationalState,
+        Route, RouteId, RouteProvider,
+    };
+}
+
+/// Mutation intent types, plan/execution/report machinery, and mutator
+/// traits.
+///
+/// This module re-exports a subset of the items already re-exported at the
+/// crate root, grouped by domain, as an additional navigation entry point.
+/// It introduces no new public symbols: every item here also resolves at
+/// `net_lattice::Item` and, for platform traits, may additionally appear
+/// under [`backend`] for backend authors. The crate root remains the
+/// canonical, complete re-export list.
+pub mod mutation {
+    #[doc(inline)]
+    pub use crate::{
+        AddressMutator, Cancellation, Compensation, DesiredAdminState, DnsMutator,
+        ExecutionOptions, InterfaceConfig, InterfaceMutator, Mutation, MutationConfirmation,
+        MutationExecutionPhase, MutationIdempotency, MutationKind, MutationOperationReport,
+        MutationOutcome, MutationPlan, MutationPlanReport, MutationPrecondition, MutationPreflight,
+        MutationPrivilege, MutationReversibility, MutationSemantics, MutationSnapshot,
+        MutationStopReason, NeighborMutator, NewDnsConfig, NewInterfaceAddress, RollbackStatus,
+        RouteMutator, Snapshot, StaticNeighbor,
+    };
+}
+
+/// Change events, event filters, and monitoring provider traits.
+///
+/// This module re-exports a subset of the items already re-exported at the
+/// crate root, grouped by domain, as an additional navigation entry point.
+/// It introduces no new public symbols: every item here also resolves at
+/// `net_lattice::Item` and, for platform traits, may additionally appear
+/// under [`backend`] for backend authors. The crate root remains the
+/// canonical, complete re-export list.
+pub mod monitoring {
+    #[doc(inline)]
+    pub use crate::{ChangeKind, Event, EventDomain, EventFilter, EventProvider, EventReceiver};
+    #[cfg(feature = "async")]
+    #[doc(inline)]
+    pub use crate::{EventStream, TokioEventProvider};
+}
+
 #[cfg(test)]
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;

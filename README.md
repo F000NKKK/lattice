@@ -178,8 +178,12 @@ facade feature.
 
 Static neighbor mutation is a request/response native call (`RTM_NEWNEIGH`/
 `RTM_DELNEIGH`, `CreateIpNetEntry2`/`DeleteIpNetEntry2`, `PF_ROUTE`'s
-`RTM_ADD`), not an event subscription, so it has no corresponding row in the
-change-monitoring capabilities above — there is nothing to watch.
+`RTM_ADD`), not an event subscription. `Capability::NEIGHBOR_MUTATION` and
+`Capability::NEIGHBOR_MONITORING` are independent capabilities: mutation
+support does not imply native change notifications for the neighbor table.
+Check `Capability::NEIGHBOR_MONITORING` (the "Neighbor change monitoring"
+row above) before watching for neighbor-table changes; it is currently
+advertised on Linux and macOS, but not Windows.
 
 ### Event delivery
 
