@@ -67,6 +67,36 @@ When one patch asks for both MTU and administrative state, a native backend
 may use separate writes. Treat errors as potentially partially applied and use
 an explicit `MutationPlan` compensator if restoration is needed.
 
+## Static neighbor mutation
+
+`StaticNeighbor` is desired intent, distinct from the observed `NeighborEntry`:
+it carries neither the synthesized `NeighborId` nor the observed
+`NeighborState`, and requires a MAC address because only static L2 mappings
+can be created this way. Check `Capability::NEIGHBOR_MUTATION` first. A
+successful add returns the observed entry read back from the OS; removing a
+present but non-`Permanent` (dynamically learned) entry is refused with
+`Error::InvalidState` rather than silently evicting it.
+
+```rust,no_run
+use net_lattice::{
+    Capability, IpAddress, Ipv4Address, InterfaceId, Lattice, MacAddress, Result, StaticNeighbor,
+};
+
+fn main() -> Result<()> {
+    let lattice = Lattice::connect()?;
+    if lattice.supports(Capability::NEIGHBOR_MUTATION) {
+        let neighbor = StaticNeighbor::new(
+            InterfaceId::new(7),
+            IpAddress::from(Ipv4Address::new(192, 0, 2, 250)),
+            MacAddress::new([0x02, 0x00, 0x00, 0x00, 0x00, 0xfa]),
+        );
+        let observed = lattice.add_static_neighbor(neighbor)?;
+        println!("{observed:?}");
+    }
+    Ok(())
+}
+```
+
 ## Monitoring capabilities
 
 Select only event domains the connected backend advertises. The aggregate
