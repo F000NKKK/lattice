@@ -91,7 +91,8 @@ Implemented:
 - Interface inspection
 - Interface administrative-state and MTU configuration
 - DNS resolver inspection and mutation
-- Inspectable mutation plans for routes, addresses, and DNS
+- Static ARP/NDP neighbor mutation
+- Inspectable mutation plans for routes, addresses, DNS, and static neighbors
 - Ordered mutation-plan execution with cancellation, snapshots, explicit
   compensation, and phase-aware reports
 - Neighbor tables (ARP/NDP)
