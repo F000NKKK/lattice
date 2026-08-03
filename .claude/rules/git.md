@@ -20,6 +20,15 @@ via `permissions.deny` in `.claude/settings.json`, not just as prose here.
 - Commit messages (auto-commits and user-requested commits alike) must NOT
   include a `Co-Authored-By` trailer or any other attribution footer. This
   overrides the default Claude Code commit template for this repository.
+- The GitHub repository is linked to YouTrack's VCS integration: reference
+  the relevant `NL-*` issue ID plainly in the commit message (e.g. a `NL-13:`
+  prefix or `NL-13` mentioned in the body) so YouTrack auto-links the commit
+  to that issue's activity feed. Do not use YouTrack command keywords (e.g.
+  `fixes NL-13`, `closes NL-13`) that could auto-transition the issue's
+  `Stage` — Stage transitions in this workflow are role-gated (reviewer
+  confirmation required before `Done`, see `@.claude/rules/youtrack.md`) and
+  must stay explicit `mcp__youtrack__update_issue` calls, not a side effect
+  of a commit message.
 - Auto-commits still respect every other restriction in this file: no
   amend/rebase/force-push, no destructive staging, no committing `.codex/`,
   root `AGENTS.md`, or `index.md`.
