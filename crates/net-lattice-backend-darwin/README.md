@@ -6,8 +6,8 @@ native ioctls. It implements the generic `net-lattice-platform` contracts.
 ## What it provides
 
 - interface, address, route, neighbor, and resolver inspection;
-- route, address, and resolver mutation where macOS exposes portable
-  semantics;
+- route, address, resolver, and static ARP/NDP neighbor mutation where macOS
+  exposes portable semantics;
 - administrative-state and MTU configuration through `SIOCSIFFLAGS` and
   `SIOCSIFMTU`, with fresh observed-interface readback;
 - routing-socket monitoring and optional async delivery;
@@ -76,5 +76,8 @@ signal.
 Inspection is normally unprivileged. Mutations can require root or specific
 system entitlements and may interact with macOS network configuration
 services. Interface configuration writes the real system interface and can
-apply MTU and administrative state independently. Privileged tests run
+apply MTU and administrative state independently. Static-neighbor remove
+reads the target first and refuses to delete a present entry that is not
+currently `Permanent`, so a dynamically learned ARP/NDP cache entry is never
+removed as a side effect of a static-removal request. Privileged tests run
 separately and must restore changed state.
