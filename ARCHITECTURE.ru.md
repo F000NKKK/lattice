@@ -367,7 +367,13 @@ impl RouteProvider for LinuxBackend {
     type Route = net_lattice_model::route::Route;
 
     fn routes(&self) -> Result<Vec<Self::Route>, Error> { /* netlink */ }
+}
+
+impl RouteMutator for LinuxBackend {
+    type Route = net_lattice_model::route::Route;
+
     fn add_route(&self, route: Self::Route) -> Result<(), Error> { /* netlink */ }
+    fn remove_route(&self, route: Self::Route) -> Result<(), Error> { /* netlink */ }
 }
 ```
 
