@@ -18,10 +18,11 @@
 **Net Lattice** is a modern, cross-platform Rust library for configuring and inspecting operating system networking through a single, strongly typed API.
 
 > **Status:** Net Lattice provides cross-platform network inspection, route,
-> address, DNS, administrative-state, and MTU mutation, inspectable mutation
-> plans, and ordered transaction execution with cancellation, snapshots,
-> compensation, and phase-aware reports. Stage 0.16 is verified on the
-> privileged Linux, Windows, and macOS CI jobs; see Current Status below.
+> address, DNS, administrative-state, MTU, and static ARP/NDP neighbor
+> mutation, inspectable mutation plans, and ordered transaction execution
+> with cancellation, snapshots, compensation, and phase-aware reports. Stage
+> 0.17 is verified on the privileged Linux, Windows, and macOS CI jobs; see
+> Current Status below.
 
 ## Overview
 
