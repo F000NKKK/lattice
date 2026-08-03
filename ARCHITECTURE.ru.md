@@ -214,7 +214,13 @@ trait RouteProvider {
     type Route;
 
     fn routes(&self) -> Result<Vec<Self::Route>, Error>;
+}
+
+trait RouteMutator {
+    type Route;
+
     fn add_route(&self, route: Self::Route) -> Result<(), Error>;
+    fn remove_route(&self, route: Self::Route) -> Result<(), Error>;
 }
 
 trait InterfaceProvider {
@@ -246,7 +252,11 @@ Provider-traits, по одному на возможность, а не один
 заставлял бы каждый backend заглушать методы для возможностей, которых у
 него нет:
 
-- `RouteProvider` — список/добавление/удаление маршрутов.
+- `RouteProvider` — список маршрутов.
+- `RouteMutator` — добавление и удаление маршрутов (ADR-0002). `Route`
+  используется одновременно и как вход мутации, и как вывод provider'а: в
+  отличие от `NeighborEntry`, у него нет ни синтезированного OS-идентификатора,
+  ни поля, доступного только для наблюдения, которое intent не должен нести.
 - `InterfaceProvider` — список наблюдаемых интерфейсов.
 - `InterfaceMutator` — применение частичной desired-конфигурации интерфейса
   с возвратом наблюдаемого интерфейса после read-after-write. Он отделён от
