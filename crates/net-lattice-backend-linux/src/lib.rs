@@ -27,7 +27,7 @@ use net_lattice_model::{IpAddress, Network};
 use net_lattice_platform::{
     AddressMutator, AddressProvider, Capability, CapabilityProvider, DnsMutator, DnsProvider,
     EventProvider, EventReceiver, InterfaceMutator, InterfaceProvider, NeighborMutator,
-    NeighborProvider, RouteProvider,
+    NeighborProvider, RouteMutator, RouteProvider,
 };
 #[cfg(feature = "async")]
 use net_lattice_platform::{TokioEventProvider, TokioEventReceiver};
@@ -389,6 +389,10 @@ impl RouteProvider for LinuxBackend {
             Ok(routes)
         })
     }
+}
+
+impl RouteMutator for LinuxBackend {
+    type Route = Route;
 
     fn add_route(&self, route: Self::Route) -> Result<()> {
         self.runtime.block_on(async {
@@ -876,6 +880,7 @@ impl CapabilityProvider for LinuxBackend {
             | Capability::INTERFACE_ADMIN_STATE
             | Capability::INTERFACE_MTU
             | Capability::NEIGHBOR_MUTATION
+            | Capability::ROUTE_MUTATION
     }
 }
 
@@ -1213,6 +1218,7 @@ mod tests {
         assert!(capabilities.contains(Capability::INTERFACE_ADMIN_STATE));
         assert!(capabilities.contains(Capability::INTERFACE_MTU));
         assert!(capabilities.contains(Capability::NEIGHBOR_MUTATION));
+        assert!(capabilities.contains(Capability::ROUTE_MUTATION));
     }
 
     #[test]
