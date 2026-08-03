@@ -7,7 +7,7 @@ Rust API. This is the application-facing Net Lattice crate.
 
 - automatic native backend selection on Linux, Windows, and macOS;
 - inspection of interfaces, addresses, routes, neighbors, and DNS;
-- imperative route, address, and resolver mutation;
+- imperative route, address, resolver, and static ARP/NDP neighbor mutation;
 - partial interface MTU and administrative-state configuration;
 - filtered native change monitoring;
 - ordered `MutationPlan` execution with runtime validation, cancellation,
