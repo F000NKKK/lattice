@@ -14,9 +14,9 @@ the existing route, address, and DNS operations on Linux, Windows, and macOS.
 Stage 0.16 interface configuration is verified by privileged Linux, Windows,
 and macOS CI; `InterfaceConfig` remains a partial imperative patch, not a
 declarative desired-state model. Stage 0.17's IPv6 DNS parity, static ARP/NDP
-neighbor mutation, and isolated destructive topology testing are implemented
-and verified on privileged Linux, Windows, and macOS CI, but not yet
-released.
+neighbor mutation (`NeighborMutator`), the `RouteProvider`/`RouteMutator`
+split, and isolated destructive topology testing are verified on privileged
+Linux, Windows, and macOS CI and are part of the published surface.
 Large capability domains remain ahead, but the published read, mutation,
 monitoring, planning, and backend-extension APIs are real public surface. The
 most valuable contributions right now are:
