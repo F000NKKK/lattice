@@ -273,25 +273,21 @@ force every backend to stub out methods for features it doesn't have:
   input, `StaticNeighbor`, is distinct from `NeighborEntry`: it carries
   neither the synthesized `NeighborId` nor the observed `NeighborState`, and
   requires a MAC address because this stage only creates static L2 mappings.
-  As of Stage 0.17 Slice C, `net-lattice-backend-linux` implements this trait
-  (`RTM_NEWNEIGH`/`RTM_DELNEIGH` via `rtnetlink`, `NUD_PERMANENT`, a
-  non-`Permanent`-entry deletion guard), `net-lattice-backend-windows`
-  implements it (`CreateIpNetEntry2`/`DeleteIpNetEntry2` over
-  `MIB_IPNET_ROW2`, `NlnsPermanent`, the same non-`Permanent`-entry deletion
-  guard, confirmed on live elevated Windows CI); both advertise
-  `Capability::NEIGHBOR_MUTATION`. `net-lattice-backend-darwin` also
-  implements the trait (`RTM_ADD` and a two-message `RTM_GET`-then-
-  `RTM_DELETE` sequence over `PF_ROUTE`, mirroring Apple's own
-  `arp.c`/`ndp.c`, the same non-`Permanent`-entry deletion guard), but a real
-  elevated macOS CI run found `add_static_neighbor` itself fails against a
-  real kernel with an as-yet-undiagnosed `InvalidState` error, so
-  `DarwinBackend::capabilities()` deliberately does **not** advertise
-  `Capability::NEIGHBOR_MUTATION` yet — advertising an operation confirmed
-  broken on real hardware would contradict ADR-0001's own requirement that a
-  capability claim rest on proven native behavior. This sandbox cannot link
-  a Darwin test binary at all (no macOS SDK/Xcode), so only cross-compiled
-  type-checking has run here. The `net-lattice` facade does not forward to `NeighborMutator`
-  on any platform yet (see ADR-0001, still `proposed`).
+  `net-lattice-backend-linux` implements this trait (`RTM_NEWNEIGH`/
+  `RTM_DELNEIGH` via `rtnetlink`, `NUD_PERMANENT`, a non-`Permanent`-entry
+  deletion guard); `net-lattice-backend-windows` implements it
+  (`CreateIpNetEntry2`/`DeleteIpNetEntry2` over `MIB_IPNET_ROW2`,
+  `NlnsPermanent`, the same deletion guard, confirmed on live elevated
+  Windows CI); `net-lattice-backend-darwin` implements it (`RTM_ADD`
+  encoding a complete `sockaddr_dl` gateway with the real interface's link
+  type, and a two-message `RTM_GET`-then-`RTM_DELETE` sequence over
+  `PF_ROUTE`, mirroring Apple's own `arp.c`/`ndp.c`, the same deletion
+  guard, confirmed on a live elevated macOS CI round trip). All three
+  backends advertise `Capability::NEIGHBOR_MUTATION`. The `net-lattice`
+  facade forwards `NeighborMutator` on every backend through
+  `Lattice::add_static_neighbor`/`remove_static_neighbor` and
+  `Mutation::{AddStaticNeighbor, RemoveStaticNeighbor}` executor dispatch
+  (ADR-0001).
 - `DnsProvider` — read/write DNS resolver configuration.
 - `AddressProvider` — list IP addresses assigned to interfaces.
 - `AddressMutator` — assign and remove IP addresses. Its input is distinct
