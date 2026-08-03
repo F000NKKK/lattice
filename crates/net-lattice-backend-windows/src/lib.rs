@@ -29,7 +29,7 @@ use net_lattice_model::{IpAddress, Network};
 use net_lattice_platform::{
     AddressMutator, AddressProvider, Capability, CapabilityProvider, DnsMutator, DnsProvider,
     EventProvider, EventReceiver, EventSender, InterfaceMutator, InterfaceProvider,
-    NeighborMutator, NeighborProvider, RouteProvider,
+    NeighborMutator, NeighborProvider, RouteMutator, RouteProvider,
 };
 #[cfg(feature = "async")]
 use net_lattice_platform::{TokioEventProvider, TokioEventReceiver, TokioEventSender};
