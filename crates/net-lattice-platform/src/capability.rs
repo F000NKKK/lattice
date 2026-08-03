@@ -54,6 +54,12 @@ bitflags::bitflags! {
         /// This is a feature gate, not proof that the current process has the
         /// privilege or policy permission to change a neighbor entry.
         const NEIGHBOR_MUTATION = 1 << 10;
+        /// The backend can add and remove routes through a supported
+        /// operating-system mechanism.
+        ///
+        /// This is a feature gate, not proof that the current process has the
+        /// privilege or policy permission to change a route.
+        const ROUTE_MUTATION = 1 << 11;
         /// Every currently modeled event domain is deliverable by the
         /// backend. This is the capability required by an all-domain
         /// [`EventProvider::watch`](crate::EventProvider::watch) request.
@@ -107,5 +113,15 @@ mod tests {
         );
         assert!(!Capability::MONITORING.contains(Capability::NEIGHBOR_MUTATION));
         assert!(!Capability::NEIGHBOR_MUTATION.contains(Capability::NEIGHBOR_MONITORING));
+    }
+
+    #[test]
+    fn route_mutation_is_a_distinct_bit_outside_the_monitoring_aggregate() {
+        assert_ne!(
+            Capability::ROUTE_MUTATION.bits(),
+            Capability::ROUTE_MONITORING.bits()
+        );
+        assert!(!Capability::MONITORING.contains(Capability::ROUTE_MUTATION));
+        assert!(!Capability::ROUTE_MUTATION.contains(Capability::ROUTE_MONITORING));
     }
 }
