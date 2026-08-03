@@ -421,6 +421,7 @@ Backend'ы зависят от `net-lattice-platform` и `net-lattice-model`. О
 ```rust
 pub trait LatticeBackend:
     RouteProvider<Route = net_lattice_model::route::Route>
+    + RouteMutator<Route = net_lattice_model::route::Route>
     + InterfaceProvider<Interface = net_lattice_model::interface::Interface>
 {
 }
