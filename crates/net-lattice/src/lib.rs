@@ -2755,7 +2755,7 @@ mod tests {
 
     #[test]
     fn facade_runs_supplied_compensation_in_reverse_order() {
-        let lattice = lattice(Capability::empty());
+        let lattice = lattice(Capability::ROUTE_MUTATION);
         let plan = MutationPlan::from_operations([
             Mutation::AddRoute(planned_route()),
             Mutation::RemoveRoute(planned_route()),
@@ -2782,7 +2782,7 @@ mod tests {
 
     #[test]
     fn facade_executes_and_compensates_an_ipv6_route_plan() {
-        let lattice = lattice(Capability::empty());
+        let lattice = lattice(Capability::ROUTE_MUTATION);
         let route = ipv6_route();
         let plan = MutationPlan::from_operations([
             Mutation::AddRoute(route.clone()),
@@ -2875,7 +2875,7 @@ mod tests {
 
     #[test]
     fn facade_captures_prior_state_before_each_applied_operation() {
-        let lattice = lattice(Capability::empty());
+        let lattice = lattice(Capability::ROUTE_MUTATION);
         let plan = MutationPlan::from_operations([
             Mutation::AddRoute(planned_route()),
             Mutation::RemoveRoute(planned_route()),
@@ -2909,7 +2909,7 @@ mod tests {
 
     #[test]
     fn facade_reports_compensation_failure() {
-        let lattice = lattice(Capability::empty());
+        let lattice = lattice(Capability::ROUTE_MUTATION);
         let plan = MutationPlan::from_operations([
             Mutation::AddRoute(planned_route()),
             Mutation::RemoveRoute(planned_route()),
