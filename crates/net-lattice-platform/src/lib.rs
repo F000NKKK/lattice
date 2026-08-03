@@ -35,7 +35,7 @@ pub use interface_mutator::InterfaceMutator;
 pub use interface_provider::InterfaceProvider;
 pub use neighbor_mutator::NeighborMutator;
 pub use neighbor_provider::NeighborProvider;
-pub use route_provider::RouteProvider;
+pub use route_provider::{RouteMutator, RouteProvider};
 #[cfg(feature = "async")]
 pub use tokio_event_provider::{TokioEventReceiver, TokioEventSender};
 
