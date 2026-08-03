@@ -8,8 +8,8 @@
   a specific Git operation.
 - Keep patches narrow and reviewable. Separate model/API, backend, tests, and
   documentation changes when practical.
-- `.ai/`, `.codex/`, root `AGENTS.md`, and `index.md` may be intentionally
-  ignored local agent context; inspect them but never force-add them. Do not
-  change ignore policy unless the user explicitly asks.
+- `.codex/`, root `AGENTS.md`, and `index.md` may be intentionally ignored
+  local agent context; inspect them but never force-add them. Do not change
+  ignore policy unless the user explicitly asks.
 - Before handoff, report changed tracked files, verification commands, and any
   privileged tests not run locally.
