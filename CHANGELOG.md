@@ -7,10 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+No unreleased changes.
+
+## [0.17.0] - 2026-08-03
+
 ### Added
 
-- Stage 0.17 static-neighbor model and platform contracts (ADR-0001, still
-  `proposed`): `StaticNeighbor` desired-neighbor intent, `Mutation::{AddStaticNeighbor,
+- Stage 0.17 static-neighbor model and platform contracts (ADR-0001):
+  `StaticNeighbor` desired-neighbor intent, `Mutation::{AddStaticNeighbor,
   RemoveStaticNeighbor}` with their semantics, `MutationSnapshot::Neighbor`,
   the `NeighborMutator` associated-type trait, and `Capability::NEIGHBOR_MUTATION`.
 - Stage 0.17 Linux native static-neighbor mutation: `net-lattice-backend-linux`
@@ -44,6 +48,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   forwards `NeighborMutator` on every backend through
   `Lattice::add_static_neighbor`/`remove_static_neighbor` and
   `Mutation::{AddStaticNeighbor, RemoveStaticNeighbor}` executor dispatch.
+- Isolated privileged public-facade acceptance for static-neighbor add/read/
+  remove and cancellation-triggered compensation, verified against real
+  Linux, Windows, and macOS backends; the isolated destructive-topology
+  acceptance carried over from Stage 0.16 is now complete for the route,
+  address, and neighbor domains on all three platforms.
+- IPv6 DNS parity: model, parser/renderer, and native-mapping tests proving
+  IPv4 and IPv6 nameservers round-trip identically through `DnsConfig`/
+  `NewDnsConfig` on Linux, Windows, and macOS, including public-facade
+  `execute_plan` coverage. No new public API — `DnsConfig`/`NewDnsConfig`
+  already accepted either address family; this closes the deferred Stage
+  0.16 verification gap.
 - Split `net-lattice-platform`'s `RouteProvider` into a read-only
   `RouteProvider` (`routes()`) and a new `RouteMutator` (`add_route()`,
   `remove_route()`), matching the provider/mutator split already used by
@@ -52,6 +67,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now rejects `Mutation::AddRoute`/`RemoveRoute` before submission when the
   connected backend does not advertise it — closing a capability-preflight
   gap that previously let route mutations reach the backend unchecked.
+
+### Changed
+
+- **Breaking (pre-1.0):** `RouteProvider::add_route`/`remove_route` moved to
+  a new `RouteMutator` trait; a third-party backend implementing
+  `RouteProvider` must now also implement `RouteMutator` to satisfy
+  `LatticeBackend`. `Lattice::add_route`/`remove_route` are unaffected at
+  the call site.
+
+## [0.16.0] - 2026-08-01
+
+### Added
+
 - Stage 0.16 interface configuration: `InterfaceConfig` partial desired
   patches and `DesiredAdminState`, explicitly separate from observed
   `Interface` state.
@@ -75,11 +103,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ADDRESS_MONITORING`; `MONITORING` is their all-domain aggregate. Windows
   now rejects neighbor and unfiltered all-domain watchers instead of silently
   returning a stream without neighbor events.
-- **Breaking (pre-1.0):** `RouteProvider::add_route`/`remove_route` moved to
-  a new `RouteMutator` trait; a third-party backend implementing
-  `RouteProvider` must now also implement `RouteMutator` to satisfy
-  `LatticeBackend`. `Lattice::add_route`/`remove_route` are unaffected at
-  the call site.
 
 ### Documentation
 
