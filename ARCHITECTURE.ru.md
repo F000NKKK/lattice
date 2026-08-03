@@ -266,28 +266,21 @@ Provider-traits, по одному на возможность, а не один
   входной тип, `StaticNeighbor`, отделён от `NeighborEntry`: он не содержит ни
   синтезированного `NeighborId`, ни наблюдаемого `NeighborState`, и требует
   MAC-адрес, поскольку на этом этапе создаются только статические L2-записи.
-  По состоянию на Stage 0.17 Slice C `net-lattice-backend-linux` реализует
-  этот трейт (`RTM_NEWNEIGH`/`RTM_DELNEIGH` через `rtnetlink`,
-  `NUD_PERMANENT`, защита от удаления не-`Permanent` записи),
-  `net-lattice-backend-windows` реализует его через
-  `CreateIpNetEntry2`/`DeleteIpNetEntry2` над `MIB_IPNET_ROW2` (`NlnsPermanent`,
-  та же защита от удаления не-`Permanent` записи, подтверждено на реальном
-  elevated Windows CI); оба заявляют `Capability::NEIGHBOR_MUTATION`.
-  `net-lattice-backend-darwin` также реализует этот трейт через `RTM_ADD` и
+  `net-lattice-backend-linux` реализует этот трейт (`RTM_NEWNEIGH`/
+  `RTM_DELNEIGH` через `rtnetlink`, `NUD_PERMANENT`, защита от удаления
+  не-`Permanent` записи); `net-lattice-backend-windows` реализует его через
+  `CreateIpNetEntry2`/`DeleteIpNetEntry2` над `MIB_IPNET_ROW2`
+  (`NlnsPermanent`, та же защита, подтверждено на реальном elevated Windows
+  CI); `net-lattice-backend-darwin` реализует его через `RTM_ADD`,
+  кодирующий полный `sockaddr_dl`-шлюз с реальным link-типом интерфейса, и
   последовательность из двух сообщений `RTM_GET`-затем-`RTM_DELETE` поверх
   `PF_ROUTE`, повторяя собственный подход Apple из `arp.c`/`ndp.c` (та же
-  защита от удаления не-`Permanent` записи), но реальный запуск на elevated
-  macOS CI показал, что сам `add_static_neighbor` завершается ошибкой
-  `InvalidState` с ещё не диагностированной причиной — поэтому
-  `DarwinBackend::capabilities()` намеренно **не** заявляет
-  `Capability::NEIGHBOR_MUTATION`: заявлять о поддержке операции,
-  подтверждённо не работающей на реальном железе, противоречило бы
-  собственному требованию ADR-0001 о том, что заявка о capability должна
-  опираться на доказанное нативное поведение. В этой песочнице невозможно
-  даже слинковать тестовый бинарник под Darwin — нет macOS SDK/Xcode, —
-  поэтому выполнена только кросс-компилируемая проверка типов. facade `net-lattice` не выполняет прямую
-  передачу вызовов `NeighborMutator` ни на одной платформе (см. ADR-0001,
-  статус всё ещё `proposed`).
+  защита), подтверждено на реальном elevated macOS CI round-trip. Все три
+  backend'а заявляют `Capability::NEIGHBOR_MUTATION`. facade `net-lattice`
+  выполняет прямую передачу вызовов `NeighborMutator` на каждом backend'е
+  через `Lattice::add_static_neighbor`/`remove_static_neighbor` и
+  диспетчеризацию executor'а `Mutation::{AddStaticNeighbor,
+  RemoveStaticNeighbor}` (ADR-0001).
 - `DnsProvider` — чтение/запись конфигурации DNS-резолвера.
 - `AddressProvider` — список IP-адресов, назначенных интерфейсам.
 - `AddressMutator` — назначение и удаление IP-адресов. Его входной тип
