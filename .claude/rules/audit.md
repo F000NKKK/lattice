@@ -19,3 +19,18 @@
 - After each implementation slice, perform a repository-wide documentation
   sync: inspect every relevant `*.md` plus affected extensionless/config
   files such as manifests, ignore rules, CI definitions, and scripts.
+
+## Audit-file size cap and auto-compaction
+
+- `.ai/<task-name>/AUDIT.md` must not exceed 1000 lines. Check its line
+  count (`wc -l`) after every append.
+- When an append would cross 1000 lines, auto-compact before writing: move
+  the existing `AUDIT.md` to `.ai/<task-name>/audit-archive/AUDIT-<NNN>.md`
+  (zero-padded, next free index), then start a fresh `AUDIT.md` whose first
+  entry is a short carry-forward summary (date, archived file name, and a
+  few sentences covering open risks, unresolved questions, and decisions
+  still in force) so later entries stay coherent without re-reading the
+  archive.
+  archive files are gitignored the same as the rest of `.ai/`.
+- Do this compaction proactively, not just when a checkbox closes — do not
+  let a single slice's entry itself push past 1000 lines.

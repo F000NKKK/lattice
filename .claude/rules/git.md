@@ -7,8 +7,22 @@ via `permissions.deny` in `.claude/settings.json`, not just as prose here.
   bounded task.
 - Preserve unrelated user changes; never use `git reset --hard`, `git
   clean`, or broad checkout commands.
-- Do not amend, rebase, force-push, or create commits unless the user asks
-  for a specific Git operation.
+- Do not amend, rebase, or force-push unless the user asks for that specific
+  Git operation.
+- Auto-commit is authorized standing policy for this repository: after each
+  bounded slice (a plan checkbox, a subtask, or any reviewer-accepted edit)
+  reaches a clean, verified state (relevant `cargo check`/`test`/`fmt`/
+  `clippy` gates pass and `AUDIT.md` is updated), create a commit for the
+  changed tracked files without asking first. Stage narrowly (named paths,
+  never `git add -A`/`.`), keep the message focused on the "why" per the
+  root git guidance, and never bypass hooks (`--no-verify`) to force one
+  through.
+- Commit messages (auto-commits and user-requested commits alike) must NOT
+  include a `Co-Authored-By` trailer or any other attribution footer. This
+  overrides the default Claude Code commit template for this repository.
+- Auto-commits still respect every other restriction in this file: no
+  amend/rebase/force-push, no destructive staging, no committing `.ai/`,
+  `.codex/`, root `AGENTS.md`, or `index.md`.
 - Keep patches narrow and reviewable. Separate model/API, backend, tests,
   and documentation changes when practical.
 - `.ai/`, `.codex/`, root `AGENTS.md`, and `index.md` may be intentionally
