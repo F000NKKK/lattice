@@ -32,7 +32,7 @@ use net_lattice_model::{IpAddress, Network};
 use net_lattice_platform::{
     AddressMutator, AddressProvider, Capability, CapabilityProvider, DnsMutator, DnsProvider,
     EventProvider, EventReceiver, InterfaceMutator, InterfaceProvider, NeighborMutator,
-    NeighborProvider, RouteProvider,
+    NeighborProvider, RouteMutator, RouteProvider,
 };
 #[cfg(feature = "async")]
 use net_lattice_platform::{TokioEventProvider, TokioEventReceiver};
@@ -736,6 +736,10 @@ impl RouteProvider for DarwinBackend {
             Ok(routes)
         })
     }
+}
+
+impl RouteMutator for DarwinBackend {
+    type Route = Route;
 
     fn add_route(&self, route: Self::Route) -> Result<()> {
         self.runtime.block_on(async {
