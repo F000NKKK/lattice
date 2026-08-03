@@ -1842,23 +1842,121 @@ mod tests {
         }
     }
 
-    /// Picks a non-loopback interface for native static-neighbor tests.
+    /// Picks a non-loopback, administratively-up interface with an assigned
+    /// IPv4 address, plus an unused address in that same on-link subnet, for
+    /// native static-neighbor tests.
+    ///
     /// Static ARP/NDP entries are an L2-resolution mechanism; unlike routes
     /// and addresses (which the other native facade tests deliberately
     /// prefer on loopback for stability), loopback interfaces do not
     /// participate in L2 neighbor resolution the same way and at least one
     /// backend is known to force ARP entries on `lo` to a non-`Permanent`
-    /// state. Falls back to whatever the backend reports if every interface
-    /// happens to be loopback.
+    /// state. An initial version of this helper picked any non-loopback
+    /// interface and used a fixed documentation-range address (RFC 5737
+    /// `192.0.2.0/24`) regardless of what subnet the interface actually
+    /// carried; on CI runners this produced `ENETUNREACH`
+    /// (`Error::Platform(Darwin(51))`) on macOS and `Error::NotFound` on
+    /// Windows, and an intermittent failure on Linux — evidence that at
+    /// least some backends validate on-link reachability for a static
+    /// neighbor's destination against the target interface's own subnet.
+    /// This version instead derives a target address from an address the
+    /// interface actually has assigned, so the destination is always on-link
+    /// for the interface it's being added against.
     #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
-    fn native_neighbor_test_interface<B: LatticeBackend>(lattice: &Lattice<B>) -> Interface {
+    fn native_neighbor_test_target<B: LatticeBackend>(
+        lattice: &Lattice<B>,
+    ) -> (Interface, IpAddress) {
         let interfaces = lattice.interfaces().expect("failed to list interfaces");
+        let addresses = lattice.addresses().expect("failed to list addresses");
+
         interfaces
             .iter()
-            .find(|interface| !matches!(interface.kind, InterfaceKind::Loopback))
-            .or_else(|| interfaces.first())
-            .cloned()
-            .expect("native backend reported no interfaces")
+            .filter(|interface| {
+                !matches!(interface.kind, InterfaceKind::Loopback)
+                    && matches!(interface.admin_state, AdminState::Up | AdminState::Unknown)
+            })
+            .find_map(|interface| {
+                let assigned = addresses.iter().find_map(|address| {
+                    if address.interface_index != interface.index {
+                        return None;
+                    }
+                    match address.address {
+                        Network::V4(network) => Some(network),
+                        Network::V6(_) => None,
+                    }
+                })?;
+                let target = unused_ipv4_in_subnet(assigned)?;
+                Some((interface.clone(), IpAddress::from(target)))
+            })
+            .expect(
+                "native backend reported no non-loopback, up interface with an assigned IPv4 \
+                 address; static-neighbor facade tests require one",
+            )
+    }
+
+    /// Returns an address in `network`'s subnet distinct from `network`'s own
+    /// assigned address, preferring the second-to-last usable host address
+    /// (the last is a broadcast address on most prefix lengths). Returns
+    /// `None` for prefixes too short to have a distinct usable host address
+    /// (`/31`, `/32`).
+    #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+    fn unused_ipv4_in_subnet(network: Ipv4Network) -> Option<Ipv4Address> {
+        let prefix = network.prefix().value();
+        if !(1..31).contains(&prefix) {
+            return None;
+        }
+        let host = u32::from_be_bytes(network.address().octets());
+        let mask = !0u32 << (32 - prefix);
+        let base = host & mask;
+        let broadcast = base | !mask;
+        let candidate = if broadcast - 1 != host {
+            broadcast - 1
+        } else {
+            broadcast - 2
+        };
+        if candidate <= base {
+            return None;
+        }
+        Some(Ipv4Address::from(std::net::Ipv4Addr::from(
+            candidate.to_be_bytes(),
+        )))
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+    #[test]
+    fn unused_ipv4_in_subnet_picks_a_distinct_on_link_address() {
+        let network = Ipv4Network::new(
+            Ipv4Address::new(192, 168, 1, 5),
+            Ipv4PrefixLength::new(24).expect("valid prefix"),
+        );
+        let candidate = unused_ipv4_in_subnet(network).expect("subnet has a spare address");
+        assert_eq!(candidate, Ipv4Address::new(192, 168, 1, 254));
+
+        // The interface's own address happens to be the usual spare pick;
+        // the fallback must still land inside the subnet and stay distinct.
+        let host_is_254 = Ipv4Network::new(
+            Ipv4Address::new(10, 0, 0, 254),
+            Ipv4PrefixLength::new(24).expect("valid prefix"),
+        );
+        let candidate = unused_ipv4_in_subnet(host_is_254).expect("subnet has a spare address");
+        assert_ne!(candidate, Ipv4Address::new(10, 0, 0, 254));
+        assert_eq!(candidate, Ipv4Address::new(10, 0, 0, 253));
+
+        // /31 and /32 have no distinct spare host address.
+        assert!(
+            unused_ipv4_in_subnet(Ipv4Network::new(
+                Ipv4Address::new(192, 168, 1, 1),
+                Ipv4PrefixLength::new(31).expect("valid prefix"),
+            ))
+            .is_none()
+        );
+        assert!(
+            unused_ipv4_in_subnet(Ipv4Network::new(
+                Ipv4Address::new(192, 168, 1, 1),
+                Ipv4PrefixLength::new(32).expect("valid prefix"),
+            ))
+            .is_none()
+        );
     }
 
     /// Exercises the complete facade transaction path for a static ARP entry
@@ -1878,10 +1976,10 @@ mod tests {
             lattice.supports(Capability::NEIGHBOR_MUTATION),
             "native backend does not advertise NEIGHBOR_MUTATION"
         );
-        let interface = native_neighbor_test_interface(&lattice);
+        let (interface, target) = native_neighbor_test_target(&lattice);
         let neighbor = StaticNeighbor::new(
             interface.id,
-            IpAddress::from(Ipv4Address::new(192, 0, 2, 250)),
+            target,
             MacAddress::new([0x02, 0x00, 0x00, 0x00, 0x00, 0xfa]),
         );
 
@@ -1938,10 +2036,10 @@ mod tests {
             lattice.supports(Capability::NEIGHBOR_MUTATION),
             "native backend does not advertise NEIGHBOR_MUTATION"
         );
-        let interface = native_neighbor_test_interface(&lattice);
+        let (interface, target) = native_neighbor_test_target(&lattice);
         let neighbor = StaticNeighbor::new(
             interface.id,
-            IpAddress::from(Ipv4Address::new(192, 0, 2, 251)),
+            target,
             MacAddress::new([0x02, 0x00, 0x00, 0x00, 0x00, 0xfb]),
         );
         let failed_neighbor = StaticNeighbor::new(
@@ -1969,7 +2067,10 @@ mod tests {
             .compensation(&mut compensate);
         let report = lattice.execute_plan(&plan, &mut options);
 
-        assert!(matches!(report.outcome(0), Some(MutationOutcome::Applied)));
+        assert!(
+            matches!(report.outcome(0), Some(MutationOutcome::Applied)),
+            "static neighbor compensation report: {report:?}"
+        );
         assert!(matches!(
             report.outcome(1),
             Some(MutationOutcome::Failed { .. })
