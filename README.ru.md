@@ -19,10 +19,11 @@
 
 > **Статус:** Net Lattice предоставляет кроссплатформенный просмотр сети,
 > изменение маршрутов, адресов, DNS, administrative state и MTU интерфейсов,
-> inspectable планы mutation-операций и упорядоченное исполнение транзакций с
-> cancellation, snapshots, compensation и фазовыми отчётами через нативные API
-> Linux, Windows и macOS. Stage 0.16 проверен privileged CI-задачами для
-> Linux, Windows и macOS; см. «Текущий статус» ниже.
+> а также статических записей ARP/NDP, inspectable планы mutation-операций и
+> упорядоченное исполнение транзакций с cancellation, snapshots, compensation
+> и фазовыми отчётами через нативные API Linux, Windows и macOS. Stage 0.17
+> проверен privileged CI-задачами для Linux, Windows и macOS; см. «Текущий
+> статус» ниже.
 
 ## Обзор
 
@@ -91,7 +92,9 @@ Net Lattice призвана закрыть этот пробел, предос�
 - Просмотр интерфейсов
 - Настройка administrative state и MTU интерфейсов
 - Просмотр и изменение конфигурации DNS-резолвера
-- Inspectable планы mutation-операций для маршрутов, адресов и DNS
+- Изменение статических записей ARP/NDP
+- Inspectable планы mutation-операций для маршрутов, адресов, DNS и
+  статических соседей
 - Упорядоченное исполнение mutation-планов с cancellation, snapshots, явной
   compensation и фазовыми отчётами
 - Таблицы соседей (ARP/NDP)
