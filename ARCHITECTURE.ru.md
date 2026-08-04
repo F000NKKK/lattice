@@ -232,10 +232,10 @@ trait RouteProvider {
 }
 
 trait RouteMutator {
-    type Route;
+    type RouteConfig;
 
-    fn add_route(&self, route: Self::Route) -> Result<(), Error>;
-    fn remove_route(&self, route: Self::Route) -> Result<(), Error>;
+    fn add_route(&self, route: Self::RouteConfig) -> Result<(), Error>;
+    fn remove_route(&self, route: Self::RouteConfig) -> Result<(), Error>;
 }
 
 trait InterfaceProvider {
@@ -268,10 +268,16 @@ Provider-traits, по одному на возможность, а не один
 него нет:
 
 - `RouteProvider` — список маршрутов.
-- `RouteMutator` — добавление и удаление маршрутов (ADR-0002). `Route`
-  используется одновременно и как вход мутации, и как вывод provider'а: в
-  отличие от `NeighborEntry`, у него нет ни синтезированного OS-идентификатора,
-  ни поля, доступного только для наблюдения, которое intent не должен нести.
+- `RouteMutator` — добавление и удаление маршрутов (ADR-0002; тип входа
+  отделён от `RouteProvider::Route` в ADR-0008). Его вход, `RouteConfig`,
+  отличен от наблюдаемого `Route`: как и `StaticNeighbor`, он не несёт
+  синтезированного backend'ом идентификатора (`Route::id` ни один backend не
+  принимает обратно как вход мутации). Идентичность для сопоставления на
+  уровне facade — `destination + gateway + metric + interface_index`,
+  намеренное надмножество реального ключа сопоставления каждого backend'а.
+  Metric маршрута учитывается только на Linux/Windows и молча
+  игнорируется как no-op на Darwin, отражая уже существующий пробел на
+  стороне наблюдаемого состояния.
 - `InterfaceProvider` — список наблюдаемых интерфейсов.
 - `InterfaceMutator` — применение частичной desired-конфигурации интерфейса
   с возвратом наблюдаемого интерфейса после read-after-write. Он отделён от
@@ -429,7 +435,7 @@ Backend'ы зависят от `net-lattice-platform` и `net-lattice-model`. О
 ```rust
 pub trait LatticeBackend:
     RouteProvider<Route = net_lattice_model::route::Route>
-    + RouteMutator<Route = net_lattice_model::route::Route>
+    + RouteMutator<RouteConfig = net_lattice_model::route::RouteConfig>
     + InterfaceProvider<Interface = net_lattice_model::interface::Interface>
 {
 }
@@ -628,7 +634,7 @@ engine. Stage 0.14 превращает следующее наблюдаемо�
 
 | Домен | Текущий контракт mutation | Нормализация, необходимая до declarative apply |
 |---|---|---|
-| Routes | `RouteMutator` добавляет и удаляет через native acknowledgements, под контролем `Capability::ROUTE_MUTATION` (ADR-0002); `Route` по-прежнему одновременно observed record и mutation input, matching при удалении зависит от платформы. | Ввести отдельный route intent и правило precondition/match для операции. Определить результаты duplicate, absent и ambiguous match. |
+| Routes | `RouteMutator` добавляет и удаляет через native acknowledgements, под контролем `Capability::ROUTE_MUTATION` (ADR-0002); входом мутации служит отдельный intent-тип `RouteConfig` (ADR-0008), matching при удалении по-прежнему зависит от платформы. | Определить результаты duplicate, absent и ambiguous match поверх уже отделённого route intent и правила precondition/match для операции. |
 | Адреса интерфейсов | `AddressMutator::add_address` возвращает повторно прочитанный `InterfaceAddress`; удаление принимает этот observed record. ID синтезируются из интерфейса и сети, а не выдаются ядром как стабильные identities. | Зафиксировать scope identity, assumptions о collision и preconditions удаления в модели операций. |
 | DNS | `DnsMutator` заменяет portable resolver view и повторно читает `DnsConfig`. Unix переписывает active resolver file и отбрасывает directives вне portable model; Windows меняет global search settings и каждый перечисленный adapter отдельными вызовами. | Отражать scope, manager ownership, persistence и partial-application results в operation report. Не обещать atomic DNS replacement или automatic rollback. |
 | Конфигурация интерфейсов | `InterfaceConfig` — partial desired patch; `InterfaceMutator` изменяет administrative state и/или MTU и возвращает observed readback. Combined native writes могут partially apply. | Сохранять явную compensation и eventual native event delivery; более широкое declarative состояние интерфейса относится к будущим этапам. |

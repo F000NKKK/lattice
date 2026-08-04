@@ -230,10 +230,10 @@ trait RouteProvider {
 }
 
 trait RouteMutator {
-    type Route;
+    type RouteConfig;
 
-    fn add_route(&self, route: Self::Route) -> Result<(), Error>;
-    fn remove_route(&self, route: Self::Route) -> Result<(), Error>;
+    fn add_route(&self, route: Self::RouteConfig) -> Result<(), Error>;
+    fn remove_route(&self, route: Self::RouteConfig) -> Result<(), Error>;
 }
 
 trait InterfaceProvider {
@@ -264,10 +264,15 @@ the same reason as before — a monolithic trait covering every domain would
 force every backend to stub out methods for features it doesn't have:
 
 - `RouteProvider` — list routes.
-- `RouteMutator` — add and remove routes (ADR-0002). `Route` is reused as
-  both mutation input and provider output: unlike `NeighborEntry`, it
-  carries no OS-synthesized identity or observation-only field that intent
-  must not accept.
+- `RouteMutator` — add and remove routes (ADR-0002; input type split from
+  `RouteProvider::Route` in ADR-0008). Its input, `RouteConfig`, is distinct
+  from the observed `Route`: like `StaticNeighbor`, it carries no
+  backend-synthesized identity (`Route::id`, never accepted back as
+  mutation input on any of the three backends). Identity for facade-level
+  matching is `destination + gateway + metric + interface_index`, a
+  deliberate superset of every backend's actual native match key. Route
+  metric is honored on Linux/Windows only and silently ignored as a no-op
+  on Darwin, mirroring the pre-existing observed-side gap.
 - `InterfaceProvider` — list observed interfaces.
 - `InterfaceMutator` — apply a partial desired interface configuration and
   return the read-after-write observed interface. It is separate from listing
@@ -424,7 +429,7 @@ but by constraining the associated types to equal the concrete
 ```rust
 pub trait LatticeBackend:
     RouteProvider<Route = net_lattice_model::route::Route>
-    + RouteMutator<Route = net_lattice_model::route::Route>
+    + RouteMutator<RouteConfig = net_lattice_model::route::RouteConfig>
     + InterfaceProvider<Interface = net_lattice_model::interface::Interface>
 {
 }
@@ -614,7 +619,7 @@ operation metadata before a transaction API can make stronger promises.
 
 | Domain | Current mutation contract | Required normalization before declarative apply |
 |---|---|---|
-| Routes | `RouteMutator` adds and removes through native acknowledgements, gated by `Capability::ROUTE_MUTATION` (ADR-0002); `Route` is still both the observed record and mutation input, and deletion matching is platform-specific. | Introduce a distinct route intent and an operation precondition/match rule. Define duplicate, absent, and ambiguous-match outcomes. |
+| Routes | `RouteMutator` adds and removes through native acknowledgements, gated by `Capability::ROUTE_MUTATION` (ADR-0002); mutation input is the distinct `RouteConfig` intent type (ADR-0008), and deletion matching is still platform-specific. | Define duplicate, absent, and ambiguous-match outcomes on top of the now-distinct route intent and operation precondition/match rule. |
 | Interface addresses | `AddressMutator::add_address` returns a re-read `InterfaceAddress`; removal accepts that observed record. IDs are synthesized from interface and network rather than kernel-issued stable identities. | Record identity scope, collision assumptions, and removal preconditions in the operation model. |
 | DNS | `DnsMutator` replaces the portable resolver view and re-reads `DnsConfig`. Unix rewrites the active resolver file and drops directives outside the portable model; Windows changes global search settings and each enumerated adapter through separate calls. | Surface scope, manager ownership, persistence, and partial-application results in the operation report. Do not promise atomic DNS replacement or automatic rollback. |
 | Interface configuration | `InterfaceConfig` is a partial desired patch; `InterfaceMutator` updates administrative state and/or MTU and returns an observed readback. Combined native writes may partially apply. | Retain explicit compensation and eventual native event delivery; broader declarative interface state belongs to later stages. |
