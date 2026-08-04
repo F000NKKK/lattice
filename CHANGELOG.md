@@ -11,15 +11,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `net-lattice-model::CurrentState`: a new `#[non_exhaustive]` whole-system
   observed-state snapshot type aggregating routes, interfaces, neighbors,
-  interface addresses, and DNS configuration. This is the data shape only;
-  assembly (a `SnapshotProvider` trait and its facade-level blanket
-  implementation) lands in a later change.
+  interface addresses, and DNS configuration, plus a `CurrentState::new`
+  constructor (required because the type is `#[non_exhaustive]`, so a struct
+  literal is unavailable outside `net-lattice-model`).
 - `net-lattice-platform::SnapshotProvider`: a new generic provider trait
   (`type State`, `fn snapshot(&self) -> Result<Self::State>`) describing the
   whole-system state assembly contract, fail-fast on the first constituent
-  read error. No backend implements it directly; the facade-level blanket
-  implementation binding `State` to `net-lattice-model::CurrentState` lands in
-  a later change.
+  read error. No backend implements it directly.
+- `net-lattice::Lattice::current_state()`: assembles a `CurrentState` from
+  routes, interfaces, neighbors, addresses, and DNS configuration in one call,
+  fail-fast on the first read error, with no partial result. Implemented via
+  `impl SnapshotProvider for Lattice<B>` (not a blanket implementation over
+  every raw backend type `B`: Rust's orphan rules forbid implementing a
+  foreign trait, `SnapshotProvider`, for a bare generic type parameter with no
+  local type in the impl) — no backend crate needs any code change to gain
+  this. `SnapshotProvider` and `CurrentState` are re-exported from the crate
+  root, `net_lattice::model`, and `net_lattice::backend`.
 - `net-lattice::model`, `net-lattice::mutation`, and `net-lattice::monitoring`:
   additive domain-scoped re-export modules for docs.rs navigation. Every item
   was already re-exported at the crate root; these modules introduce no new

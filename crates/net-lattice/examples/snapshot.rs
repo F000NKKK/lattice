@@ -8,17 +8,24 @@ fn main() -> Result<()> {
     let lattice = Lattice::connect()?;
 
     println!("capabilities: {:?}", lattice.capabilities());
-    for interface in lattice.interfaces()? {
+
+    // `current_state()` assembles all five domains below in one fail-fast
+    // call; the constituent reads are still sequential and independent (no
+    // cross-domain atomicity), so this is equivalent to calling each of
+    // `interfaces()`, `routes()`, `addresses()`, `dns_config()`, and
+    // `neighbors()` individually.
+    let state = lattice.current_state()?;
+    for interface in &state.interfaces {
         println!("interface: {interface:?}");
     }
-    for route in lattice.routes()? {
+    for route in &state.routes {
         println!("route: {route:?}");
     }
-    for address in lattice.addresses()? {
+    for address in &state.addresses {
         println!("address: {address:?}");
     }
-    println!("dns: {:?}", lattice.dns_config()?);
-    for neighbor in lattice.neighbors()? {
+    println!("dns: {:?}", state.dns);
+    for neighbor in &state.neighbors {
         println!("neighbor: {neighbor:?}");
     }
     Ok(())

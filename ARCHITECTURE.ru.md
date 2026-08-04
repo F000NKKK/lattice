@@ -583,10 +583,18 @@ provider-traits, а не другой контракт backend'а. Дорабо�
 
 По состоянию на этап 0.18 `CurrentState` (форма данных, в `net-lattice-model`)
 и `SnapshotProvider` (контракт сборки, в `net-lattice-platform`) уже
-существуют, но blanket-реализация на уровне фасада, которая связывает
-associated-тип `State` у `SnapshotProvider` с конкретным типом `CurrentState`
-— то есть то, что реально позволяет `Lattice<B>` производить `CurrentState`
-— ещё не появилась. `DesiredState`, `Diff` и `ApplyPlan` пока не существуют,
+существуют, и `Lattice<B>::current_state()` производит `CurrentState` для
+любого подключённого backend'а без единой строчки кода в крейте backend'а.
+Связка между associated-типом `State` у `SnapshotProvider` и конкретным типом
+`CurrentState` реализована как `impl SnapshotProvider for Lattice<B>` в
+фасаде, а не как blanket-реализация для произвольного типа backend'а `B`:
+orphan rules Rust запрещают blanket-реализацию foreign trait'а
+(`SnapshotProvider`, объявленного в `net-lattice-platform`) для голого
+generic-параметра типа без локального типа в самой реализации. `Lattice<B>`
+— это собственный локальный тип фасада, поэтому реализация trait'а на нём
+одновременно легальна и достаточна — backend'ам по-прежнему не нужно писать
+никакого кода, чтобы получить снапшот всей системы.
+`DesiredState`, `Diff` и `ApplyPlan` пока не существуют,
 и под них сейчас не создаётся ни одного крейта — они относятся к этапам
 0.19–0.20, после стабилизации transaction-контрактов и оставшейся imperative
 mutation-поверхности, когда можно будет вычислять содержательный diff.

@@ -583,9 +583,16 @@ architecture reserves room for it as:
 
 As of stage 0.18, `CurrentState` (the data shape, in `net-lattice-model`) and
 `SnapshotProvider` (the assembly contract, in `net-lattice-platform`) exist,
-but the facade-level blanket implementation that binds `SnapshotProvider`'s
-associated `State` to the concrete `CurrentState` type — the piece that
-actually lets a `Lattice<B>` produce a `CurrentState` — has not landed yet.
+and `Lattice<B>::current_state()` produces a `CurrentState` for any connected
+backend with zero backend-crate code. The binding between `SnapshotProvider`'s
+associated `State` and the concrete `CurrentState` type is realized as an
+`impl SnapshotProvider for Lattice<B>` in the facade rather than a blanket
+implementation over every raw backend type `B`: Rust's orphan rules forbid a
+foreign trait (`SnapshotProvider`, defined in `net-lattice-platform`) being
+blanket-implemented for a bare generic type parameter with no local type in
+the impl. `Lattice<B>` is the facade's own local type, so implementing the
+trait there is both legal and sufficient — no backend still needs to write
+any code to get whole-system snapshots.
 `DesiredState`, `Diff`, and `ApplyPlan` do not exist yet, and no crate is
 created for them now — they belong to stages 0.19–0.20, after the
 transaction and remaining imperative mutation contracts are stable enough to

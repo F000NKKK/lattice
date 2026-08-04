@@ -53,6 +53,31 @@ pub struct CurrentState {
     pub dns: DnsConfig,
 }
 
+impl CurrentState {
+    /// Assembles a [`CurrentState`] from its five per-domain reads.
+    ///
+    /// `#[non_exhaustive]` blocks a struct-literal construction from outside
+    /// this crate (for example from the `net-lattice` facade, which is the
+    /// only place a whole-system snapshot is actually assembled — see
+    /// [`crate::snapshot`]'s module documentation), so this constructor is
+    /// the supported way to build one.
+    pub fn new(
+        routes: Vec<Route>,
+        interfaces: Vec<Interface>,
+        neighbors: Vec<NeighborEntry>,
+        addresses: Vec<InterfaceAddress>,
+        dns: DnsConfig,
+    ) -> Self {
+        Self {
+            routes,
+            interfaces,
+            neighbors,
+            addresses,
+            dns,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

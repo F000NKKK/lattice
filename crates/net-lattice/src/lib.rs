@@ -179,13 +179,14 @@ pub use net_lattice_model::mutation::{
 };
 pub use net_lattice_model::neighbor::{NeighborEntry, NeighborId, NeighborState, StaticNeighbor};
 pub use net_lattice_model::route::{Route, RouteId};
+pub use net_lattice_model::snapshot::CurrentState;
 pub use net_lattice_model::{IpAddress, Network};
 #[cfg(feature = "async")]
 pub use net_lattice_platform::TokioEventProvider;
 pub use net_lattice_platform::{
     AddressMutator, AddressProvider, Capability, CapabilityProvider, DnsMutator, DnsProvider,
     EventProvider, EventReceiver, InterfaceMutator, InterfaceProvider, NeighborMutator,
-    NeighborProvider, RouteMutator, RouteProvider,
+    NeighborProvider, RouteMutator, RouteProvider, SnapshotProvider,
 };
 
 /// Observed and desired-state domain objects, plus their read/inspection
@@ -200,10 +201,10 @@ pub use net_lattice_platform::{
 pub mod model {
     #[doc(inline)]
     pub use crate::{
-        AddressProvider, AdminState, DnsConfig, DnsProvider, Interface, InterfaceAddress,
-        InterfaceAddressId, InterfaceId, InterfaceKind, InterfaceProvider, IpAddress, MacAddress,
-        NeighborEntry, NeighborId, NeighborProvider, NeighborState, Network, OperationalState,
-        Route, RouteId, RouteProvider,
+        AddressProvider, AdminState, CurrentState, DnsConfig, DnsProvider, Interface,
+        InterfaceAddress, InterfaceAddressId, InterfaceId, InterfaceKind, InterfaceProvider,
+        IpAddress, MacAddress, NeighborEntry, NeighborId, NeighborProvider, NeighborState, Network,
+        OperationalState, Route, RouteId, RouteProvider, SnapshotProvider,
     };
 }
 
@@ -262,11 +263,11 @@ use std::time::Instant;
 /// [`LatticeBackend`] requires, without hunting through the larger
 /// root-level (now domain-modules-augmented) item lists.
 pub mod backend {
-    pub use crate::LatticeBackend;
+    pub use crate::{CurrentState, LatticeBackend};
     pub use net_lattice_platform::{
         AddressMutator, AddressProvider, CapabilityProvider, DnsMutator, DnsProvider,
         EventProvider, EventReceiver, EventSender, InterfaceMutator, InterfaceProvider,
-        NeighborMutator, NeighborProvider, RouteMutator, RouteProvider,
+        NeighborMutator, NeighborProvider, RouteMutator, RouteProvider, SnapshotProvider,
     };
     #[cfg(feature = "async")]
     pub use net_lattice_platform::{TokioEventProvider, TokioEventReceiver, TokioEventSender};
@@ -285,6 +286,16 @@ pub mod backend {
 /// `net-lattice` section. `CapabilityProvider` has no associated type to
 /// converge — it reports plain runtime facts about the connected system,
 /// not domain objects — so it's required as-is.
+///
+/// This bound deliberately does **not** include
+/// [`SnapshotProvider`]: Rust's
+/// orphan rules forbid a blanket `impl<B> SnapshotProvider for B` in this
+/// crate (`SnapshotProvider` is a foreign trait defined in
+/// `net-lattice-platform`, and a bare generic `B` is not a local type — see
+/// [`Lattice`]'s own `SnapshotProvider` implementation below for the actual,
+/// compiling shape of this contract). Requiring `SnapshotProvider` here
+/// would force every third-party backend to implement it by hand, which is
+/// exactly what this design avoids.
 pub trait LatticeBackend:
     RouteProvider<Route = Route>
     + RouteMutator<Route = Route>
@@ -320,6 +331,42 @@ impl<B> LatticeBackend for B where
 /// The top-level entry point: a connected backend for the current system.
 pub struct Lattice<B: LatticeBackend> {
     backend: B,
+}
+
+/// Assembles a [`CurrentState`] snapshot of the connected backend.
+///
+/// `net-lattice-platform`'s [`net_lattice_platform::SnapshotProvider`] is
+/// generic over an associated `State` type because that crate does not
+/// depend on `net-lattice-model` and cannot name `CurrentState` directly
+/// (see ADR NL-A-8). The ADR's original design called for a blanket
+/// `impl<B> SnapshotProvider for B` over every raw backend type — that
+/// formulation does not compile: `SnapshotProvider` is a foreign trait here
+/// (defined in `net-lattice-platform`) and a bare generic `B` is not a local
+/// type, so Rust's orphan rules reject it (`E0210`, verified against this
+/// exact impl). [`Lattice<B>`] is the local type this crate does own, so the
+/// implementation is realized here instead: any [`Lattice<B>`] over a
+/// [`LatticeBackend`] gets [`SnapshotProvider`]
+/// for free, without any backend crate writing a single extra line — the
+/// zero-backend-code guarantee ADR NL-A-8 intended is preserved, just at the
+/// facade type rather than the raw backend type.
+impl<B: LatticeBackend> SnapshotProvider for Lattice<B> {
+    type State = CurrentState;
+
+    /// Assembles a whole-system [`CurrentState`] snapshot. See
+    /// [`Lattice::current_state`] for the primary, doc-complete entry point;
+    /// this trait implementation exists so [`Lattice<B>`] can be used
+    /// generically wherever a [`SnapshotProvider`]
+    /// is expected.
+    fn snapshot(&self) -> Result<CurrentState> {
+        let routes = self.backend.routes()?;
+        let interfaces = self.backend.interfaces()?;
+        let neighbors = self.backend.neighbors()?;
+        let addresses = self.backend.addresses()?;
+        let dns = self.backend.dns_config()?;
+        Ok(CurrentState::new(
+            routes, interfaces, neighbors, addresses, dns,
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -409,6 +456,23 @@ impl<B: LatticeBackend> Lattice<B> {
     /// Removes the observed interface address.
     pub fn remove_address(&self, address: InterfaceAddress) -> Result<()> {
         self.backend.remove_address(address)
+    }
+
+    /// Assembles a whole-system snapshot of every domain this crate models:
+    /// routes, interfaces, neighbors, interface addresses, and DNS
+    /// configuration.
+    ///
+    /// The five constituent reads are performed sequentially with no lock or
+    /// transaction spanning them, the same as every other multi-read path on
+    /// this type — do not assume two fields of the returned [`CurrentState`]
+    /// were observed at the same instant. If any one read fails, this
+    /// returns that error and no [`CurrentState`] at all; there is no
+    /// partial-result variant. A caller that wants best-effort partial data
+    /// should call [`Self::routes`], [`Self::interfaces`],
+    /// [`Self::neighbors`], [`Self::addresses`], and [`Self::dns_config`]
+    /// directly instead.
+    pub fn current_state(&self) -> Result<CurrentState> {
+        SnapshotProvider::snapshot(self)
     }
 
     /// Performs the runtime portion of mutation preflight.
@@ -979,6 +1043,7 @@ mod tests {
         capabilities: Capability,
         fail_events: bool,
         fail_mutations: bool,
+        fail_dns_read: bool,
     }
 
     fn network() -> Network {
@@ -1133,7 +1198,11 @@ mod tests {
         type DnsConfig = DnsConfig;
 
         fn dns_config(&self) -> Result<Self::DnsConfig> {
-            Ok(DnsConfig::new())
+            if self.fail_dns_read {
+                Err(Error::Unsupported)
+            } else {
+                Ok(DnsConfig::new())
+            }
         }
     }
 
@@ -1301,6 +1370,7 @@ mod tests {
                 capabilities,
                 fail_events: false,
                 fail_mutations: false,
+                fail_dns_read: false,
             },
         }
     }
@@ -1353,6 +1423,35 @@ mod tests {
             .expect("configure interface");
         assert_eq!(configured.admin_state, AdminState::Up);
         assert_eq!(configured.mtu, Some(1500));
+    }
+
+    #[test]
+    fn current_state_assembles_all_five_domains() {
+        let lattice = lattice(Capability::empty());
+
+        let state = lattice.current_state().expect("current state");
+
+        assert_eq!(state.routes, lattice.routes().expect("routes"));
+        assert_eq!(state.interfaces, lattice.interfaces().expect("interfaces"));
+        assert_eq!(state.neighbors, lattice.neighbors().expect("neighbors"));
+        assert_eq!(state.addresses, lattice.addresses().expect("addresses"));
+        assert_eq!(state.dns, lattice.dns_config().expect("dns"));
+    }
+
+    #[test]
+    fn current_state_fails_fast_and_returns_no_partial_state_on_dns_read_failure() {
+        let lattice = Lattice {
+            backend: TestBackend {
+                capabilities: Capability::empty(),
+                fail_events: false,
+                fail_mutations: false,
+                fail_dns_read: true,
+            },
+        };
+
+        let result = lattice.current_state();
+
+        assert!(matches!(result, Err(Error::Unsupported)));
     }
 
     #[test]
@@ -1419,6 +1518,7 @@ mod tests {
                 capabilities: Capability::INTERFACE_ADMIN_STATE | Capability::INTERFACE_MTU,
                 fail_events: false,
                 fail_mutations: true,
+                fail_dns_read: false,
             },
         };
         let config =
@@ -1510,6 +1610,7 @@ mod tests {
                 capabilities: Capability::DNS_MUTATION,
                 fail_events: false,
                 fail_mutations: true,
+                fail_dns_read: false,
             },
         };
         let plan = MutationPlan::from_operations([Mutation::SetDnsConfig(NewDnsConfig::new())]);
@@ -1805,6 +1906,7 @@ mod tests {
                 capabilities: Capability::NEIGHBOR_MUTATION,
                 fail_events: false,
                 fail_mutations: true,
+                fail_dns_read: false,
             },
         };
         let add_plan =
@@ -3531,6 +3633,7 @@ mod tests {
                 capabilities: Capability::MONITORING,
                 fail_events: true,
                 fail_mutations: false,
+                fail_dns_read: false,
             },
         };
         assert!(lattice.watch().is_err());
@@ -3545,6 +3648,7 @@ mod tests {
                 capabilities: Capability::MONITORING,
                 fail_events: true,
                 fail_mutations: false,
+                fail_dns_read: false,
             },
         };
         assert!(lattice.watch_async(EventFilter::ALL).is_err());

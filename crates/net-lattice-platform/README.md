@@ -11,9 +11,8 @@ public facade and native platform backends.
   `DnsMutator`, `NeighborProvider`/`NeighborMutator` (static ARP/NDP entry
   add/remove intent), and `AddressProvider`/`AddressMutator`;
 - `SnapshotProvider`, a generic whole-system state assembly contract; no
-  backend implements it directly — the facade supplies a blanket
-  implementation over backends that already implement the read providers
-  above;
+  backend implements it directly — the facade supplies the implementation,
+  covering any backend that already implements the read providers above;
 - runtime `Capability` reporting;
 - synchronous event sender/receiver contracts;
 - optional native Tokio watcher contracts behind the `async` feature.

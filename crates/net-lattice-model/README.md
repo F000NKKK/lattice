@@ -15,8 +15,9 @@ models data and contracts; it never inspects or mutates the host system.
 - explicit separation between inspectable plan data and runtime execution;
 - `CurrentState`, a whole-system observed-state snapshot aggregating routes,
   interfaces, neighbors, interface addresses, and DNS configuration
-  (assembled elsewhere, by a backend/facade — this crate only defines the
-  data shape).
+  (assembled elsewhere, by the facade — this crate only defines the data
+  shape and a `CurrentState::new` constructor, since the type is
+  `#[non_exhaustive]`).
 
 Use this crate directly for offline plan construction, policy analysis,
 serialization layers, or backend development. Use the `net-lattice` facade to
