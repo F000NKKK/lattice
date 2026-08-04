@@ -12,10 +12,10 @@
 //! an arbitrary real interface when actually applying a mutation to the
 //! host).
 
-use net_lattice::model::{
-    InterfaceAddress, InterfaceAddressId, InterfaceId, IpAddress, Network, Route, RouteId,
+use net_lattice::model::{InterfaceAddress, InterfaceAddressId, InterfaceId, IpAddress, Network};
+use net_lattice::mutation::{
+    Mutation, MutationPlan, NewDnsConfig, NewInterfaceAddress, RouteConfig,
 };
-use net_lattice::mutation::{Mutation, MutationPlan, NewDnsConfig, NewInterfaceAddress};
 use net_lattice::{Ipv4Address, Ipv4Network, Ipv4PrefixLength};
 
 fn network(host: Ipv4Address) -> Network {
@@ -26,8 +26,7 @@ fn network(host: Ipv4Address) -> Network {
 }
 
 fn main() {
-    let route = Route::new(RouteId::new(0), network(Ipv4Address::new(198, 18, 0, 0)))
-        .with_interface_index(2);
+    let route = RouteConfig::new(network(Ipv4Address::new(198, 18, 0, 0))).with_interface_index(2);
     let requested_address = NewInterfaceAddress::new(
         InterfaceId::new(2),
         network(Ipv4Address::new(192, 0, 2, 10)),
@@ -43,7 +42,7 @@ fn main() {
     );
 
     let plan = MutationPlan::from_operations([
-        Mutation::AddRoute(route.clone()),
+        Mutation::AddRoute(route),
         Mutation::RemoveRoute(route),
         Mutation::AddAddress(requested_address),
         Mutation::RemoveAddress(observed_address),
