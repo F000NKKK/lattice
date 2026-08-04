@@ -2207,9 +2207,25 @@ mod tests {
     /// This version instead derives a target address from an address the
     /// interface actually has assigned, so the destination is always on-link
     /// for the interface it's being added against.
+    ///
+    /// `offset` selects which spare host address in the subnet to use (1 =
+    /// the usual second-to-last address, 2 = the next one down, ...) so that
+    /// two privileged tests running back-to-back under the shared
+    /// [`native_facade_privileged_guard`] mutex target distinct addresses on
+    /// the same interface, rather than racing on the same
+    /// `(interface, address)` static-neighbor identity. An earlier version
+    /// of this helper always picked the same address for every caller; when
+    /// one test's native delete (`DeleteIpNetEntry2`) and the next test's
+    /// native create (`CreateIpNetEntry2`) for that identical address landed
+    /// back-to-back with no gap, Windows CI observed the create fail with
+    /// `ERROR_OBJECT_ALREADY_EXISTS` (surfaced as `Error::AlreadyExists`) —
+    /// evidence the OS had not yet fully retired the deleted row internally.
+    /// Distinct addresses per caller remove the dependency on that
+    /// delete-then-recreate timing entirely, without touching any backend.
     #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
     fn native_neighbor_test_target<B: LatticeBackend>(
         lattice: &Lattice<B>,
+        offset: u32,
     ) -> (Interface, IpAddress) {
         let interfaces = lattice.interfaces().expect("failed to list interfaces");
         let addresses = lattice.addresses().expect("failed to list addresses");
@@ -2230,7 +2246,7 @@ mod tests {
                         Network::V6(_) => None,
                     }
                 })?;
-                let target = unused_ipv4_in_subnet(assigned)?;
+                let target = unused_ipv4_in_subnet(assigned, offset)?;
                 Some((interface.clone(), IpAddress::from(target)))
             })
             .expect(
@@ -2240,12 +2256,15 @@ mod tests {
     }
 
     /// Returns an address in `network`'s subnet distinct from `network`'s own
-    /// assigned address, preferring the second-to-last usable host address
-    /// (the last is a broadcast address on most prefix lengths). Returns
-    /// `None` for prefixes too short to have a distinct usable host address
-    /// (`/31`, `/32`).
+    /// assigned address, preferring the `offset`-th usable host address
+    /// counting down from the broadcast address (`offset = 1` is the usual
+    /// second-to-last address; the last is the broadcast address on most
+    /// prefix lengths). Skips the interface's own address if the initial
+    /// candidate collides with it. Returns `None` for prefixes too short to
+    /// have a distinct usable host address (`/31`, `/32`) or for an `offset`
+    /// that runs past the start of the subnet.
     #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
-    fn unused_ipv4_in_subnet(network: Ipv4Network) -> Option<Ipv4Address> {
+    fn unused_ipv4_in_subnet(network: Ipv4Network, offset: u32) -> Option<Ipv4Address> {
         let prefix = network.prefix().value();
         if !(1..31).contains(&prefix) {
             return None;
@@ -2254,11 +2273,10 @@ mod tests {
         let mask = !0u32 << (32 - prefix);
         let base = host & mask;
         let broadcast = base | !mask;
-        let candidate = if broadcast - 1 != host {
-            broadcast - 1
-        } else {
-            broadcast - 2
-        };
+        let mut candidate = broadcast.checked_sub(offset)?;
+        if candidate == host {
+            candidate = candidate.checked_sub(1)?;
+        }
         if candidate <= base {
             return None;
         }
@@ -2274,8 +2292,12 @@ mod tests {
             Ipv4Address::new(192, 168, 1, 5),
             Ipv4PrefixLength::new(24).expect("valid prefix"),
         );
-        let candidate = unused_ipv4_in_subnet(network).expect("subnet has a spare address");
+        let candidate = unused_ipv4_in_subnet(network, 1).expect("subnet has a spare address");
         assert_eq!(candidate, Ipv4Address::new(192, 168, 1, 254));
+
+        // A larger offset picks a different, still-distinct spare address.
+        let candidate = unused_ipv4_in_subnet(network, 2).expect("subnet has a spare address");
+        assert_eq!(candidate, Ipv4Address::new(192, 168, 1, 253));
 
         // The interface's own address happens to be the usual spare pick;
         // the fallback must still land inside the subnet and stay distinct.
@@ -2283,23 +2305,29 @@ mod tests {
             Ipv4Address::new(10, 0, 0, 254),
             Ipv4PrefixLength::new(24).expect("valid prefix"),
         );
-        let candidate = unused_ipv4_in_subnet(host_is_254).expect("subnet has a spare address");
+        let candidate = unused_ipv4_in_subnet(host_is_254, 1).expect("subnet has a spare address");
         assert_ne!(candidate, Ipv4Address::new(10, 0, 0, 254));
         assert_eq!(candidate, Ipv4Address::new(10, 0, 0, 253));
 
         // /31 and /32 have no distinct spare host address.
         assert!(
-            unused_ipv4_in_subnet(Ipv4Network::new(
-                Ipv4Address::new(192, 168, 1, 1),
-                Ipv4PrefixLength::new(31).expect("valid prefix"),
-            ))
+            unused_ipv4_in_subnet(
+                Ipv4Network::new(
+                    Ipv4Address::new(192, 168, 1, 1),
+                    Ipv4PrefixLength::new(31).expect("valid prefix"),
+                ),
+                1
+            )
             .is_none()
         );
         assert!(
-            unused_ipv4_in_subnet(Ipv4Network::new(
-                Ipv4Address::new(192, 168, 1, 1),
-                Ipv4PrefixLength::new(32).expect("valid prefix"),
-            ))
+            unused_ipv4_in_subnet(
+                Ipv4Network::new(
+                    Ipv4Address::new(192, 168, 1, 1),
+                    Ipv4PrefixLength::new(32).expect("valid prefix"),
+                ),
+                1
+            )
             .is_none()
         );
     }
@@ -2321,7 +2349,7 @@ mod tests {
             lattice.supports(Capability::NEIGHBOR_MUTATION),
             "native backend does not advertise NEIGHBOR_MUTATION"
         );
-        let (interface, target) = native_neighbor_test_target(&lattice);
+        let (interface, target) = native_neighbor_test_target(&lattice, 1);
         let neighbor = StaticNeighbor::new(
             interface.id,
             target,
@@ -2395,7 +2423,7 @@ mod tests {
             lattice.supports(Capability::NEIGHBOR_MUTATION),
             "native backend does not advertise NEIGHBOR_MUTATION"
         );
-        let (interface, target) = native_neighbor_test_target(&lattice);
+        let (interface, target) = native_neighbor_test_target(&lattice, 2);
         let neighbor = StaticNeighbor::new(
             interface.id,
             target,
