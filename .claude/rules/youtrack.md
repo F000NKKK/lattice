@@ -67,7 +67,16 @@ resolve the gap this way instead of guessing per task:
 
 - `Develop` — set by whichever role starts active work (researcher/architect
   notes can stay at `Backlog`; the implementer is the one who moves a Task
-  into `Develop`).
+  into `Develop`). Researcher and architect subagents do not carry
+  `mcp__youtrack__update_issue` in their toolset (see `.claude/agents/
+  researcher.md`/`architect.md`) — if the primary agent wants a researcher/
+  architect Task moved off `Backlog` while that role's work is still active,
+  the primary agent sets `Develop` itself before dispatching, since the
+  subagent cannot. Never let this tooling gap read as "forgot to update the
+  Task" — either leave it at `Backlog` deliberately (the default, permitted
+  above) or set it explicitly; don't jump a Task straight from `Backlog` to
+  `Done` skipping the intermediate states as a way to paper over a missed
+  update.
 - `Review` — the implementer sets this when its own implementation and
   verification comment is posted and the slice is complete pending
   independent check.
@@ -222,6 +231,18 @@ must be explicit text.
 
 Never propose or accept a public-API decision only in chat or only in an
 issue comment; if it changes a public contract, it needs an Article.
+
+**ADR numbering is sequential (continuous) across the whole project, never
+reset per stage.** Every ADR Article's title has the form
+`ADR-NNNN (stage): <title>`; `NNNN` is a single global counter shared by all
+stages — the `(stage)` suffix records provenance only, it does not restart
+the count. Before filing a new ADR, read `NL-A-1` (`mcp__youtrack__get_article`,
+which lists every child Article's current title) and use
+`(highest existing NNNN) + 1`. Do not infer the next number from the current
+stage's own ADR count — that produced a real numbering collision once
+already (corrected 2026-08-04: NL-A-10 was misfiled as "ADR-0003 (0.19)"
+because only Stage 0.19's own ADRs were counted, when the correct global
+next number was 0008) and must not recur.
 
 Before deciding whether a breaking public-API change is acceptable, check
 `@.claude/rules/versioning.md` — pre-1.0, a breaking change inside the

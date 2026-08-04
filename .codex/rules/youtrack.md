@@ -63,7 +63,15 @@ resolve the gap this way instead of guessing per task:
 
 - `Develop` — set by whichever role starts active work (researcher/architect
   notes can stay at `Backlog`; the implementer is the one who moves a Task
-  into `Develop`).
+  into `Develop`). Researcher/architect roles have no `update_issue`-
+  equivalent REST call in their standard toolset (see `.codex/agents/
+  researcher.md`/`architect.md`) — if a researcher/architect Task needs to
+  move off `Backlog` while that role's work is still active, the primary
+  agent sets `Develop` itself before dispatching. Don't let a missed update
+  read as intentional inaction: either leave `Backlog` deliberately (the
+  default, permitted above) or set it explicitly — never skip straight from
+  `Backlog` to `Done` to paper over a state that was never updated in
+  between.
 - `Review` — the implementer sets this when its own implementation and
   verification comment is posted and the slice is complete pending
   independent check.
@@ -196,6 +204,18 @@ considered / Consequences / Verification structure as the retired
 `.codex/templates/ADR.md`. Reference the Article ID (e.g. `NL-A-7`) as
 explicit text in the governing issue's description or a comment — there is
 no typed issue-to-article link over this surface.
+
+**ADR numbering is sequential (continuous) across the whole project, never
+reset per stage.** Every ADR Article's title has the form
+`ADR-NNNN (stage): <title>`; `NNNN` is a single global counter shared by all
+stages — the `(stage)` suffix records provenance only, it does not restart
+the count. Before filing a new ADR, read `NL-A-1` (list every child
+Article's current title) and use `(highest existing NNNN) + 1`. Do not infer
+the next number from the current stage's own ADR count alone — that
+produced a real numbering collision once already (corrected 2026-08-04:
+NL-A-10 was misfiled as "ADR-0003 (0.19)" because only Stage 0.19's own
+ADRs were counted, when the correct global next number was 0008) and must
+not recur.
 
 Before deciding whether a breaking public-API change is acceptable, check
 `rules/versioning.md` — pre-1.0, a breaking change inside the current
