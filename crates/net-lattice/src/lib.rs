@@ -27,10 +27,9 @@
 //! [`Lattice::current_state`] reads all five domains in one call and returns
 //! them together as a single [`CurrentState`] snapshot. The observed/desired-
 //! state domain objects they return, plus their read/inspection provider
-//! traits, are also reachable through the [`model`] module for domain-scoped
-//! browsing — [`Interface`], [`Route`], [`NeighborEntry`],
-//! [`InterfaceAddress`], [`DnsConfig`], and [`CurrentState`] all resolve
-//! identically whether imported from the crate root or from `model`.
+//! traits — [`Interface`], [`Route`], [`NeighborEntry`],
+//! [`InterfaceAddress`], [`DnsConfig`], and [`CurrentState`] among them —
+//! resolve only through the [`model`] module, not at the crate root.
 //!
 //! # Direct mutations
 //!
@@ -41,11 +40,13 @@
 //! submission. Mutation intent types (for example [`StaticNeighbor`] and
 //! [`InterfaceConfig`]) are distinct from the observed state they produce; a
 //! successful mutation returns a fresh read-after-write observation. These
-//! types and the mutator traits a backend implements are also reachable
-//! through the [`mutation`] module.
+//! types and the mutator traits a backend implements resolve through the
+//! [`mutation`] module.
 //!
 //! ```no_run
-//! use net_lattice::{Capability, IpAddress, Ipv4Address, Lattice, MacAddress, Result, StaticNeighbor};
+//! use net_lattice::{Capability, Ipv4Address, Lattice, Result};
+//! use net_lattice::model::{IpAddress, MacAddress};
+//! use net_lattice::mutation::StaticNeighbor;
 //!
 //! fn main() -> Result<()> {
 //!     let lattice = Lattice::connect()?;
@@ -75,14 +76,13 @@
 //! an [`ExecutionOptions`] value, then inspect the returned
 //! [`MutationPlanReport`], which preserves plan indices and distinguishes
 //! validation, snapshot, execution, cancellation, and compensation
-//! boundaries. This machinery, plus the mutator traits above, is also
-//! reachable through the [`mutation`] module.
+//! boundaries. This machinery, plus the mutator traits above, resolves
+//! through the [`mutation`] module.
 //!
 //! ```no_run
-//! use net_lattice::{
-//!     ExecutionOptions, Ipv4Address, Ipv4Network, Ipv4PrefixLength, Lattice, Mutation,
-//!     MutationPlan, Network, Result, Route, RouteId,
-//! };
+//! use net_lattice::{Ipv4Address, Ipv4Network, Ipv4PrefixLength, Lattice, Result};
+//! use net_lattice::model::{Network, Route, RouteId};
+//! use net_lattice::mutation::{ExecutionOptions, Mutation, MutationPlan};
 //!
 //! fn main() -> Result<()> {
 //!     let lattice = Lattice::connect()?;
@@ -127,8 +127,7 @@
 //! Mutation support does not imply native change notifications:
 //! a backend can advertise a mutation capability without advertising the
 //! matching monitoring capability, and vice versa. Change events, filters,
-//! and monitoring provider traits are also reachable through the
-//! [`monitoring`] module.
+//! and monitoring provider traits resolve through the [`monitoring`] module.
 //!
 //! # Implementing a backend
 //!
@@ -136,7 +135,7 @@
 //! [`Lattice`]; the [`backend`] module collects every provider, mutator, and
 //! event trait it requires in one place for third-party backend authors,
 //! alongside the extension types ([`backend::EventSender`] and friends) not
-//! otherwise re-exported at the crate root.
+//! reachable anywhere else.
 //!
 //! # Facade design
 //!
@@ -147,105 +146,154 @@
 //! without `net-lattice-platform` ever depending on `net-lattice-model`. See
 //! ARCHITECTURE.md for the full rationale.
 //!
-//! Consumers may import every item above from either the flat crate root
-//! (unchanged, kept for compatibility with existing `use net_lattice::X;`
-//! imports) or from the domain-scoped [`model`], [`mutation`], and
-//! [`monitoring`] modules (added for docs.rs navigation), whichever is more
-//! convenient — both paths resolve to the exact same item. The three domain
-//! modules introduce no new type or trait: they are additional paths to the
-//! existing root re-exports, grouped by domain, not a replacement for the
-//! root list or a distinct API surface.
+//! Only a small, cross-cutting set of items resolves at the bare crate root:
+//! [`Error`], [`Id`], [`PlatformErrorCode`], [`Result`], the `Ipv4*`/`Ipv6*`
+//! address/network/prefix-length primitives, [`Capability`],
+//! [`CapabilityProvider`], and the crate-local [`Lattice`]/[`LatticeBackend`]
+//! definitions — none of these duplicate a domain-module path, so there is
+//! nothing to consolidate by moving them. Every other item (interfaces,
+//! routes, neighbors, addresses, DNS configuration, mutation intents and
+//! plans, and change events, along with their provider/mutator traits)
+//! resolves only through the domain-scoped [`model`], [`mutation`], and
+//! [`monitoring`] modules (and, for backend authors, [`backend`]) — it is
+//! not also re-exported at the crate root. `net-lattice` has not reached
+//! 1.0 and this 0.18.0 release has not yet been published, so there is no
+//! external consumer of a prior flat-root path to preserve; keeping items
+//! reachable from two or three separate rendered docs.rs pages would only
+//! ship that duplication to a real audience for no benefit.
 
-/// Async event adapters, enabled by the `async` feature.
+// Async event adapters, enabled by the `async` feature. Not re-exported at
+// the crate root (Category A, see the module docs above); reachable via
+// `monitoring::EventStream`.
 #[cfg(feature = "async")]
-pub use net_lattice_async::EventStream;
+use net_lattice_async::EventStream;
 mod executor;
-pub use executor::{Cancellation, Compensation, ExecutionOptions, Snapshot};
+// `Cancellation`/`Compensation`/`Snapshot` are not referenced by bare name
+// anywhere else in this file; they are exposed solely via
+// `mutation::{Cancellation, Compensation, Snapshot}`, imported there
+// directly from `crate::executor`.
+use executor::ExecutionOptions;
 pub use net_lattice_core::{Error, Id, PlatformErrorCode, Result};
 pub use net_lattice_ip::{
     Ipv4Address, Ipv4Network, Ipv4PrefixLength, Ipv6Address, Ipv6Network, Ipv6PrefixLength,
 };
-pub use net_lattice_model::dns::{DnsConfig, NewDnsConfig};
-pub use net_lattice_model::event::{ChangeKind, Event, EventDomain, EventFilter};
-pub use net_lattice_model::ifaddr::{InterfaceAddress, InterfaceAddressId, NewInterfaceAddress};
-pub use net_lattice_model::interface::{
-    AdminState, DesiredAdminState, Interface, InterfaceConfig, InterfaceId, InterfaceKind,
-    OperationalState,
+use net_lattice_model::dns::{DnsConfig, NewDnsConfig};
+use net_lattice_model::event::{Event, EventDomain, EventFilter};
+// `ChangeKind` is referenced only by `#[cfg(test)] mod tests` below (via
+// `use super::*;`), so a non-test `cargo check` reports it unused even
+// though `cargo test` uses it.
+#[allow(unused_imports)]
+use net_lattice_model::event::ChangeKind;
+#[allow(unused_imports)]
+use net_lattice_model::ifaddr::InterfaceAddressId;
+use net_lattice_model::ifaddr::{InterfaceAddress, NewInterfaceAddress};
+#[allow(unused_imports)]
+use net_lattice_model::interface::{AdminState, DesiredAdminState, InterfaceId, InterfaceKind};
+use net_lattice_model::interface::{Interface, InterfaceConfig};
+#[allow(unused_imports)]
+use net_lattice_model::mac::MacAddress;
+use net_lattice_model::mutation::{
+    Mutation, MutationExecutionPhase, MutationOperationReport, MutationOutcome, MutationPlan,
+    MutationPlanReport, MutationSnapshot, MutationStopReason, RollbackStatus,
 };
-pub use net_lattice_model::mac::MacAddress;
-pub use net_lattice_model::mutation::{
-    Mutation, MutationConfirmation, MutationExecutionPhase, MutationIdempotency, MutationKind,
-    MutationOperationReport, MutationOutcome, MutationPlan, MutationPlanReport,
-    MutationPrecondition, MutationPreflight, MutationPrivilege, MutationReversibility,
-    MutationSemantics, MutationSnapshot, MutationStopReason, RollbackStatus,
-};
-pub use net_lattice_model::neighbor::{NeighborEntry, NeighborId, NeighborState, StaticNeighbor};
-pub use net_lattice_model::route::{Route, RouteId};
-pub use net_lattice_model::snapshot::CurrentState;
-pub use net_lattice_model::{IpAddress, Network};
+use net_lattice_model::neighbor::{NeighborEntry, StaticNeighbor};
+#[allow(unused_imports)]
+use net_lattice_model::neighbor::{NeighborId, NeighborState};
+use net_lattice_model::route::Route;
+#[allow(unused_imports)]
+use net_lattice_model::route::RouteId;
+use net_lattice_model::snapshot::CurrentState;
+#[allow(unused_imports)]
+use net_lattice_model::{IpAddress, Network};
+#[allow(unused_imports)]
+use net_lattice_platform::DnsProvider;
 #[cfg(feature = "async")]
-pub use net_lattice_platform::TokioEventProvider;
-pub use net_lattice_platform::{
-    AddressMutator, AddressProvider, Capability, CapabilityProvider, DnsMutator, DnsProvider,
-    EventProvider, EventReceiver, InterfaceMutator, InterfaceProvider, NeighborMutator,
-    NeighborProvider, RouteMutator, RouteProvider, SnapshotProvider,
+use net_lattice_platform::TokioEventProvider;
+use net_lattice_platform::{
+    AddressMutator, AddressProvider, DnsMutator, EventProvider, EventReceiver, InterfaceMutator,
+    InterfaceProvider, NeighborMutator, NeighborProvider, RouteMutator, RouteProvider,
+    SnapshotProvider,
 };
+pub use net_lattice_platform::{Capability, CapabilityProvider};
 
 /// Observed and desired-state domain objects, plus their read/inspection
 /// provider traits.
 ///
-/// This module re-exports a subset of the items already re-exported at the
-/// crate root, grouped by domain, as an additional navigation entry point.
-/// It introduces no new public symbols: every item here also resolves at
-/// `net_lattice::Item` and, for platform traits, may additionally appear
-/// under [`backend`] for backend authors. The crate root remains the
-/// canonical, complete re-export list.
+/// This is the only public path to these items: they are not re-exported at
+/// the crate root. Platform traits re-exported here may additionally appear
+/// under [`backend`] for backend authors.
 pub mod model {
     #[doc(inline)]
-    pub use crate::{
-        AddressProvider, AdminState, CurrentState, DnsConfig, DnsProvider, Interface,
-        InterfaceAddress, InterfaceAddressId, InterfaceId, InterfaceKind, InterfaceProvider,
-        IpAddress, MacAddress, NeighborEntry, NeighborId, NeighborProvider, NeighborState, Network,
-        OperationalState, Route, RouteId, RouteProvider, SnapshotProvider,
+    pub use net_lattice_model::dns::DnsConfig;
+    #[doc(inline)]
+    pub use net_lattice_model::ifaddr::{InterfaceAddress, InterfaceAddressId};
+    #[doc(inline)]
+    pub use net_lattice_model::interface::{
+        AdminState, Interface, InterfaceId, InterfaceKind, OperationalState,
+    };
+    #[doc(inline)]
+    pub use net_lattice_model::mac::MacAddress;
+    #[doc(inline)]
+    pub use net_lattice_model::neighbor::{NeighborEntry, NeighborId, NeighborState};
+    #[doc(inline)]
+    pub use net_lattice_model::route::{Route, RouteId};
+    #[doc(inline)]
+    pub use net_lattice_model::snapshot::CurrentState;
+    #[doc(inline)]
+    pub use net_lattice_model::{IpAddress, Network};
+    #[doc(inline)]
+    pub use net_lattice_platform::{
+        AddressProvider, DnsProvider, InterfaceProvider, NeighborProvider, RouteProvider,
+        SnapshotProvider,
     };
 }
 
 /// Mutation intent types, plan/execution/report machinery, and mutator
 /// traits.
 ///
-/// This module re-exports a subset of the items already re-exported at the
-/// crate root, grouped by domain, as an additional navigation entry point.
-/// It introduces no new public symbols: every item here also resolves at
-/// `net_lattice::Item` and, for platform traits, may additionally appear
-/// under [`backend`] for backend authors. The crate root remains the
-/// canonical, complete re-export list.
+/// This is the only public path to these items: they are not re-exported at
+/// the crate root. Platform traits re-exported here may additionally appear
+/// under [`backend`] for backend authors.
 pub mod mutation {
     #[doc(inline)]
-    pub use crate::{
-        AddressMutator, Cancellation, Compensation, DesiredAdminState, DnsMutator,
-        ExecutionOptions, InterfaceConfig, InterfaceMutator, Mutation, MutationConfirmation,
-        MutationExecutionPhase, MutationIdempotency, MutationKind, MutationOperationReport,
-        MutationOutcome, MutationPlan, MutationPlanReport, MutationPrecondition, MutationPreflight,
-        MutationPrivilege, MutationReversibility, MutationSemantics, MutationSnapshot,
-        MutationStopReason, NeighborMutator, NewDnsConfig, NewInterfaceAddress, RollbackStatus,
-        RouteMutator, Snapshot, StaticNeighbor,
+    pub use crate::executor::{Cancellation, Compensation, ExecutionOptions, Snapshot};
+    #[doc(inline)]
+    pub use net_lattice_model::dns::NewDnsConfig;
+    #[doc(inline)]
+    pub use net_lattice_model::ifaddr::NewInterfaceAddress;
+    #[doc(inline)]
+    pub use net_lattice_model::interface::{DesiredAdminState, InterfaceConfig};
+    #[doc(inline)]
+    pub use net_lattice_model::mutation::{
+        Mutation, MutationConfirmation, MutationExecutionPhase, MutationIdempotency, MutationKind,
+        MutationOperationReport, MutationOutcome, MutationPlan, MutationPlanReport,
+        MutationPrecondition, MutationPreflight, MutationPrivilege, MutationReversibility,
+        MutationSemantics, MutationSnapshot, MutationStopReason, RollbackStatus,
+    };
+    #[doc(inline)]
+    pub use net_lattice_model::neighbor::StaticNeighbor;
+    #[doc(inline)]
+    pub use net_lattice_platform::{
+        AddressMutator, DnsMutator, InterfaceMutator, NeighborMutator, RouteMutator,
     };
 }
 
 /// Change events, event filters, and monitoring provider traits.
 ///
-/// This module re-exports a subset of the items already re-exported at the
-/// crate root, grouped by domain, as an additional navigation entry point.
-/// It introduces no new public symbols: every item here also resolves at
-/// `net_lattice::Item` and, for platform traits, may additionally appear
-/// under [`backend`] for backend authors. The crate root remains the
-/// canonical, complete re-export list.
+/// This is the only public path to these items: they are not re-exported at
+/// the crate root. Platform traits re-exported here may additionally appear
+/// under [`backend`] for backend authors.
 pub mod monitoring {
-    #[doc(inline)]
-    pub use crate::{ChangeKind, Event, EventDomain, EventFilter, EventProvider, EventReceiver};
     #[cfg(feature = "async")]
     #[doc(inline)]
-    pub use crate::{EventStream, TokioEventProvider};
+    pub use net_lattice_async::EventStream;
+    #[doc(inline)]
+    pub use net_lattice_model::event::{ChangeKind, Event, EventDomain, EventFilter};
+    #[cfg(feature = "async")]
+    #[doc(inline)]
+    pub use net_lattice_platform::TokioEventProvider;
+    #[doc(inline)]
+    pub use net_lattice_platform::{EventProvider, EventReceiver};
 }
 
 #[cfg(test)]
@@ -256,16 +304,20 @@ use std::time::Instant;
 ///
 /// These traits are a supported extension API. A backend must preserve the
 /// documented read, mutation, event-delivery, and cancellation semantics of
-/// each trait it implements. The root re-exports remain available for
-/// compatibility; new backend code may import from this module. Application
-/// code that only consumes [`Lattice`] should keep importing from the crate
-/// root or the [`model`], [`mutation`], and [`monitoring`] modules, while
-/// this module exists specifically so third-party backend implementers can
-/// see, in one place, every provider, mutator, and event trait
-/// [`LatticeBackend`] requires, without hunting through the larger
-/// root-level (now domain-modules-augmented) item lists.
+/// each trait it implements. [`LatticeBackend`] (a crate-local item, not a
+/// re-export) and [`CapabilityProvider`] (a cross-cutting root-only item,
+/// not a domain re-export) both resolve at the bare crate root; every other
+/// item re-exported in this module — [`CurrentState`] and the remaining 12
+/// provider/mutator/event traits — resolves only through
+/// [`model`]/[`mutation`]/[`monitoring`] and here, not at the crate root.
+/// Application code that only consumes [`Lattice`] should
+/// keep importing from the crate root or the [`model`], [`mutation`], and
+/// [`monitoring`] modules, while this module exists specifically so
+/// third-party backend implementers can see, in one place, every provider,
+/// mutator, and event trait [`LatticeBackend`] requires.
 pub mod backend {
-    pub use crate::{CurrentState, LatticeBackend};
+    pub use crate::LatticeBackend;
+    pub use net_lattice_model::snapshot::CurrentState;
     pub use net_lattice_platform::{
         AddressMutator, AddressProvider, CapabilityProvider, DnsMutator, DnsProvider,
         EventProvider, EventReceiver, EventSender, InterfaceMutator, InterfaceProvider,
@@ -920,7 +972,8 @@ impl<B: LatticeBackend> Lattice<B> {
     ///
     /// ```no_run
     /// use futures::StreamExt;
-    /// use net_lattice::{EventFilter, Lattice, Result};
+    /// use net_lattice::{Lattice, Result};
+    /// use net_lattice::monitoring::EventFilter;
     ///
     /// async fn monitor() -> Result<()> {
     ///     let lattice = Lattice::connect()?;

@@ -25,12 +25,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every raw backend type `B`: Rust's orphan rules forbid implementing a
   foreign trait, `SnapshotProvider`, for a bare generic type parameter with no
   local type in the impl) — no backend crate needs any code change to gain
-  this. `SnapshotProvider` and `CurrentState` are re-exported from the crate
-  root, `net_lattice::model`, and `net_lattice::backend`.
+  this. `SnapshotProvider` and `CurrentState` are re-exported from
+  `net_lattice::model` and `net_lattice::backend`.
 - `net-lattice::model`, `net-lattice::mutation`, and `net-lattice::monitoring`:
-  additive domain-scoped re-export modules for docs.rs navigation. Every item
-  was already re-exported at the crate root; these modules introduce no new
-  type, trait, or behavior, and `LatticeBackend`'s bound is unchanged.
+  domain-scoped re-export modules for docs.rs navigation, collecting the
+  observed/desired-state, mutation, and monitoring items respectively. These
+  modules introduce no new type or trait, and `LatticeBackend`'s bound is
+  unchanged.
+
+### Changed
+
+- **Breaking:** `net-lattice`'s crate-root re-export of every domain item
+  (interfaces, routes, neighbors, addresses, DNS configuration, mutation
+  intents and plans, change events, and their provider/mutator traits, plus
+  `CurrentState`/`SnapshotProvider`) has been removed. These items now
+  resolve only through the domain-scoped `net_lattice::model`,
+  `net_lattice::mutation`, and `net_lattice::monitoring` modules (and, for
+  backend authors, `net_lattice::backend`); a small cross-cutting set
+  (`Error`, `Id`, `PlatformErrorCode`, `Result`, the `Ipv4*`/`Ipv6*`
+  primitives, `Capability`, `CapabilityProvider`, `Lattice`, and
+  `LatticeBackend`) still resolves at the crate root. `net-lattice` has not
+  reached 1.0 and this 0.18.0 release had not yet been published, so no
+  external consumer's import breaks; keeping the duplicate root re-export
+  would have shipped items rendered on two or three separate docs.rs pages
+  to a real audience for no benefit.
 
 ### Documentation
 
@@ -40,8 +58,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Capability::NEIGHBOR_MUTATION` + `StaticNeighbor` mutation doctest and a
   `MutationPlan` build/validate/execute/report transaction doctest.
 - Extended the `backend` module's doc comment to distinguish application
-  code (crate root or the `model`/`mutation`/`monitoring` modules) from
-  third-party backend implementers (`backend`).
+  code (the `model`/`mutation`/`monitoring` modules, plus a small
+  cross-cutting set that still resolves at the crate root) from third-party
+  backend implementers (`backend`).
 - Reworded the README.md/README.ru.md `NEIGHBOR_MUTATION`/
   `NEIGHBOR_MONITORING` passage: the two are independent capabilities, and
   mutation support does not imply native change notifications; readers are
