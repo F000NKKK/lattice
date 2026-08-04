@@ -582,7 +582,14 @@ architecture reserves room for it as:
   its operational state, traffic counters) which cannot be meaningfully
   "desired" — a consumer expressing intent should not be able to construct
   a `Route` with a nonsensical read-only field set, nor should the
-  compiler let them try.
+  compiler let them try. Implemented as of Stage 0.19: `DesiredState`
+  (`net-lattice-model`) is a whole-system, caller-authored aggregate with
+  one `Option`-wrapped field per domain — `None` means that domain is
+  unmanaged, `Some` (including an empty collection) means it is managed
+  with exactly that desired content — built via `DesiredState::empty()`
+  and per-domain `with_*` builder methods, with no backend/provider
+  dependency (unlike `CurrentState`, it is never assembled from a
+  backend read).
 - `Diff` — the computed difference between a `CurrentState` and a
   `DesiredState`, comparing state and config types field-by-field where
   they overlap.
@@ -602,12 +609,13 @@ blanket-implemented for a bare generic type parameter with no local type in
 the impl. `Lattice<B>` is the facade's own local type, so implementing the
 trait there is both legal and sufficient — no backend still needs to write
 any code to get whole-system snapshots.
-`DesiredState`, `Diff`, and `ApplyPlan` do not exist yet, and no crate is
-created for them now — they belong to stages 0.19–0.20, after the
-transaction and remaining imperative mutation contracts are stable enough to
-compute a meaningful diff against. The state/config split is named here
-— as a parallel `*Config` type per domain object living alongside its state
-type in `net-lattice-model` — so that it is built in from the first `*Config`
+`DesiredState` (the data shape, in `net-lattice-model`, see above) now
+exists as of Stage 0.19. `Diff` and `ApplyPlan` do not exist yet — they
+belong to the rest of Stage 0.19 and to Stage 0.20, after the transaction
+and remaining imperative mutation contracts are stable enough to compute a
+meaningful diff against. The state/config split is named here — as a
+parallel `*Config` type per domain object living alongside its state type
+in `net-lattice-model` — so that it is built in from the first `*Config`
 type rather than retrofitted after `CurrentState`/`DesiredState` have
 already been conflated into one type.
 

@@ -17,7 +17,14 @@ models data and contracts; it never inspects or mutates the host system.
   interfaces, neighbors, interface addresses, and DNS configuration
   (assembled elsewhere, by the facade — this crate only defines the data
   shape and a `CurrentState::new` constructor, since the type is
-  `#[non_exhaustive]`).
+  `#[non_exhaustive]`);
+- `DesiredState`, a whole-system, caller-authored desired-state aggregate
+  paralleling `CurrentState`: one `Option`-wrapped field per domain, where
+  `None` means the domain is unmanaged and `Some` (including an empty
+  collection) means it is managed with that exact desired content. Unlike
+  `CurrentState`, it is never assembled from a backend read — build one with
+  `DesiredState::empty()` and its `with_routes`/`with_interfaces`/
+  `with_neighbors`/`with_addresses`/`with_dns` builder methods.
 
 Use this crate directly for offline plan construction, policy analysis,
 serialization layers, or backend development. Use the `net-lattice` facade to

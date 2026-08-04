@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `net-lattice-model::DesiredState`: a new `#[non_exhaustive]`, whole-system,
+  caller-authored desired-state aggregate paralleling `CurrentState` — one
+  `Option`-wrapped field per domain (`routes`, `interfaces`, `neighbors`,
+  `addresses`, `dns`). `None` means that domain is not managed by this
+  `DesiredState`; `Some` (including an empty collection) means it is managed
+  with exactly that desired content — an empty `Vec` requests removal of
+  every observed entry in that domain, it is not equivalent to `None`.
+  Unlike `CurrentState`, it has no backend/provider dependency and is never
+  assembled from a backend read; it is built via `DesiredState::empty()`
+  plus `with_routes`/`with_interfaces`/`with_neighbors`/`with_addresses`/
+  `with_dns` builder methods. Re-exported from the crate root.
 - `net-lattice-model::route::RouteConfig`: a new `#[non_exhaustive]` route
   mutation intent type (`destination`, `gateway`, `metric`,
   `interface_index`), distinct from the observed `Route` record, mirroring
