@@ -97,7 +97,19 @@ resolve the gap this way instead of guessing per task:
 - `Done` — the primary agent (or the reviewer directly, when it was able to
   run every applicable verification command itself) sets this only once a
   reviewer comment exists with no unresolved confirmed defect and no
-  outstanding verification remains.
+  outstanding verification remains. **When the researcher/architect/
+  implementer/reviewer pipeline is decomposed into separate sibling Tasks
+  under one Story (this project's normal decomposition — e.g. a Task each
+  for the audit, the ADR, the implementation, and the independent review),
+  a passing reviewer pass must set `Done` on BOTH the reviewer's own Task
+  AND the implementer Task(s) it reviewed** — they are two different issues
+  and closing one does not close the other. Forgetting the implementer Task
+  leaves it stuck at `Review` indefinitely with nothing left in the pipeline
+  to advance it (observed and corrected on `NL-46`, 2026-08-04: its reviewer
+  Task `NL-47` passed and closed itself but left `NL-46` sitting at `Review`
+  until the primary agent caught it and closed it manually). Whichever agent
+  performs the review — subagent or primary — must set `Done` on every
+  Task the review covers, not only its own.
 
 If the reviewer can run the full applicable matrix itself in one pass, skip
 `Test`/`Staging` and go straight `Review` → `Done` — those two states exist
@@ -218,8 +230,9 @@ format. A comment must state:
 
 The reviewer must not reuse the implementer's comment as evidence: it
 inspects the diff and re-runs verification independently, then posts its own
-comment. Advance `Stage` to `Done` only after a reviewer comment is present
-with no unresolved confirmed defects.
+comment. See "Stage ownership" above for exactly when and by whom `Stage`
+advances to `Done` — including the sibling-Task closing rule for the
+researcher/architect/implementer/reviewer decomposition this project uses.
 
 ## ADRs — YouTrack Articles replace `adr/*.md`
 
@@ -268,8 +281,9 @@ quietly into a routine Sprint release.
   tests, cleanup behavior, and completion evidence in its description.
 - Audit current code before proposing new types or traits; reuse established
   domain types, provider contracts, capabilities, and execution paths.
-- Advance `Stage` to `Done` only after implementation, focused tests, docs,
-  and verification gates all agree, and a reviewer comment confirms it.
+- Advance `Stage` to `Done` per "Stage ownership" above only once
+  implementation, focused tests, docs, and verification gates all agree and
+  a reviewer comment confirms it.
 - Record unresolved questions as a comment on the Epic or as a new `Task`
   with `Stage: Backlog`, not as untracked chat output.
 

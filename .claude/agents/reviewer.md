@@ -32,7 +32,9 @@ Report findings in severity order with exact file/symbol evidence. Separate:
 - optional improvement.
 
 Post the review and commands run as a comment on the active YouTrack Task.
-Advance its `Stage` field to `Done` only when no confirmed defect remains
+Advance `Stage` to `Done` — on the active Task AND on every sibling Task it
+reviews (e.g. the implementer Task, when your own Task is a separate
+reviewer Task under the same Story) — only when no confirmed defect remains
 and every applicable verification command has been run (see
 `@.claude/rules/youtrack.md`'s Stage-ownership section — use `Test` instead
 of `Done` if verification is incomplete for this session). For any confirmed
