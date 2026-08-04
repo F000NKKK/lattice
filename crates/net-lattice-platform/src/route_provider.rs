@@ -22,13 +22,21 @@ pub trait RouteProvider {
 
 /// Adds and removes routes.
 ///
-/// `Route` carries no OS-synthesized identity or derived observation field
-/// distinct from caller intent (unlike `NeighborEntry`/`StaticNeighbor`), so
-/// the same associated type is reused as both mutation input and the
-/// [`crate::RouteProvider`] output.
+/// A route *does* carry a backend-synthesized identity distinct from
+/// caller intent: on Windows and Darwin the observed `RouteProvider::Route`
+/// carries an `id` synthesized as a hash of its own observed fields, and on
+/// Linux it is a kernel-issued netlink handle — on every platform, no
+/// native API accepts that id back as mutation input. This mirrors
+/// [`crate::NeighborProvider`]/[`crate::NeighborMutator`], which already
+/// keep the observed `NeighborEntry` and the intent `StaticNeighbor` as two
+/// distinct types precisely because `NeighborEntry::id` is never accepted
+/// back either. `RouteMutator` therefore declares its own associated
+/// `RouteConfig` type instead of reusing [`crate::RouteProvider`]'s `Route`:
+/// the facade binds it to `net_lattice_model::route::RouteConfig`, a
+/// distinct intent type with no id field.
 pub trait RouteMutator {
-    type Route;
+    type RouteConfig;
 
-    fn add_route(&self, route: Self::Route) -> Result<()>;
-    fn remove_route(&self, route: Self::Route) -> Result<()>;
+    fn add_route(&self, route: Self::RouteConfig) -> Result<()>;
+    fn remove_route(&self, route: Self::RouteConfig) -> Result<()>;
 }
