@@ -6,7 +6,8 @@
 
 use std::time::Duration;
 
-use net_lattice::{Capability, Error, Event, EventFilter, Lattice, Result};
+use net_lattice::monitoring::{Event, EventFilter};
+use net_lattice::{Capability, Error, Lattice, Result};
 
 fn main() -> Result<()> {
     let lattice = Lattice::connect()?;

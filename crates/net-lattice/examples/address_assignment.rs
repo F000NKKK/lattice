@@ -5,10 +5,9 @@
 //! it successfully created. Choose an unused address appropriate for the host
 //! before running it with sufficient privilege.
 
-use net_lattice::{
-    Error, Ipv4Address, Ipv4Network, Ipv4PrefixLength, Lattice, Network, NewInterfaceAddress,
-    Result,
-};
+use net_lattice::model::Network;
+use net_lattice::mutation::NewInterfaceAddress;
+use net_lattice::{Error, Ipv4Address, Ipv4Network, Ipv4PrefixLength, Lattice, Result};
 
 fn main() -> Result<()> {
     let Some(index) = std::env::var("NET_LATTICE_INTERFACE_INDEX")

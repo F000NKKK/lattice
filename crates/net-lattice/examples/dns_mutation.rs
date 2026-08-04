@@ -6,7 +6,9 @@
 //! platform operation can still leave different state; inspect `dns_config()`
 //! afterwards.
 
-use net_lattice::{IpAddress, Ipv4Address, Lattice, NewDnsConfig, Result};
+use net_lattice::model::IpAddress;
+use net_lattice::mutation::NewDnsConfig;
+use net_lattice::{Ipv4Address, Lattice, Result};
 
 fn main() -> Result<()> {
     if std::env::var("NET_LATTICE_APPLY_DNS_EXAMPLE").as_deref() != Ok("1") {

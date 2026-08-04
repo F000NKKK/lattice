@@ -4,18 +4,19 @@
 //!
 //! This example never calls [`net_lattice::Lattice::connect`] and never
 //! touches real host state; every value below (route, interface, address)
-//! only ever exists as an in-memory [`net_lattice::MutationPlan`] entry that
-//! is printed, not executed. The interface index `2` and interface ID `2`
-//! below are therefore synthetic placeholders, unlike the other examples in
-//! this directory (which read `NET_LATTICE_INTERFACE_INDEX` at runtime
-//! specifically to avoid clobbering an arbitrary real interface when
-//! actually applying a mutation to the host).
+//! only ever exists as an in-memory [`net_lattice::mutation::MutationPlan`]
+//! entry that is printed, not executed. The interface index `2` and
+//! interface ID `2` below are therefore synthetic placeholders, unlike the
+//! other examples in this directory (which read
+//! `NET_LATTICE_INTERFACE_INDEX` at runtime specifically to avoid clobbering
+//! an arbitrary real interface when actually applying a mutation to the
+//! host).
 
-use net_lattice::{
-    InterfaceAddress, InterfaceAddressId, InterfaceId, IpAddress, Ipv4Address, Ipv4Network,
-    Ipv4PrefixLength, Mutation, MutationPlan, Network, NewDnsConfig, NewInterfaceAddress, Route,
-    RouteId,
+use net_lattice::model::{
+    InterfaceAddress, InterfaceAddressId, InterfaceId, IpAddress, Network, Route, RouteId,
 };
+use net_lattice::mutation::{Mutation, MutationPlan, NewDnsConfig, NewInterfaceAddress};
+use net_lattice::{Ipv4Address, Ipv4Network, Ipv4PrefixLength};
 
 fn network(host: Ipv4Address) -> Network {
     Network::from(Ipv4Network::new(

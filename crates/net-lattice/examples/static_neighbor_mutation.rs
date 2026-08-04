@@ -6,9 +6,9 @@
 //! before running with elevated privilege. The example removes only the
 //! entry it successfully added.
 
-use net_lattice::{
-    Capability, Error, IpAddress, Ipv4Address, Lattice, MacAddress, Result, StaticNeighbor,
-};
+use net_lattice::model::{IpAddress, MacAddress};
+use net_lattice::mutation::StaticNeighbor;
+use net_lattice::{Capability, Error, Ipv4Address, Lattice, Result};
 
 fn main() -> Result<()> {
     let Some(index) = std::env::var("NET_LATTICE_INTERFACE_INDEX")

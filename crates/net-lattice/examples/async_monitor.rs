@@ -1,7 +1,8 @@
 //! Consume native change notifications through the optional async facade.
 
 use futures::StreamExt;
-use net_lattice::{Capability, Error, EventFilter, Lattice, Result};
+use net_lattice::monitoring::EventFilter;
+use net_lattice::{Capability, Error, Lattice, Result};
 
 async fn monitor() -> Result<()> {
     let lattice = Lattice::connect()?;

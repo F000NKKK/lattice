@@ -4,9 +4,8 @@
 //! the hard-coded documentation prefix before running with elevated privilege.
 //! The example removes only the route it successfully added.
 
-use net_lattice::{
-    Ipv4Address, Ipv4Network, Ipv4PrefixLength, Lattice, Network, Result, Route, RouteId,
-};
+use net_lattice::model::{Network, Route, RouteId};
+use net_lattice::{Ipv4Address, Ipv4Network, Ipv4PrefixLength, Lattice, Result};
 
 fn main() -> Result<()> {
     let Some(interface_index) = std::env::var("NET_LATTICE_INTERFACE_INDEX")

@@ -68,7 +68,9 @@ capabilities, then submit it. A successful call returns an observed interface
 read after the native update.
 
 ```rust,no_run
-use net_lattice::{Capability, DesiredAdminState, InterfaceConfig, InterfaceId, Lattice, Result};
+use net_lattice::model::InterfaceId;
+use net_lattice::mutation::{DesiredAdminState, InterfaceConfig};
+use net_lattice::{Capability, Lattice, Result};
 
 fn main() -> Result<()> {
     let lattice = Lattice::connect()?;
@@ -100,9 +102,9 @@ present but non-`Permanent` (dynamically learned) entry is refused with
 `Error::InvalidState` rather than silently evicting it.
 
 ```rust,no_run
-use net_lattice::{
-    Capability, IpAddress, Ipv4Address, InterfaceId, Lattice, MacAddress, Result, StaticNeighbor,
-};
+use net_lattice::model::{InterfaceId, IpAddress, MacAddress};
+use net_lattice::mutation::StaticNeighbor;
+use net_lattice::{Capability, Ipv4Address, Lattice, Result};
 
 fn main() -> Result<()> {
     let lattice = Lattice::connect()?;
@@ -129,7 +131,8 @@ address notifications, but rejects neighbor and all-domain subscriptions with
 `Error::Unsupported` rather than returning a stream that omits neighbors.
 
 ```rust,no_run
-use net_lattice::{Capability, EventFilter, Lattice, Result};
+use net_lattice::monitoring::EventFilter;
+use net_lattice::{Capability, Lattice, Result};
 
 fn main() -> Result<()> {
     let lattice = Lattice::connect()?;

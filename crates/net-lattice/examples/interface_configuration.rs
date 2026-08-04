@@ -3,10 +3,12 @@
 //! This example does not change networking unless all required environment
 //! variables are supplied and `NET_LATTICE_APPLY_INTERFACE_CONFIG=1` is set.
 //! It operates on real host state and does not guess a rollback. Capture the
-//! current [`net_lattice::Interface`] and use an explicit `MutationPlan`
-//! compensator if an application needs an attempted restoration.
+//! current [`net_lattice::model::Interface`] and use an explicit
+//! `MutationPlan` compensator if an application needs an attempted
+//! restoration.
 
-use net_lattice::{Capability, DesiredAdminState, Error, InterfaceConfig, Lattice, Result};
+use net_lattice::mutation::{DesiredAdminState, InterfaceConfig};
+use net_lattice::{Capability, Error, Lattice, Result};
 
 fn requested_admin_state() -> Result<Option<DesiredAdminState>> {
     match std::env::var("NET_LATTICE_INTERFACE_ADMIN_STATE")
