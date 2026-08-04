@@ -24,10 +24,12 @@
 //! [`Lattice::interfaces`], [`Lattice::routes`], [`Lattice::addresses`],
 //! [`Lattice::neighbors`], and [`Lattice::dns_config`] read the connected
 //! backend's current observed state; these calls are generally unprivileged.
-//! The observed/desired-state domain objects they return, plus their
-//! read/inspection provider traits, are also reachable through the [`model`]
-//! module for domain-scoped browsing — [`Interface`], [`Route`],
-//! [`NeighborEntry`], [`InterfaceAddress`], and [`DnsConfig`] all resolve
+//! [`Lattice::current_state`] reads all five domains in one call and returns
+//! them together as a single [`CurrentState`] snapshot. The observed/desired-
+//! state domain objects they return, plus their read/inspection provider
+//! traits, are also reachable through the [`model`] module for domain-scoped
+//! browsing — [`Interface`], [`Route`], [`NeighborEntry`],
+//! [`InterfaceAddress`], [`DnsConfig`], and [`CurrentState`] all resolve
 //! identically whether imported from the crate root or from `model`.
 //!
 //! # Direct mutations
@@ -337,18 +339,17 @@ pub struct Lattice<B: LatticeBackend> {
 ///
 /// `net-lattice-platform`'s [`net_lattice_platform::SnapshotProvider`] is
 /// generic over an associated `State` type because that crate does not
-/// depend on `net-lattice-model` and cannot name `CurrentState` directly
-/// (see ADR NL-A-8). The ADR's original design called for a blanket
-/// `impl<B> SnapshotProvider for B` over every raw backend type — that
-/// formulation does not compile: `SnapshotProvider` is a foreign trait here
-/// (defined in `net-lattice-platform`) and a bare generic `B` is not a local
-/// type, so Rust's orphan rules reject it (`E0210`, verified against this
-/// exact impl). [`Lattice<B>`] is the local type this crate does own, so the
+/// depend on `net-lattice-model` and cannot name `CurrentState` directly. A
+/// blanket `impl<B> SnapshotProvider for B` over every raw backend type does
+/// not compile: `SnapshotProvider` is a foreign trait here (defined in
+/// `net-lattice-platform`) and a bare generic `B` is not a local type, so
+/// Rust's orphan rules reject it (`E0210`, verified against this exact
+/// impl). [`Lattice<B>`] is the local type this crate does own, so the
 /// implementation is realized here instead: any [`Lattice<B>`] over a
 /// [`LatticeBackend`] gets [`SnapshotProvider`]
 /// for free, without any backend crate writing a single extra line — the
-/// zero-backend-code guarantee ADR NL-A-8 intended is preserved, just at the
-/// facade type rather than the raw backend type.
+/// zero-backend-code guarantee is preserved, just at the facade type rather
+/// than the raw backend type.
 impl<B: LatticeBackend> SnapshotProvider for Lattice<B> {
     type State = CurrentState;
 

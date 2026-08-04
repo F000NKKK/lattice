@@ -7,6 +7,9 @@ Rust API. This is the application-facing Net Lattice crate.
 
 - automatic native backend selection on Linux, Windows, and macOS;
 - inspection of interfaces, addresses, routes, neighbors, and DNS;
+- `current_state()`, a single call returning a whole-system `CurrentState`
+  snapshot (routes, interfaces, neighbors, addresses, and DNS) assembled from
+  the same per-domain reads, with zero extra backend code required;
 - imperative route, address, resolver, and static ARP/NDP neighbor mutation;
 - partial interface MTU and administrative-state configuration;
 - filtered native change monitoring;
@@ -26,6 +29,25 @@ fn main() -> Result<()> {
     for interface in lattice.interfaces()? {
         println!("{interface:?}");
     }
+    Ok(())
+}
+```
+
+## Whole-system snapshot
+
+`current_state()` reads routes, interfaces, neighbors, addresses, and DNS in
+one call and returns them as a single `CurrentState`. Each domain is still an
+independent backend read — there is no lock or transaction spanning them, so
+treat the result as several closely timed reads, not one atomic capture. If
+any one read fails, the whole call fails and returns no partial state.
+
+```rust,no_run
+use net_lattice::{Lattice, Result};
+
+fn main() -> Result<()> {
+    let lattice = Lattice::connect()?;
+    let state = lattice.current_state()?;
+    println!("{} routes, {} interfaces", state.routes.len(), state.interfaces.len());
     Ok(())
 }
 ```
