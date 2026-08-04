@@ -1,11 +1,11 @@
 //! The domain model of operating system networking state.
 //!
-//! No operating-system dependency. Stage 0.4 added the `mac` and `interface`
-//! modules; Stage 0.5 added `dns`; Stage 0.6 added `neighbor`; Stage 0.7
-//! added `ifaddr`; Stage 0.8 added `event`; Stage 0.14 added `mutation`;
-//! Stage 0.16 added desired interface-configuration intent; Stage 0.17 adds
+//! No operating-system dependency. Covers interface (`interface`, `mac`),
+//! route (`route`), DNS (`dns`), neighbor (`neighbor`), interface-address
+//! (`ifaddr`), and change-event (`event`) observed state; mutation intent
+//! and plan/execution/report machinery (`mutation`), including
 //! `StaticNeighbor` desired-neighbor intent and its `Mutation` variants; and
-//! Stage 0.18 adds the whole-system `CurrentState` snapshot in `snapshot`.
+//! the whole-system `CurrentState` snapshot (`snapshot`).
 
 mod address;
 pub mod dns;

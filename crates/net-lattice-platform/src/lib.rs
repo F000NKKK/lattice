@@ -6,11 +6,12 @@
 //! ARCHITECTURE.md for the full rationale, including how model
 //! convergence is enforced one layer up, in `lattice`.
 //!
-//! Stage 0.4 added `InterfaceProvider`; Stage 0.5 added `DnsProvider`;
-//! Stage 0.6 added `NeighborProvider`; Stage 0.7 added `AddressProvider`;
-//! Stage 0.8 added `EventProvider`; Stage 0.16 added `InterfaceMutator`;
-//! Stage 0.17 added `NeighborMutator` and `Capability::NEIGHBOR_MUTATION`;
-//! Stage 0.18 adds `SnapshotProvider`.
+//! Provides read/inspection providers for routes, interfaces, DNS,
+//! neighbors, and interface addresses; mutator traits for each of those
+//! domains (`InterfaceMutator`, `NeighborMutator`, and their siblings) gated
+//! by their respective `Capability` flags; `EventProvider` for native
+//! change-notification delivery; and `SnapshotProvider`, the whole-system
+//! state assembly contract.
 
 mod address_mutator;
 mod address_provider;
