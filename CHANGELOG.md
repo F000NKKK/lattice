@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `net-lattice-model::CurrentState`: a new `#[non_exhaustive]` whole-system
+  observed-state snapshot type aggregating routes, interfaces, neighbors,
+  interface addresses, and DNS configuration. This is the data shape only;
+  assembly (a `SnapshotProvider` trait and its facade-level blanket
+  implementation) lands in a later change.
 - `net-lattice::model`, `net-lattice::mutation`, and `net-lattice::monitoring`:
   additive domain-scoped re-export modules for docs.rs navigation. Every item
   was already re-exported at the crate root; these modules introduce no new
