@@ -47,6 +47,7 @@ live as real files, not inlined prose:
 @.claude/rules/research.md
 @.claude/rules/files.md
 @.claude/rules/git.md
+@.claude/rules/versioning.md
 
 The destructive-command restrictions in `git.md` are additionally enforced
 mechanically via `permissions.deny` in `.claude/settings.json` — not just

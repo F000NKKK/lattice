@@ -13,9 +13,10 @@ the YouTrack REST API — see `rules/youtrack.md`. The former file-based
    REST API.
 3. Read the issue's description, prior comments, and any linked ADR
    Articles under `NL-A-1`.
-4. Load all five rule files in `rules/` (`ci.md`, `files.md`, `git.md`,
-   `research.md`, `youtrack.md`). Codex has no glob/conditional or per-role
-   rule loading in `config.toml` — unlike role scoping, there is no
+4. Load all six rule files in `rules/` (`ci.md`, `files.md`, `git.md`,
+   `research.md`, `versioning.md`, `youtrack.md`). Codex has no
+   glob/conditional or per-role rule loading in `config.toml` — unlike role
+   scoping, there is no
    mechanism to load only "applicable" rules automatically, so read the
    full set every session and apply judgment about which constraints bind
    the current slice.
@@ -40,7 +41,8 @@ rather than bundled into a rules-loading fix.
 ## Contents
 
 - `config.toml` — minimal repository-local Codex discovery settings.
-- `rules/` — reusable YouTrack, file, Git, research, and CI constraints.
+- `rules/` — reusable YouTrack, file, Git, research, CI, and versioning
+  constraints.
 - `agents/` — role profiles for research, design, implementation, and review.
 - `templates/` — request bodies and field references for creating YouTrack
   Epics/Stories/Tasks/Bugs and ADR Articles via the REST API.

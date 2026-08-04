@@ -26,7 +26,11 @@ available in the environment. Key endpoints:
 
 - `Epic` — one roadmap stage (0.16, 0.17, 0.18, ...).
 - `User Story` — a bounded track or slice inside a stage, subtask of its
-  Epic.
+  Epic. **A User Story must always own at least one child Task** —
+  inviolable, not a guideline. Never leave a Story without Tasks, even
+  temporarily, and never advance its `Stage` past `Backlog` with zero child
+  Tasks. If scope isn't decomposed yet, file a scoping Task in the same turn
+  the Story itself is created.
 - `Task` — one bounded unit of work: model, platform, backend, test, CI,
   documentation, or packaging subtask, subtask of its Story (or its Epic for
   small stages).
@@ -193,10 +197,20 @@ considered / Consequences / Verification structure as the retired
 explicit text in the governing issue's description or a comment — there is
 no typed issue-to-article link over this surface.
 
+Before deciding whether a breaking public-API change is acceptable, check
+`rules/versioning.md` — pre-1.0, a breaking change inside the current
+Sprint's release is normal roadmap evolution and needs no special
+justification beyond the ADR itself; post-1.0, the same kind of change
+requires an explicit major-version decision and cannot be folded quietly
+into a routine Sprint release.
+
 ## Decomposing a stage
 
 - Start from one Epic and decompose it into the applicable model, platform,
   facade, backend, test, CI, documentation, and packaging Tasks.
+- Every User Story created by this decomposition must end this same turn
+  with at least one child Task filed under it — see "Issue hierarchy"
+  above. A Story with no Tasks is not a valid stopping point.
 - Every Task must name its files, public API impact, platform assumptions,
   tests, cleanup behavior, and completion evidence in its description.
 - Audit current code before proposing new types or traits; reuse established

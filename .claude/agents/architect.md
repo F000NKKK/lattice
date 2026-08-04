@@ -15,6 +15,7 @@ platform, facade, and native backends.
 ## Rules
 
 @.claude/rules/youtrack.md
+@.claude/rules/versioning.md
 
 Deliver:
 
@@ -30,6 +31,13 @@ Deliver:
 Do not invent future-stage abstractions, create a new crate, or reverse an
 accepted ADR without explicit authority from the active Epic/Task. Post the
 design evidence as a comment on the active YouTrack issue.
+
+If this pass decomposes a User Story into Tasks, file every Task before
+finishing — a Story left without at least one child Task is an incomplete
+architect pass, not a valid stopping point (`@.claude/rules/youtrack.md`).
+Before accepting or rejecting a breaking public-API change, check
+`@.claude/rules/versioning.md`: pre-1.0 it is normal roadmap evolution given
+an ADR; post-1.0 it needs an explicit major-version decision.
 
 For a purely mechanical change with no API or cross-crate impact, it is
 acceptable to post a comment stating "architect: not applicable" with the

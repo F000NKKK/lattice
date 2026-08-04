@@ -35,9 +35,9 @@ native mechanism available to limit which rules a given piece of work loads.
   and a denylist that mechanically blocks destructive Git operations
   (`git reset --hard`, `git clean`, force-push, amend, rebase, forced add) —
   enforcement, not just prose in `rules/git.md`.
-- `rules/` — reusable YouTrack, file, Git, research, and CI constraints,
-  using Claude Code tool names directly (`Edit`/`Write` for file edits,
-  `Grep`/`Glob`/`Read` for search and inspection,
+- `rules/` — reusable YouTrack, file, Git, research, CI, and versioning
+  constraints, using Claude Code tool names directly (`Edit`/`Write` for
+  file edits, `Grep`/`Glob`/`Read` for search and inspection,
   `mcp__youtrack__*` for issue tracking).
 - `agents/` — role subagents for research, design, implementation, and
   review, as native Claude Code subagent definitions (YAML frontmatter with

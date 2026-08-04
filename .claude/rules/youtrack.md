@@ -9,7 +9,14 @@ workflow (`plan.md`, `AUDIT.md`, `adr/`), which has been retired.
 
 - `Epic` — one roadmap stage (0.16, 0.17, 0.18, ...). Created once per stage.
 - `User Story` — a bounded track or slice inside a stage (e.g. "Track A —
-  documentation polish"), linked as a subtask of its Epic.
+  documentation polish"), linked as a subtask of its Epic. **A User Story
+  must always own at least one child Task.** This is an inviolable rule, not
+  a guideline: never leave a Story without Tasks, even temporarily, and
+  never advance a Story's `Stage` past `Backlog` while it has zero child
+  Tasks. If a Story's scope isn't decomposed yet, the very first thing owed
+  to it is a scoping Task (see "Decomposing a stage" below) — create that
+  Task in the same turn the Story itself is created, don't leave the Story
+  bare pending a "later" pass.
 - `Task` — one bounded checkbox-equivalent unit of work: model, platform,
   backend, test, CI, documentation, or packaging subtask. Linked as a subtask
   of its Story (or directly of its Epic for small stages).
@@ -216,11 +223,21 @@ must be explicit text.
 Never propose or accept a public-API decision only in chat or only in an
 issue comment; if it changes a public contract, it needs an Article.
 
+Before deciding whether a breaking public-API change is acceptable, check
+`@.claude/rules/versioning.md` — pre-1.0, a breaking change inside the
+current Sprint's release is normal roadmap evolution and does not need
+special justification beyond the ADR itself; post-1.0, the same kind of
+change requires an explicit major-version decision and cannot be folded
+quietly into a routine Sprint release.
+
 ## Decomposing a stage
 
 - Start from one Epic (a roadmap stage) and decompose it into the applicable
   model, platform, facade, backend, test, CI, documentation, and packaging
   Tasks, same as the retired `audit.md` decomposition rule.
+- Every User Story created by this decomposition must end this same turn
+  with at least one child Task filed under it — see "Issue hierarchy"
+  above. A Story with no Tasks is not a valid stopping point.
 - Every Task must name its files, public API impact, platform assumptions,
   tests, cleanup behavior, and completion evidence in its description.
 - Audit current code before proposing new types or traits; reuse established
