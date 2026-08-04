@@ -81,8 +81,8 @@
 //!
 //! ```no_run
 //! use net_lattice::{Ipv4Address, Ipv4Network, Ipv4PrefixLength, Lattice, Result};
-//! use net_lattice::model::{Network, Route, RouteId};
-//! use net_lattice::mutation::{ExecutionOptions, Mutation, MutationPlan};
+//! use net_lattice::model::Network;
+//! use net_lattice::mutation::{ExecutionOptions, Mutation, MutationPlan, RouteConfig};
 //!
 //! fn main() -> Result<()> {
 //!     let lattice = Lattice::connect()?;
@@ -96,12 +96,12 @@
 //!     let Some(interface) = lattice.interfaces()?.into_iter().next() else {
 //!         return Ok(());
 //!     };
-//!     let route = Route::new(RouteId::new(0), destination).with_interface_index(interface.index);
+//!     let route = RouteConfig::new(destination).with_interface_index(interface.index);
 //!
 //!     // Build: an add followed by its own remove is a safe, idempotent demo
 //!     // plan that leaves system state unchanged if executed.
 //!     let plan = MutationPlan::from_operations([
-//!         Mutation::AddRoute(route.clone()),
+//!         Mutation::AddRoute(route),
 //!         Mutation::RemoveRoute(route),
 //!     ]);
 //!
@@ -199,9 +199,9 @@ use net_lattice_model::mutation::{
 use net_lattice_model::neighbor::{NeighborEntry, StaticNeighbor};
 #[allow(unused_imports)]
 use net_lattice_model::neighbor::{NeighborId, NeighborState};
-use net_lattice_model::route::Route;
 #[allow(unused_imports)]
 use net_lattice_model::route::RouteId;
+use net_lattice_model::route::{Route, RouteConfig};
 use net_lattice_model::snapshot::CurrentState;
 #[allow(unused_imports)]
 use net_lattice_model::{IpAddress, Network};
@@ -272,6 +272,8 @@ pub mod mutation {
     };
     #[doc(inline)]
     pub use net_lattice_model::neighbor::StaticNeighbor;
+    #[doc(inline)]
+    pub use net_lattice_model::route::RouteConfig;
     #[doc(inline)]
     pub use net_lattice_platform::{
         AddressMutator, DnsMutator, InterfaceMutator, NeighborMutator, RouteMutator,
@@ -352,7 +354,7 @@ pub mod backend {
 /// exactly what this design avoids.
 pub trait LatticeBackend:
     RouteProvider<Route = Route>
-    + RouteMutator<Route = Route>
+    + RouteMutator<RouteConfig = RouteConfig>
     + InterfaceProvider<Interface = Interface>
     + InterfaceMutator<Interface = Interface, InterfaceConfig = InterfaceConfig>
     + DnsMutator<NewDnsConfig = NewDnsConfig, DnsConfig = DnsConfig>
@@ -367,7 +369,7 @@ pub trait LatticeBackend:
 
 impl<B> LatticeBackend for B where
     B: RouteProvider<Route = Route>
-        + RouteMutator<Route = Route>
+        + RouteMutator<RouteConfig = RouteConfig>
         + InterfaceProvider<Interface = Interface>
         + InterfaceMutator<Interface = Interface, InterfaceConfig = InterfaceConfig>
         + DnsMutator<NewDnsConfig = NewDnsConfig, DnsConfig = DnsConfig>
@@ -433,14 +435,14 @@ impl<B: LatticeBackend> Lattice<B> {
     /// Adds a route. Requires [`Capability::ROUTE_MUTATION`]; use
     /// [`Self::execute_plan`] with [`Mutation::AddRoute`] for
     /// capability/precondition checks and compensation support.
-    pub fn add_route(&self, route: Route) -> Result<()> {
+    pub fn add_route(&self, route: RouteConfig) -> Result<()> {
         self.backend.add_route(route)
     }
 
     /// Removes a route. Requires [`Capability::ROUTE_MUTATION`]; use
     /// [`Self::execute_plan`] with [`Mutation::RemoveRoute`] for
     /// capability/precondition checks and compensation support.
-    pub fn remove_route(&self, route: Route) -> Result<()> {
+    pub fn remove_route(&self, route: RouteConfig) -> Result<()> {
         self.backend.remove_route(route)
     }
 
@@ -563,36 +565,28 @@ impl<B: LatticeBackend> Lattice<B> {
                         .routes()?
                         .iter()
                         .any(|candidate| Self::same_route(candidate, route))
-                        && !removed_routes
-                            .iter()
-                            .any(|candidate| Self::same_route(candidate, route));
+                        && !removed_routes.iter().any(|candidate| candidate == route);
                     let exists = exists_in_system
-                        || planned_routes
-                            .iter()
-                            .any(|candidate| Self::same_route(candidate, route));
+                        || planned_routes.iter().any(|candidate| candidate == route);
                     if exists {
                         return Err(Error::AlreadyExists);
                     }
-                    planned_routes.push(route.clone());
-                    removed_routes.retain(|candidate| !Self::same_route(candidate, route));
+                    planned_routes.push(*route);
+                    removed_routes.retain(|candidate| candidate != route);
                 }
                 Mutation::RemoveRoute(route) => {
                     let exists_in_system = self
                         .routes()?
                         .iter()
                         .any(|candidate| Self::same_route(candidate, route))
-                        && !removed_routes
-                            .iter()
-                            .any(|candidate| Self::same_route(candidate, route));
+                        && !removed_routes.iter().any(|candidate| candidate == route);
                     let exists = exists_in_system
-                        || planned_routes
-                            .iter()
-                            .any(|candidate| Self::same_route(candidate, route));
+                        || planned_routes.iter().any(|candidate| candidate == route);
                     if !exists {
                         return Err(Error::NotFound);
                     }
-                    planned_routes.retain(|candidate| !Self::same_route(candidate, route));
-                    removed_routes.push(route.clone());
+                    planned_routes.retain(|candidate| candidate != route);
+                    removed_routes.push(*route);
                 }
                 Mutation::AddAddress(address) => {
                     let interface_index = address.interface_id.value() as u32;
@@ -676,7 +670,7 @@ impl<B: LatticeBackend> Lattice<B> {
         Ok(())
     }
 
-    fn same_route(left: &Route, right: &Route) -> bool {
+    fn same_route(left: &Route, right: &RouteConfig) -> bool {
         left.destination == right.destination
             && left.gateway == right.gateway
             && left.metric == right.metric
@@ -833,9 +827,9 @@ impl<B: LatticeBackend> Lattice<B> {
             let started = Instant::now();
 
             let result = match operation {
-                Mutation::AddRoute(route) => self.add_route(route.clone()),
+                Mutation::AddRoute(route) => self.add_route(*route),
 
-                Mutation::RemoveRoute(route) => self.remove_route(route.clone()),
+                Mutation::RemoveRoute(route) => self.remove_route(*route),
 
                 Mutation::AddAddress(address) => self.add_address(address.clone()).map(|_| ()),
 
@@ -1107,25 +1101,52 @@ mod tests {
         ))
     }
 
-    fn route() -> Route {
+    /// Observed record matching [`route`]'s intent, seeded into
+    /// `TestBackend::routes`. Kept as a separate helper because
+    /// `RouteProvider::Route` (observed) and `RouteMutator::RouteConfig`
+    /// (intent) are now distinct types (ADR-0008, 0.19).
+    fn observed_route() -> Route {
         Route::new(RouteId::new(1), network()).with_interface_index(1)
     }
 
-    fn planned_route() -> Route {
+    fn route() -> RouteConfig {
+        RouteConfig::new(network()).with_interface_index(1)
+    }
+
+    fn planned_route() -> RouteConfig {
         route().with_metric(7)
     }
 
-    fn ipv6_route() -> Route {
+    fn ipv6_route() -> RouteConfig {
         let destination = Network::from(Ipv6Network::new(
             Ipv6Address::new([0x2001, 0xdb8, 0, 0x16, 0, 0, 0, 0]),
             Ipv6PrefixLength::new(64).expect("valid IPv6 prefix"),
         ));
-        Route::new(RouteId::new(16), destination)
+        RouteConfig::new(destination)
             .with_gateway(IpAddress::from(Ipv6Address::new([
                 0x2001, 0xdb8, 0, 0x16, 0, 0, 0, 1,
             ])))
             .with_metric(42)
             .with_interface_index(7)
+    }
+
+    /// Converts an observed [`Route`] (e.g. read back from
+    /// [`Lattice::routes`]) into the [`RouteConfig`] intent
+    /// `Mutation::RemoveRoute` now requires, carrying over every field but
+    /// the backend-synthesized [`RouteId`] (never accepted back as input).
+    #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
+    fn to_route_config(observed: &Route) -> RouteConfig {
+        let mut config = RouteConfig::new(observed.destination);
+        if let Some(gateway) = observed.gateway {
+            config = config.with_gateway(gateway);
+        }
+        if let Some(metric) = observed.metric {
+            config = config.with_metric(metric);
+        }
+        if let Some(interface_index) = observed.interface_index {
+            config = config.with_interface_index(interface_index);
+        }
+        config
     }
 
     fn ipv6_address() -> NewInterfaceAddress {
@@ -1184,14 +1205,14 @@ mod tests {
         type Route = Route;
 
         fn routes(&self) -> Result<Vec<Self::Route>> {
-            Ok(vec![route()])
+            Ok(vec![observed_route()])
         }
     }
 
     impl RouteMutator for TestBackend {
-        type Route = Route;
+        type RouteConfig = RouteConfig;
 
-        fn add_route(&self, _route: Self::Route) -> Result<()> {
+        fn add_route(&self, _route: Self::RouteConfig) -> Result<()> {
             if self.fail_mutations {
                 Err(Error::InvalidState)
             } else {
@@ -1199,7 +1220,7 @@ mod tests {
             }
         }
 
-        fn remove_route(&self, _route: Self::Route) -> Result<()> {
+        fn remove_route(&self, _route: Self::RouteConfig) -> Result<()> {
             if self.fail_mutations {
                 Err(Error::InvalidState)
             } else {
@@ -1441,7 +1462,7 @@ mod tests {
         let address = NewInterfaceAddress::new(InterfaceId::new(1), network());
 
         assert_eq!(lattice.routes().expect("routes").len(), 1);
-        lattice.add_route(route.clone()).expect("add route");
+        lattice.add_route(route).expect("add route");
         lattice.remove_route(route).expect("remove route");
         assert_eq!(lattice.interfaces().expect("interfaces").len(), 1);
         assert_eq!(lattice.dns_config().expect("dns").nameservers.len(), 0);
@@ -1792,7 +1813,7 @@ mod tests {
         let observed_address = InterfaceAddress::new(InterfaceAddressId::new(1), 1, network());
 
         assert!(matches!(
-            lattice.snapshot_for_mutation(&Mutation::AddRoute(route.clone())),
+            lattice.snapshot_for_mutation(&Mutation::AddRoute(route)),
             Ok(MutationSnapshot::Route(Some(_)))
         ));
         assert!(matches!(
@@ -2138,7 +2159,7 @@ mod tests {
     #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
     struct RouteRestore<'a, B: LatticeBackend> {
         lattice: &'a Lattice<B>,
-        route: Option<Route>,
+        route: Option<RouteConfig>,
     }
 
     #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
@@ -2645,16 +2666,16 @@ mod tests {
             Ipv4Address::new(203, 0, 113, 0),
             Ipv4PrefixLength::new(24).expect("valid prefix"),
         ));
-        let route = Route::new(RouteId::new(0), destination).with_interface_index(interface.index);
+        let route = RouteConfig::new(destination).with_interface_index(interface.index);
 
-        let add_plan = MutationPlan::from_operations([Mutation::AddRoute(route.clone())]);
+        let add_plan = MutationPlan::from_operations([Mutation::AddRoute(route)]);
         let mut snapshot = |_, operation: &Mutation| lattice.snapshot_for_mutation(operation);
         let mut options = ExecutionOptions::default().snapshot(&mut snapshot);
         let add_report = lattice.execute_plan(&add_plan, &mut options);
         assert!(add_report.is_success(), "route add report: {add_report:?}");
         let mut restore = RouteRestore {
             lattice: &lattice,
-            route: Some(route.clone()),
+            route: Some(route),
         };
 
         let observed_route = lattice
@@ -2666,7 +2687,9 @@ mod tests {
                     && candidate.interface_index == route.interface_index
             })
             .expect("added route was not observed");
-        let remove_plan = MutationPlan::from_operations([Mutation::RemoveRoute(observed_route)]);
+        let remove_plan = MutationPlan::from_operations([Mutation::RemoveRoute(to_route_config(
+            &observed_route,
+        ))]);
         let mut options = ExecutionOptions::default();
         let remove_report = lattice.execute_plan(&remove_plan, &mut options);
         assert!(
@@ -2707,9 +2730,9 @@ mod tests {
             Ipv6Address::new([0x2001, 0xdb8, 0, 0, 0, 0, 0, 0]),
             Ipv6PrefixLength::new(32).expect("valid IPv6 prefix"),
         ));
-        let route = Route::new(RouteId::new(0), destination).with_interface_index(interface.index);
+        let route = RouteConfig::new(destination).with_interface_index(interface.index);
 
-        let add_plan = MutationPlan::from_operations([Mutation::AddRoute(route.clone())]);
+        let add_plan = MutationPlan::from_operations([Mutation::AddRoute(route)]);
         let mut snapshot = |_, operation: &Mutation| lattice.snapshot_for_mutation(operation);
         let mut options = ExecutionOptions::default().snapshot(&mut snapshot);
         let add_report = lattice.execute_plan(&add_plan, &mut options);
@@ -2719,7 +2742,7 @@ mod tests {
         );
         let mut restore = RouteRestore {
             lattice: &lattice,
-            route: Some(route.clone()),
+            route: Some(route),
         };
 
         let observed_route = lattice
@@ -2731,7 +2754,9 @@ mod tests {
                     && candidate.interface_index == route.interface_index
             })
             .expect("added ipv6 route was not observed");
-        let remove_plan = MutationPlan::from_operations([Mutation::RemoveRoute(observed_route)]);
+        let remove_plan = MutationPlan::from_operations([Mutation::RemoveRoute(to_route_config(
+            &observed_route,
+        ))]);
         let mut options = ExecutionOptions::default();
         let remove_report = lattice.execute_plan(&remove_plan, &mut options);
         assert!(
@@ -2861,24 +2886,21 @@ mod tests {
             Ipv4Address::new(198, 51, 100, 0),
             Ipv4PrefixLength::new(24).expect("valid prefix"),
         ));
-        let route = Route::new(RouteId::new(0), destination).with_interface_index(interface.index);
-        let failed_route = Route::new(
-            RouteId::new(0),
-            Network::from(Ipv4Network::new(
-                Ipv4Address::new(198, 51, 101, 0),
-                Ipv4PrefixLength::new(24).expect("valid prefix"),
-            )),
-        )
+        let route = RouteConfig::new(destination).with_interface_index(interface.index);
+        let failed_route = RouteConfig::new(Network::from(Ipv4Network::new(
+            Ipv4Address::new(198, 51, 101, 0),
+            Ipv4PrefixLength::new(24).expect("valid prefix"),
+        )))
         .with_interface_index(u32::MAX);
         let plan = MutationPlan::from_operations([
-            Mutation::AddRoute(route.clone()),
+            Mutation::AddRoute(route),
             Mutation::AddRoute(failed_route),
         ]);
 
         let mut snapshot = |_, operation: &Mutation| lattice.snapshot_for_mutation(operation);
         let mut compensate = |_, operation: &Mutation, _: Option<&MutationSnapshot>| match operation
         {
-            Mutation::AddRoute(route) => lattice.remove_route(route.clone()),
+            Mutation::AddRoute(route) => lattice.remove_route(*route),
             _ => Ok(()),
         };
         let mut options = ExecutionOptions::default()
@@ -2923,24 +2945,21 @@ mod tests {
             Ipv6Address::new([0x2001, 0xdb8, 4, 0, 0, 0, 0, 0]),
             Ipv6PrefixLength::new(64).expect("valid IPv6 prefix"),
         ));
-        let route = Route::new(RouteId::new(0), destination).with_interface_index(interface.index);
-        let failed_route = Route::new(
-            RouteId::new(0),
-            Network::from(Ipv6Network::new(
-                Ipv6Address::new([0x2001, 0xdb8, 5, 0, 0, 0, 0, 0]),
-                Ipv6PrefixLength::new(64).expect("valid IPv6 prefix"),
-            )),
-        )
+        let route = RouteConfig::new(destination).with_interface_index(interface.index);
+        let failed_route = RouteConfig::new(Network::from(Ipv6Network::new(
+            Ipv6Address::new([0x2001, 0xdb8, 5, 0, 0, 0, 0, 0]),
+            Ipv6PrefixLength::new(64).expect("valid IPv6 prefix"),
+        )))
         .with_interface_index(u32::MAX);
         let plan = MutationPlan::from_operations([
-            Mutation::AddRoute(route.clone()),
+            Mutation::AddRoute(route),
             Mutation::AddRoute(failed_route),
         ]);
 
         let mut snapshot = |_, operation: &Mutation| lattice.snapshot_for_mutation(operation);
         let mut compensate = |_, operation: &Mutation, _: Option<&MutationSnapshot>| match operation
         {
-            Mutation::AddRoute(route) => lattice.remove_route(route.clone()),
+            Mutation::AddRoute(route) => lattice.remove_route(*route),
             _ => Ok(()),
         };
         let mut options = ExecutionOptions::default()
@@ -3123,7 +3142,7 @@ mod tests {
             Ipv6Address::new([0x2001, 0xdb8, 9, 0, 0, 0, 0, 0]),
             Ipv6PrefixLength::new(64).expect("valid IPv6 prefix"),
         ));
-        let route = Route::new(RouteId::new(0), destination).with_interface_index(interface.index);
+        let route = RouteConfig::new(destination).with_interface_index(interface.index);
 
         // `Lattice::watch()` is deliberately all-domain and requires the
         // aggregate `Capability::MONITORING` (including neighbor
@@ -3140,8 +3159,8 @@ mod tests {
             .expect("failed to subscribe to async events");
 
         // Recover from an interrupted prior run before attempting the add.
-        let _ = lattice.remove_route(route.clone());
-        let add_plan = MutationPlan::from_operations([Mutation::AddRoute(route.clone())]);
+        let _ = lattice.remove_route(route);
+        let add_plan = MutationPlan::from_operations([Mutation::AddRoute(route)]);
         let mut snapshot = |_, operation: &Mutation| lattice.snapshot_for_mutation(operation);
         let mut options = ExecutionOptions::default().snapshot(&mut snapshot);
         let add_report = lattice.execute_plan(&add_plan, &mut options);
@@ -3151,7 +3170,7 @@ mod tests {
         );
         let mut restore = RouteRestore {
             lattice: &lattice,
-            route: Some(route.clone()),
+            route: Some(route),
         };
 
         // Obtain the identity from the notification itself, matching the
@@ -3188,7 +3207,9 @@ mod tests {
                     && candidate.interface_index == route.interface_index
             })
             .expect("added ipv6 route was not observed before removal");
-        let remove_plan = MutationPlan::from_operations([Mutation::RemoveRoute(observed_route)]);
+        let remove_plan = MutationPlan::from_operations([Mutation::RemoveRoute(to_route_config(
+            &observed_route,
+        ))]);
         let mut remove_options = ExecutionOptions::default();
         let remove_report = lattice.execute_plan(&remove_plan, &mut remove_options);
         assert!(
@@ -3504,8 +3525,8 @@ mod tests {
         let lattice = lattice(Capability::ROUTE_MUTATION);
         let route = ipv6_route();
         let plan = MutationPlan::from_operations([
-            Mutation::AddRoute(route.clone()),
-            Mutation::RemoveRoute(route.clone()),
+            Mutation::AddRoute(route),
+            Mutation::RemoveRoute(route),
         ]);
         lattice
             .validate_plan(&plan)
@@ -3534,7 +3555,7 @@ mod tests {
             Some(MutationOutcome::NotAttempted)
         ));
         assert!(matches!(report.rollback(), RollbackStatus::Completed));
-        assert_eq!(snapshots, vec![(0, Mutation::AddRoute(route.clone()))]);
+        assert_eq!(snapshots, vec![(0, Mutation::AddRoute(route))]);
         assert_eq!(
             compensated,
             vec![(
