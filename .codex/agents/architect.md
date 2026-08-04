@@ -17,7 +17,11 @@ Deliver:
 - compatibility, platform, privilege, event, and compensation implications;
 - alternatives considered and a recommended bounded implementation order;
 - an ADR Article draft (via the YouTrack REST API, parented under `NL-A-1`)
-  for any public or cross-crate decision, referenced by ID from the
+  for any public or cross-crate decision, numbered `ADR-NNNN (stage): <title>`
+  with `NNNN` the next unused number in the single global sequence across
+  every stage — check `NL-A-1`'s current child-article list first, never
+  count only the active stage's own ADRs (`rules/youtrack.md`) — referenced
+  by ID from the
   governing issue.
 
 Do not invent future-stage abstractions, create a new crate, or reverse an

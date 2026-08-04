@@ -26,7 +26,10 @@ Deliver:
 - alternatives considered and a recommended bounded implementation order;
 - an ADR Article draft (`mcp__youtrack__create_article`, parented under
   `NL-A-1`) for any public or cross-crate decision, referenced by ID from the
-  governing issue.
+  governing issue. Number it `ADR-NNNN (stage): <title>` where `NNNN` is the
+  next unused number in the single global sequence across every stage —
+  check `NL-A-1`'s current child-article list first; never count only the
+  active stage's own ADRs (`@.claude/rules/youtrack.md`).
 
 Do not invent future-stage abstractions, create a new crate, or reverse an
 accepted ADR without explicit authority from the active Epic/Task. Post the
