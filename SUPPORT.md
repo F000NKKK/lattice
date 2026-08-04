@@ -10,32 +10,21 @@ Thank you for your interest in Net Lattice.
 
 ## Project Status
 
-Net Lattice has completed Stage 0.18 of its [architecture](ARCHITECTURE.md)'s
-Incremental Delivery Plan: whole-system `CurrentState` snapshot assembly
+Net Lattice provides cross-platform network inspection, route, interface,
+interface-address, DNS resolver, and static ARP/NDP neighbor mutation,
+interface administrative-state and MTU configuration, inspectable data-only
+mutation plans, side-effect-free preflight analysis, ordered transaction
+execution with runtime preflight, operation-boundary cancellation, typed
+prior-state snapshots, phase/timing reports and explicit compensation, bounded
+object/domain-filterable monitoring with optional native async event
+delivery, and whole-system `CurrentState` snapshot assembly
 (`net-lattice-model::CurrentState`, `net-lattice-platform::SnapshotProvider`,
 `Lattice::current_state()`) aggregating routes, interfaces, neighbors,
 interface addresses, and DNS configuration in one fail-fast call with no
-partial result, requiring no backend-crate change to adopt. It builds on
-Stage 0.15's route and interface-address mutation, DNS resolver
-inspection and mutation, interface and neighbor inspection, bounded
-object/domain-filterable monitoring, optional native async event delivery, and
-inspectable data-only mutation plans, side-effect-free `MutationPreflight`
-analysis, and typed execution-report and compensation-boundary contracts for
-the existing route, address, and DNS operations on Linux, Windows, and macOS.
-Stage 0.16 interface configuration is verified by privileged Linux, Windows,
-and macOS CI and is part of the published support surface. It remains a
-partial imperative patch rather than a declarative desired-state model. Stage
-0.17's IPv6 DNS parity, static ARP/NDP neighbor mutation (`NeighborMutator`,
-`Capability::NEIGHBOR_MUTATION`), and isolated destructive topology testing
-(route/address/neighbor CRUD, transaction compensation, filtered events, and
-async delivery) are verified on privileged Linux, Windows, and macOS CI and
-are part of the published support surface. `RouteProvider` was also split
-into a read-only `RouteProvider` and a new `RouteMutator`
-(`Capability::ROUTE_MUTATION`), matching the provider/mutator pattern used
-by every other domain.
-The Stage 0.15 executor provides ordered submission, runtime preflight,
-operation-boundary cancellation, typed prior-state snapshot capture, phase and
-timing reports, and an explicit compensator callback. Usage support is limited
-to the published surface for now. See [README.md](README.md)'s Current Status;
-questions about usage,
-direction, and design are all welcome.
+partial result. `RouteProvider`/`RouteMutator` and every other domain follow
+the same read-only provider / mutator pattern, gated by explicit
+`Capability` flags. `InterfaceConfig` is a partial imperative patch, not a
+declarative desired-state model. This surface is verified by privileged
+Linux, Windows, and macOS CI and is part of the published support surface.
+See [README.md](README.md)'s Current Status for the full capability matrix;
+questions about usage, direction, and design are all welcome.

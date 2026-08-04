@@ -4,31 +4,38 @@
 
 🇺🇸 [English](ARCHITECTURE.md) | 🇷🇺 **Русский**
 
-Этот документ описывает планируемую структуру workspace Net Lattice и принципы
-дизайна, лежащие в её основе. Он отражает предполагаемое направление, а не
-текущее состояние: см. [CHANGELOG.md](CHANGELOG.md) и [README.md](README.md)
-для того, что реально существует в репозитории на данный момент. На момент
-написания реализация этапа 0.16 плана поэтапной поставки ниже завершена и
-проверена privileged CI evidence:
-`net-lattice-core`,
-`net-lattice-ip`, модули `route`, `interface`, `dns`, `neighbor`, `ifaddr` и `mutation` в `net-lattice-model`,
-`RouteProvider`, `InterfaceProvider`, `InterfaceMutator`, `DnsProvider`, `DnsMutator`, `NeighborProvider`, `AddressProvider`, `AddressMutator`, `CapabilityProvider`, синхронный `EventProvider`, feature-gated `TokioEventProvider` и object/domain selectors `EventFilter` в `net-lattice-platform`,
-поддержка маршрутов, адресов интерфейсов, DNS, соседей (ARP/NDP), нативного изменения маршрутов/адресов/DNS, inspectable mutation plans, упорядоченный executor транзакций с runtime-preflight, cancellation на границах операций, типизированными snapshots, явной compensation и фазовыми отчётами. `InterfaceConfig` и `DesiredAdminState` описывают intent интерфейса отдельно от наблюдаемого `Interface`; `InterfaceMutator` применяет capability-gated патчи administrative state и MTU с read-after-write наблюдением во всех встроенных backend'ах. Нативный мониторинг событий реализован в `net-lattice-backend-linux`,
-`net-lattice-backend-windows`, `net-lattice-backend-darwin`, crate потока
-событий `net-lattice-async` и feature-gated async-фасад. Capabilities
-мониторинга зависят от домена: aggregate-бит `MONITORING` означает native-путь
-доставки для каждого текущего домена, а filtered watch требует выбранный бит
-route/interface/neighbor/address. В Windows нет native callback изменений
-соседей, поэтому neighbor и all-domain subscriptions отклоняются. Это описание
-было верным по состоянию на Stage 0.16; с тех пор вышли Stage 0.17 (изменение
-соседей, разделение `RouteProvider`/`RouteMutator`, паритет IPv6 для DNS,
-изолированная деструктивная topology-приёмка) и Stage 0.18 (снапшоты
-`CurrentState` для всей системы, `SnapshotProvider`) — оба тоже проверены и
-завершены; актуальный список этапов с отметками см. в таблице плана поэтапной
-поставки ниже, а подробности по каждому этапу — в
-[CHANGELOG.md](CHANGELOG.md)/[README.ru.md](README.ru.md). Всё, что описано
-дальше Stage 0.18 в этой таблице, по-прежнему только цель, а не текущее
-состояние.
+Этот документ описывает структуру workspace Net Lattice и принципы дизайна,
+лежащие в её основе. Более поздние строки плана поэтапной поставки ниже
+описывают ещё не реализованную, планируемую работу; см.
+[CHANGELOG.md](CHANGELOG.md) и [README.ru.md](README.ru.md) для датированной
+записи о том, что уже вышло.
+
+Net Lattice предоставляет, и privileged CI на Linux/Windows/macOS проверяет:
+`net-lattice-core` и `net-lattice-ip`; модули `route`, `interface`, `dns`,
+`neighbor`, `ifaddr` и `mutation` в `net-lattice-model`;
+`RouteProvider`/`RouteMutator`, `InterfaceProvider`, `InterfaceMutator`,
+`DnsProvider`, `DnsMutator`, `NeighborProvider`, `NeighborMutator`,
+`AddressProvider`, `AddressMutator`, `CapabilityProvider`, синхронный
+`EventProvider`, feature-gated `TokioEventProvider` и object/domain selectors
+`EventFilter` в `net-lattice-platform`; просмотр и нативное изменение
+маршрутов, адресов интерфейсов, DNS и соседей (ARP/NDP); inspectable mutation
+plans; упорядоченный executor транзакций с runtime-preflight, cancellation на
+границах операций, типизированными snapshots, явной compensation и фазовыми
+отчётами; а также снапшоты `CurrentState` для всей системы через
+`net-lattice-platform::SnapshotProvider`. `InterfaceConfig` и
+`DesiredAdminState` описывают intent интерфейса отдельно от наблюдаемого
+`Interface`; `InterfaceMutator` применяет capability-gated патчи
+administrative state и MTU с read-after-write наблюдением во всех встроенных
+backend'ах. Нативный мониторинг событий реализован в
+`net-lattice-backend-linux`, `net-lattice-backend-windows`,
+`net-lattice-backend-darwin`, crate потока событий `net-lattice-async` и
+feature-gated async-фасад. Capabilities мониторинга зависят от домена:
+aggregate-бит `MONITORING` означает native-путь доставки для каждого текущего
+домена, а filtered watch требует выбранный бит route/interface/neighbor/address.
+В Windows нет native callback изменений соседей, поэтому neighbor и
+all-domain subscriptions отклоняются. Полный список этапов см. в таблице
+плана поэтапной поставки ниже, а подробности по каждому релизу — в
+[CHANGELOG.md](CHANGELOG.md)/[README.ru.md](README.ru.md).
 
 ## Руководящий принцип
 
@@ -536,8 +543,8 @@ runtime-агностичный: `watch() -> Result<EventReceiver<Event>>`.
 `recv`, `try_recv`, `recv_timeout` и реализует `Iterator`. Это сохраняет
 возможность использования без async runtime.
 
-Синхронный контракт остаётся доступен без async-зависимости. Этап 0.11 добавил
-опциональную feature `async` в `net-lattice`: она реэкспортирует единый
+Синхронный контракт остаётся доступен без async-зависимости. Этап 0.11
+добавляет опциональную feature `async` в `net-lattice`: она реэкспортирует единый
 runtime-agnostic `net-lattice-async::EventStream` и добавляет
 `Lattice::watch_async(filter)`. `EventStream` реализует `futures::Stream`,
 поэтому приложения сохраняют свободу выбора executor. Это не zero-cost wrapper
@@ -589,7 +596,7 @@ provider-traits, а не другой контракт backend'а. Дорабо�
   (add/remove/modify), которая разрешила бы `Diff`, которую можно
   просмотреть до выполнения и откатить, если шаг провалится.
 
-По состоянию на этап 0.18 `CurrentState` (форма данных, в `net-lattice-model`)
+`CurrentState` (форма данных, в `net-lattice-model`)
 и `SnapshotProvider` (контракт сборки, в `net-lattice-platform`) уже
 существуют, и `Lattice<B>::current_state()` производит `CurrentState` для
 любого подключённого backend'а без единой строчки кода в крейте backend'а.
@@ -711,28 +718,31 @@ Stages 0.15–0.20 должны строить transactions и declarative apply
 ## План поэтапной поставки
 
 Полная модель выше — это цель, а не отправная точка. Крейты и модули
-вводятся только тогда, когда под них есть реальная работа по реализации:
+вводятся только тогда, когда под них есть реальная работа по реализации.
+
+Строки до 0.18 включительно реализованы и доступны сегодня; строки начиная с
+0.19 описывают планируемую, ещё не реализованную работу:
 
 | Этап | Объём |
 |-------|-------|
-| 0.1 ✅ | `net-lattice-core`, `net-lattice-ip`, `net-lattice-model` (только модуль `route`), `net-lattice-platform` (`RouteProvider`), `net-lattice-backend-linux` (маршруты через Netlink), `net-lattice` |
-| 0.2 ✅ | `net-lattice-backend-windows` (`RouteProvider`) |
-| 0.3 ✅ | `net-lattice-backend-darwin` (`RouteProvider`) |
-| 0.4 ✅ | модуль `interface` + `InterfaceProvider` на всех backend'ах |
-| 0.5 ✅ | модуль `dns` + `DnsProvider` на всех backend'ах |
-| 0.6 ✅ | модуль `neighbor` + `NeighborProvider` (ARP/NDP) на всех backend'ах |
-| 0.7 ✅ | модуль `ifaddr` + `AddressProvider` (IP-адреса интерфейсов) на всех backend'ах |
-| 0.8 ✅ | модуль `event` + синхронные `EventProvider`/`EventReceiver`; мониторинг через Netlink multicast (Linux), PF_ROUTE (macOS) и уведомления IP Helper (Windows). |
-| 0.9 ✅ | `NewInterfaceAddress` + `AddressMutator`; нативное назначение/удаление IPv4/IPv6-адресов через Netlink (Linux), IP Helper (Windows) и address ioctl (macOS). |
-| 0.10 ✅ | Семантика событий: bounded delivery, overflow/resynchronization, filtering, cancellation и распространение ошибок фонового watcher'а. |
-| 0.11 ✅ | Опциональная feature `async` в `net-lattice`; `net-lattice-async` предоставляет один runtime-agnostic `EventStream`, а Linux (Tokio Netlink), Windows (callbacks IP Helper) и macOS (reader PF_ROUTE) доставляют события прямо в bounded Tokio transports. |
-| 0.12 ✅ | Стабилизация API watcher'ов: composable object/domain filters до помещения в очередь, validation capabilities мониторинга по доменам и одинаковая sync/async семантика filter. `MONITORING` — aggregate всех доменов; filter с недоступным доменом отклоняется до native-регистрации. |
-| 0.13 ✅ | Изменение DNS с моделью intent/observed state: `NewDnsConfig` применяется через поддерживаемые системные механизмы, а результирующий `DnsConfig` повторно читается на Linux, Windows и macOS. |
-| 0.14 ✅ | Модель mutation-операций: inspectable значения `Mutation` и упорядоченные `MutationPlan` для существующих изменений routes/addresses/DNS; явные классификации preconditions, idempotency, privileges, confirmation, partial application и reversibility. Добавлен side-effect-free анализ `MutationPreflight`, а также типизированные `MutationOutcome`, `MutationPlanReport` и `RollbackStatus` для отчёта исполнителя; сами планы не имеют side effects исполнения или rollback. |
-| 0.15 ✅ | Базовое исполнение транзакций: runtime capability и object-precondition preflight через `Lattice::validate_plan`, provider-backed capture `MutationSnapshot` через `snapshot_for_mutation`, отправка операций по порядку через `Lattice::execute_plan`, настроенный единым `ExecutionOptions`, результаты операций с фазами и длительностями, остановка после первой ошибки, cancellation на границе операции, capture prior state и явно переданный compensator в обратном порядке. Ignored native facade route round-trip и compensation scenarios запускаются в каждом privileged CI job; DNS partial-application integration намеренно остаётся non-destructive. |
-| 0.16 ✅ | Конфигурация интерфейсов: отдельный desired `InterfaceConfig`, независимые capability gates для admin state/MTU, read-after-write mutation на Linux/Windows/macOS, typed snapshots executor'а, native mappings событий интерфейса и privileged проверки submission/readback/restoration. Destructive end-to-end event proof остаётся follow-up для isolated topology. |
-| 0.17 ✅ | Изменение соседей, паритет IPv6 для DNS и изолированная кроссплатформенная topology-приёмка для деструктивных операций маршрутов/адресов/соседей и facade-потоков. Детальное планирование будет выполнено до реализации. |
-| 0.18 ✅ | Основа snapshot: `CurrentState` последовательно собирается из реализованных provider'ов, с явно определёнными scope, consistency и partial-read семантиками snapshot. |
+| 0.1 | `net-lattice-core`, `net-lattice-ip`, `net-lattice-model` (только модуль `route`), `net-lattice-platform` (`RouteProvider`), `net-lattice-backend-linux` (маршруты через Netlink), `net-lattice` |
+| 0.2 | `net-lattice-backend-windows` (`RouteProvider`) |
+| 0.3 | `net-lattice-backend-darwin` (`RouteProvider`) |
+| 0.4 | модуль `interface` + `InterfaceProvider` на всех backend'ах |
+| 0.5 | модуль `dns` + `DnsProvider` на всех backend'ах |
+| 0.6 | модуль `neighbor` + `NeighborProvider` (ARP/NDP) на всех backend'ах |
+| 0.7 | модуль `ifaddr` + `AddressProvider` (IP-адреса интерфейсов) на всех backend'ах |
+| 0.8 | модуль `event` + синхронные `EventProvider`/`EventReceiver`; мониторинг через Netlink multicast (Linux), PF_ROUTE (macOS) и уведомления IP Helper (Windows). |
+| 0.9 | `NewInterfaceAddress` + `AddressMutator`; нативное назначение/удаление IPv4/IPv6-адресов через Netlink (Linux), IP Helper (Windows) и address ioctl (macOS). |
+| 0.10 | Семантика событий: bounded delivery, overflow/resynchronization, filtering, cancellation и распространение ошибок фонового watcher'а. |
+| 0.11 | Опциональная feature `async` в `net-lattice`; `net-lattice-async` предоставляет один runtime-agnostic `EventStream`, а Linux (Tokio Netlink), Windows (callbacks IP Helper) и macOS (reader PF_ROUTE) доставляют события прямо в bounded Tokio transports. |
+| 0.12 | Стабилизация API watcher'ов: composable object/domain filters до помещения в очередь, validation capabilities мониторинга по доменам и одинаковая sync/async семантика filter. `MONITORING` — aggregate всех доменов; filter с недоступным доменом отклоняется до native-регистрации. |
+| 0.13 | Изменение DNS с моделью intent/observed state: `NewDnsConfig` применяется через поддерживаемые системные механизмы, а результирующий `DnsConfig` повторно читается на Linux, Windows и macOS. |
+| 0.14 | Модель mutation-операций: inspectable значения `Mutation` и упорядоченные `MutationPlan` для изменений routes/addresses/DNS; явные классификации preconditions, idempotency, privileges, confirmation, partial application и reversibility. Включает side-effect-free анализ `MutationPreflight`, а также типизированные `MutationOutcome`, `MutationPlanReport` и `RollbackStatus` для отчёта исполнителя; сами планы не имеют side effects исполнения или rollback. |
+| 0.15 | Базовое исполнение транзакций: runtime capability и object-precondition preflight через `Lattice::validate_plan`, provider-backed capture `MutationSnapshot` через `snapshot_for_mutation`, отправка операций по порядку через `Lattice::execute_plan`, настроенный единым `ExecutionOptions`, результаты операций с фазами и длительностями, остановка после первой ошибки, cancellation на границе операции, capture prior state и явно переданный compensator в обратном порядке. Ignored native facade route round-trip и compensation scenarios запускаются в каждом privileged CI job; DNS partial-application integration намеренно остаётся non-destructive. |
+| 0.16 | Конфигурация интерфейсов: отдельный desired `InterfaceConfig`, независимые capability gates для admin state/MTU, read-after-write mutation на Linux/Windows/macOS, typed snapshots executor'а, native mappings событий интерфейса и privileged проверки submission/readback/restoration. Destructive end-to-end event proof остаётся follow-up для isolated topology. |
+| 0.17 | Изменение соседей, паритет IPv6 для DNS и изолированная кроссплатформенная topology-приёмка для деструктивных операций маршрутов/адресов/соседей и facade-потоков. |
+| 0.18 | Основа snapshot: `CurrentState` последовательно собирается из реализованных provider'ов, с явно определёнными scope, consistency и partial-read семантиками snapshot. |
 | 0.19 | Декларативная модель и diff: конфигурационные типы `DesiredState` остаются отдельными от наблюдаемых типов; создаётся inspectable `Diff` без его применения. |
 | 0.20 | Декларативное применение: `Diff` компилируется в `ApplyPlan`, исполняется через transaction engine и сообщает о convergence, non-convergence и результатах compensation. |
 | 0.21 | Pre-1.0 hardening: заморозка core model, provider extension contracts, правил identity, значений capability, гарантий событий и матрицы поддержки платформ; завершение cross-platform privileged regression coverage и migration guidance. |

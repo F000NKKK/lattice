@@ -22,8 +22,8 @@
 > а также статических записей ARP/NDP, inspectable планы mutation-операций и
 > упорядоченное исполнение транзакций с cancellation, snapshots, compensation
 > и фазовыми отчётами, а также согласованными снапшотами `CurrentState` для
-> всей системы через нативные API Linux, Windows и macOS. Stage 0.18
-> завершён; см. «Текущий статус» ниже.
+> всей системы через нативные API Linux, Windows и macOS. Полный список
+> возможностей — в разделе «Текущий статус» ниже.
 
 ## Обзор
 
@@ -118,18 +118,19 @@ Net Lattice призвана закрыть этот пробел, предос�
 
 ## Текущий статус
 
-Stage 0.18 добавляет снапшоты `CurrentState` для всей системы: `CurrentState`
+Net Lattice собирает снапшоты `CurrentState` для всей системы: `CurrentState`
 в `net-lattice-model` объединяет маршруты, интерфейсы, соседей, адреса
 интерфейсов и конфигурацию DNS; `net-lattice-platform::SnapshotProvider`
 описывает контракт сборки; `Lattice::current_state()` реализует его,
-завершаясь с первой же ошибкой чтения без частичного результата. Ни один
-backend-крейт не потребовал изменений — реализация написана один раз для
-`Lattice<B>`. Полный список изменений, включая доменные reexport-модули
-`net_lattice::model`/`mutation`/`monitoring` и удаление reexport-а доменных
-типов из корня крейта, см. в записи `0.18.0` [CHANGELOG.md](CHANGELOG.md).
+завершаясь с первой же ошибкой чтения без частичного результата. Ни одному
+backend-крейту не требуется изменение — реализация написана один раз для
+`Lattice<B>`. Полный, датированный по версиям список изменений, включая
+доменные reexport-модули `net_lattice::model`/`mutation`/`monitoring` (корень
+крейта больше не реэкспортирует доменные типы напрямую), см. в
+[CHANGELOG.md](CHANGELOG.md).
 
-Реализация этапа 0.17 плана поэтапной поставки из
-[архитектуры](ARCHITECTURE.ru.md) проверена privileged CI-задачами:
+Следующая поверхность API, описанная в плане поэтапной поставки
+[архитектуры](ARCHITECTURE.ru.md), проверена privileged CI-задачами:
 
 - `net-lattice-core`, `net-lattice-ip`
 - модули `route`, `mac`, `interface`, `dns`, `neighbor`, `ifaddr`, `event` и `mutation` в `net-lattice-model`; `NewInterfaceAddress`, `NewDnsConfig` и `StaticNeighbor` выражают намерение изменения отдельно от наблюдаемого состояния
@@ -221,27 +222,31 @@ if lattice.supports(Capability::ROUTE_MONITORING) {
 
 ## Дорожная карта
 
-1. **Bootstrap** *(завершён)* — инфраструктура репозитория, лицензирование, файлы для сообщества и настройка инструментов.
-2. **Проектирование** *(завершено)* — структура крейтов, базовые абстракции и стратегия абстрагирования платформ реализованы на этапе 0.1. См. [ARCHITECTURE.ru.md](ARCHITECTURE.ru.md).
-3. **Фундамент** *(завершено)* — реализованы базовые типы IP/маршрутов/интерфейсов и все три платформенных бэкенда.
-4. **Паритет платформ** *(завершён)* — реализованы Linux/Windows/macOS backend'ы для изменения маршрутов и адресов, интерфейсов, чтения DNS, чтения соседей, чтения адресов и мониторинга.
-5. **Stage 0.9: Изменение адресов** *(завершён)* — кроссплатформенное назначение и удаление IPv4/IPv6-адресов интерфейсов.
-6. **Stage 0.10: Семантика событий** *(завершён)* — bounded delivery, сигнализация overflow и resynchronization, filtering, cancellation и распространение ошибок.
-7. **Stage 0.11: Async events** *(завершён)* — опциональная feature фасада `async`, единый runtime-agnostic `EventStream` и нативная Tokio-backed доставка в каждом платформенном backend.
-8. **Stage 0.12: Стабилизация API watcher'ов** *(завершён)* — composable filters по объектам/доменам, filtering до помещения в очередь, validation capability мониторинга и одинаковая семантика filter для sync/async watcher'ов с сохранением опубликованного API 0.11.
-9. **Stage 0.13: Изменение DNS** *(завершён)* — замена конфигурации резолвера через поддерживаемые системные механизмы, закрытая capability, на Linux, Windows и macOS.
-10. **Stage 0.14: Модель mutation-операций** *(завершён)* — inspectable значения `Mutation` и планы `MutationPlan` только из данных для существующих изменений routes, addresses и DNS; явно определены preconditions, idempotency, privileges, confirmation, partial application и reversibility.
-11. **Stage 0.15: Исполнение транзакций** *(завершён)* — упорядоченные планы, результаты каждой операции, диагностика фаз и длительностей, границы cancellation и ошибок, а также compensation только для документированно reversible операций.
-12. **Stage 0.16: Конфигурация интерфейсов** *(завершён)* — отдельная desired-конфигурация интерфейса, capability-gated изменение admin state и MTU, read-after-write результаты и platform-parity tests.
-13. **Stage 0.17: Изменение соседей, паритет IPv6 для DNS и изолированная topology-приёмка** *(завершён)* — intent/observed управление статическими ARP/NDP (`NeighborMutator`, ADR-0001), разделение `RouteProvider`/`RouteMutator` (ADR-0002), паритет IPv6 для DNS и безопасное кроссплатформенное тестирование деструктивных операций, проверено на privileged CI Linux, Windows и macOS.
-14. **Stage 0.18: Snapshots** *(завершён)* — последовательно собранный `CurrentState` с явно определёнными scope, consistency и partial-read семантиками.
+Текущий набор возможностей описан выше, в разделах «Возможности» и «Текущий
+статус»; список ниже — это план дальнейшей поставки, последовательный обзор,
+а не журнал статусов:
+
+1. **Bootstrap** — инфраструктура репозитория, лицензирование, файлы для сообщества и настройка инструментов.
+2. **Проектирование** — структура крейтов, базовые абстракции и стратегия абстрагирования платформ. См. [ARCHITECTURE.ru.md](ARCHITECTURE.ru.md).
+3. **Фундамент** — базовые типы IP/маршрутов/интерфейсов и все три платформенных бэкенда.
+4. **Паритет платформ** — Linux/Windows/macOS backend'ы для изменения маршрутов и адресов, интерфейсов, чтения DNS, чтения соседей, чтения адресов и мониторинга.
+5. **Stage 0.9: Изменение адресов** — кроссплатформенное назначение и удаление IPv4/IPv6-адресов интерфейсов.
+6. **Stage 0.10: Семантика событий** — bounded delivery, сигнализация overflow и resynchronization, filtering, cancellation и распространение ошибок.
+7. **Stage 0.11: Async events** — опциональная feature фасада `async`, единый runtime-agnostic `EventStream` и нативная Tokio-backed доставка в каждом платформенном backend.
+8. **Stage 0.12: Стабилизация API watcher'ов** — composable filters по объектам/доменам, filtering до помещения в очередь, validation capability мониторинга и одинаковая семантика filter для sync/async watcher'ов.
+9. **Stage 0.13: Изменение DNS** — замена конфигурации резолвера через поддерживаемые системные механизмы, закрытая capability, на Linux, Windows и macOS.
+10. **Stage 0.14: Модель mutation-операций** — inspectable значения `Mutation` и планы `MutationPlan` только из данных для изменений routes, addresses и DNS; явно определены preconditions, idempotency, privileges, confirmation, partial application и reversibility.
+11. **Stage 0.15: Исполнение транзакций** — упорядоченные планы, результаты каждой операции, диагностика фаз и длительностей, границы cancellation и ошибок, а также compensation для документированно reversible операций.
+12. **Stage 0.16: Конфигурация интерфейсов** — отдельная desired-конфигурация интерфейса, capability-gated изменение admin state и MTU, read-after-write результаты и platform-parity tests.
+13. **Stage 0.17: Изменение соседей, паритет IPv6 для DNS и изолированная topology-приёмка** — intent/observed управление статическими ARP/NDP (`NeighborMutator`, ADR-0001), разделение `RouteProvider`/`RouteMutator` (ADR-0002), паритет IPv6 для DNS и безопасное кроссплатформенное тестирование деструктивных операций, проверено на privileged CI Linux, Windows и macOS.
+14. **Stage 0.18: Snapshots** — последовательно собранный `CurrentState` с явно определёнными scope, consistency и partial-read семантиками.
 15. **Stage 0.19: Декларативный diff** — отдельные конфигурационные типы `DesiredState` и inspectable `Diff` без mutation.
 16. **Stage 0.20: Декларативное применение** — компиляция `Diff` в `ApplyPlan` и его исполнение через transaction engine.
 17. **Stage 0.21: Pre-1.0 hardening** — заморозка публичных контрактов, правил identity и capability, гарантий событий, матрицы платформ и privileged regression coverage.
 18. **Stage 0.22+: Домены Capability** — VLAN, VRF, namespaces, firewall и tunnels, каждый с полным контрактом read/intent/mutation/event/capability/tests. Они не являются prerequisite для 1.0.
-19. **1.0** — стабильная основа для реализованных контрактов inspection, monitoring, imperative mutation, transactions и declarative apply. Она закрывается compatibility audit из 0.21, а не каждым будущим сетевым доменом.
+19. **1.0** — стабильная основа для контрактов inspection, monitoring, imperative mutation, transactions и declarative apply. Она закрывается compatibility audit из 0.21, а не каждым будущим сетевым доменом.
 
-Этапы — это границы поставки, а не обещание одного релиза на каждый заголовок: platform validation может разделить этап, а focused hardening-релизы могут появляться между этапами.
+Этапы — это границы поставки, а не обещание одного релиза на каждый заголовок: platform validation может разделить этап, а focused hardening-релизы могут появляться между этапами. О том, что реально вышло в каждом датированном релизе, см. [CHANGELOG.md](CHANGELOG.md).
 
 ## Участие в проекте
 

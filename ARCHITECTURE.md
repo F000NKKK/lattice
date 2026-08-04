@@ -4,39 +4,36 @@
 
 🇺🇸 **English** | 🇷🇺 [Русский](ARCHITECTURE.ru.md)
 
-This document describes the planned workspace structure for Net Lattice and the
-design principles behind it. It reflects intended direction, not current
-state: see [CHANGELOG.md](CHANGELOG.md) and [README.md](README.md) for what
-actually exists in the repository today. As of this writing, Stage 0.16
-implementation is complete and verified by privileged CI: `net-lattice-core`,
-`net-lattice-ip`, `net-lattice-model`'s `route`, `interface`, `dns`,
-`neighbor`, `ifaddr`, and `mutation` modules, `net-lattice-platform`'s `RouteProvider`,
-`InterfaceProvider`, `InterfaceMutator`, `DnsProvider`, `DnsMutator`, `NeighborProvider`, and
-`AddressProvider`, `AddressMutator`, `CapabilityProvider`, synchronous `EventProvider`,
-feature-gated `TokioEventProvider`, and object/domain `EventFilter` selectors,
-route/interface-address/DNS/neighbor support, native route/address/DNS
-mutation, inspectable mutation plans, the ordered transaction executor with
-runtime preflight, cancellation boundaries, typed snapshots, explicit
-compensation, and phase-aware reports. `InterfaceConfig` and
-`DesiredAdminState` describe interface intent separately from observed
-`Interface`; `InterfaceMutator` applies capability-gated administrative-state
-and MTU patches with read-after-write observation on all built-in backends.
-Native event monitoring is implemented in
-`net-lattice-backend-linux`, `net-lattice-backend-windows`, and
+This document describes the workspace structure for Net Lattice and the
+design principles behind it. Later sections of the Incremental Delivery Plan
+below describe planned, not-yet-built work; see [CHANGELOG.md](CHANGELOG.md)
+and [README.md](README.md) for the dated record of what has shipped.
+
+Net Lattice provides, and privileged Linux/Windows/macOS CI verifies:
+`net-lattice-core` and `net-lattice-ip`; `net-lattice-model`'s `route`,
+`interface`, `dns`, `neighbor`, `ifaddr`, and `mutation` modules;
+`net-lattice-platform`'s `RouteProvider`/`RouteMutator`, `InterfaceProvider`,
+`InterfaceMutator`, `DnsProvider`, `DnsMutator`, `NeighborProvider`,
+`NeighborMutator`, `AddressProvider`, `AddressMutator`, `CapabilityProvider`,
+synchronous `EventProvider`, feature-gated `TokioEventProvider`, and
+object/domain `EventFilter` selectors; route/interface-address/DNS/neighbor
+inspection and native mutation; inspectable mutation plans; the ordered
+transaction executor with runtime preflight, cancellation boundaries, typed
+snapshots, explicit compensation, and phase-aware reports; and whole-system
+`CurrentState` snapshots through `net-lattice-platform::SnapshotProvider`.
+`InterfaceConfig` and `DesiredAdminState` describe interface intent
+separately from observed `Interface`; `InterfaceMutator` applies
+capability-gated administrative-state and MTU patches with read-after-write
+observation on all built-in backends. Native event monitoring is implemented
+in `net-lattice-backend-linux`, `net-lattice-backend-windows`, and
 `net-lattice-backend-darwin`, the `net-lattice-async` event stream crate, and
 the feature-gated async facade. Monitoring capabilities are domain-specific:
 the aggregate `MONITORING` bit means a native delivery path exists for every
 currently modeled domain, while filtered watches require their selected
 route/interface/neighbor/address bit. Windows has no native neighbor-change
-callback and therefore rejects neighbor and all-domain subscriptions. That
-description was accurate as of Stage 0.16; Stage 0.17 (neighbor mutation, the
-`RouteProvider`/`RouteMutator` split, IPv6 DNS parity, isolated destructive
-topology acceptance) and Stage 0.18 (`CurrentState` whole-system snapshots,
-`SnapshotProvider`) have since shipped and are also verified/complete — see
-the Incremental Delivery Plan table below for the current checkmarked stage
-list, and [CHANGELOG.md](CHANGELOG.md)/[README.md](README.md) for full
-per-stage detail. Everything past Stage 0.18 in that table is still a target,
-not current state.
+callback and therefore rejects neighbor and all-domain subscriptions. See the
+Incremental Delivery Plan table below for the full stage list and
+[CHANGELOG.md](CHANGELOG.md)/[README.md](README.md) for per-release detail.
 
 ## Guiding Principle
 
@@ -588,7 +585,7 @@ architecture reserves room for it as:
   that would resolve a `Diff`, which can be inspected before being executed
   and rolled back if a step fails.
 
-As of stage 0.18, `CurrentState` (the data shape, in `net-lattice-model`) and
+`CurrentState` (the data shape, in `net-lattice-model`) and
 `SnapshotProvider` (the assembly contract, in `net-lattice-platform`) exist,
 and `Lattice<B>::current_state()` produces a `CurrentState` for any connected
 backend with zero backend-crate code. The binding between `SnapshotProvider`'s
@@ -709,26 +706,29 @@ discipline once Lattice reaches 1.0.
 The full model above is a target, not a starting point. Crates and modules
 are introduced only when there is real implementation work for them:
 
+Rows through 0.18 are implemented and available today; rows from 0.19 onward
+describe planned, not-yet-built work.
+
 | Stage | Scope |
 |-------|-------|
-| 0.1 ✅ | `net-lattice-core`, `net-lattice-ip`, `net-lattice-model` (`route` module only), `net-lattice-platform` (`RouteProvider`), `net-lattice-backend-linux` (routes via Netlink), `net-lattice` |
-| 0.2 ✅ | `net-lattice-backend-windows` (`RouteProvider`) |
-| 0.3 ✅ | `net-lattice-backend-darwin` (`RouteProvider`) |
-| 0.4 ✅ | `interface` module + `InterfaceProvider` across all backends |
-| 0.5 ✅ | `dns` module + `DnsProvider` across all backends |
-| 0.6 ✅ | `neighbor` module + `NeighborProvider` (ARP/NDP) across all backends |
-| 0.7 ✅ | `ifaddr` module + `AddressProvider` (IP addresses on interfaces) across all backends |
-| 0.8 ✅ | `event` module + synchronous `EventProvider`/`EventReceiver`; monitoring via Netlink multicast (Linux), PF_ROUTE (macOS), and IP Helper notifications (Windows). |
-| 0.9 ✅ | `NewInterfaceAddress` + `AddressMutator`; native IPv4/IPv6 address assignment/removal via Netlink (Linux), IP Helper (Windows), and address ioctls (macOS). |
-| 0.10 ✅ | Event semantics: bounded delivery, overflow/resynchronization, filtering, cancellation, and background-error propagation. |
-| 0.11 ✅ | Optional `net-lattice` `async` feature; `net-lattice-async` exposes one runtime-agnostic `EventStream`, while Linux (Tokio Netlink), Windows (IP Helper callbacks), and macOS (PF_ROUTE reader) deliver directly into bounded Tokio transports. |
-| 0.12 ✅ | Watcher API stabilization: composable object/domain filters applied before enqueueing, domain-specific monitoring-capability validation, and consistent synchronous/async filter semantics. `MONITORING` is the all-domain aggregate; a filter requiring an unavailable domain fails before native registration. |
-| 0.13 ✅ | DNS mutation with an intent/observed-state model: `NewDnsConfig` is applied through supported system mechanisms and the resulting `DnsConfig` is re-read on Linux, Windows, and macOS. |
-| 0.14 ✅ | Mutation operation model: inspectable `Mutation` values and ordered `MutationPlan`s for existing route/address/DNS mutations; explicit preconditions, idempotency, privilege, confirmation, partial-application, and reversibility classifications. Adds side-effect-free `MutationPreflight` analysis plus typed `MutationOutcome`, `MutationPlanReport`, and `RollbackStatus` contracts for executor reporting, while plans themselves retain no execution or rollback side effects. |
-| 0.15 ✅ | Transaction execution baseline: runtime capability and object-precondition preflight via `Lattice::validate_plan`, provider-backed `MutationSnapshot` capture through `snapshot_for_mutation`, ordered submission through `Lattice::execute_plan` configured by `ExecutionOptions`, per-operation outcomes, phase/timing diagnostics, first-failure stopping, operation-boundary cancellation, caller-defined prior-state capture, and an explicitly supplied reverse-order compensator. Ignored native facade route round-trip and compensation scenarios run in each privileged CI job; DNS partial-application integration remains intentionally non-destructive. |
-| 0.16 ✅ | Interface configuration: separate desired `InterfaceConfig`, independent admin-state/MTU capability gates, read-after-write mutation on Linux/Windows/macOS, typed executor snapshots, existing native interface-change event mappings, and privileged submission/readback/restoration checks. Destructive end-to-end event proof remains isolated-topology follow-up. |
-| 0.17 ✅ | Neighbor mutation plus IPv6 DNS parity and isolated cross-platform topology acceptance for destructive route/address/neighbor and facade flows. Detailed planning will precede implementation. |
-| 0.18 ✅ | Snapshot foundation: `CurrentState` assembled consistently from the implemented providers, with snapshot scope, consistency, and partial-read semantics made explicit. |
+| 0.1 | `net-lattice-core`, `net-lattice-ip`, `net-lattice-model` (`route` module only), `net-lattice-platform` (`RouteProvider`), `net-lattice-backend-linux` (routes via Netlink), `net-lattice` |
+| 0.2 | `net-lattice-backend-windows` (`RouteProvider`) |
+| 0.3 | `net-lattice-backend-darwin` (`RouteProvider`) |
+| 0.4 | `interface` module + `InterfaceProvider` across all backends |
+| 0.5 | `dns` module + `DnsProvider` across all backends |
+| 0.6 | `neighbor` module + `NeighborProvider` (ARP/NDP) across all backends |
+| 0.7 | `ifaddr` module + `AddressProvider` (IP addresses on interfaces) across all backends |
+| 0.8 | `event` module + synchronous `EventProvider`/`EventReceiver`; monitoring via Netlink multicast (Linux), PF_ROUTE (macOS), and IP Helper notifications (Windows). |
+| 0.9 | `NewInterfaceAddress` + `AddressMutator`; native IPv4/IPv6 address assignment/removal via Netlink (Linux), IP Helper (Windows), and address ioctls (macOS). |
+| 0.10 | Event semantics: bounded delivery, overflow/resynchronization, filtering, cancellation, and background-error propagation. |
+| 0.11 | Optional `net-lattice` `async` feature; `net-lattice-async` exposes one runtime-agnostic `EventStream`, while Linux (Tokio Netlink), Windows (IP Helper callbacks), and macOS (PF_ROUTE reader) deliver directly into bounded Tokio transports. |
+| 0.12 | Watcher API stabilization: composable object/domain filters applied before enqueueing, domain-specific monitoring-capability validation, and consistent synchronous/async filter semantics. `MONITORING` is the all-domain aggregate; a filter requiring an unavailable domain fails before native registration. |
+| 0.13 | DNS mutation with an intent/observed-state model: `NewDnsConfig` is applied through supported system mechanisms and the resulting `DnsConfig` is re-read on Linux, Windows, and macOS. |
+| 0.14 | Mutation operation model: inspectable `Mutation` values and ordered `MutationPlan`s for route/address/DNS mutations; explicit preconditions, idempotency, privilege, confirmation, partial-application, and reversibility classifications. Includes side-effect-free `MutationPreflight` analysis plus typed `MutationOutcome`, `MutationPlanReport`, and `RollbackStatus` contracts for executor reporting; plans themselves retain no execution or rollback side effects. |
+| 0.15 | Transaction execution baseline: runtime capability and object-precondition preflight via `Lattice::validate_plan`, provider-backed `MutationSnapshot` capture through `snapshot_for_mutation`, ordered submission through `Lattice::execute_plan` configured by `ExecutionOptions`, per-operation outcomes, phase/timing diagnostics, first-failure stopping, operation-boundary cancellation, caller-defined prior-state capture, and an explicitly supplied reverse-order compensator. Ignored native facade route round-trip and compensation scenarios run in each privileged CI job; DNS partial-application integration remains intentionally non-destructive. |
+| 0.16 | Interface configuration: separate desired `InterfaceConfig`, independent admin-state/MTU capability gates, read-after-write mutation on Linux/Windows/macOS, typed executor snapshots, native interface-change event mappings, and privileged submission/readback/restoration checks. Destructive end-to-end event proof remains isolated-topology follow-up. |
+| 0.17 | Neighbor mutation plus IPv6 DNS parity and isolated cross-platform topology acceptance for destructive route/address/neighbor and facade flows. |
+| 0.18 | Snapshot foundation: `CurrentState` assembled consistently from the implemented providers, with snapshot scope, consistency, and partial-read semantics made explicit. |
 | 0.19 | Declarative model and diff: `DesiredState` configuration types remain distinct from observed types; produce an inspectable `Diff` without applying it. |
 | 0.20 | Declarative apply: compile a `Diff` into an `ApplyPlan`, execute it through the transaction engine, and report convergence, non-convergence, and compensation results. |
 | 0.21 | Pre-1.0 hardening: freeze the core model, provider extension contracts, identity rules, capability meanings, event guarantees, and platform support matrix; complete cross-platform privileged regression coverage and migration guidance. |

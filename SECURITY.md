@@ -31,11 +31,9 @@ informed as the issue is investigated and resolved.
 
 ## Scope
 
-The latest published release, Stage 0.18 of Net Lattice's
-[architecture](ARCHITECTURE.md)'s
-Incremental Delivery Plan, provides route inspection and mutation, interface
-inspection, DNS resolver inspection and mutation, neighbor inspection and
-static ARP/NDP neighbor mutation, interface-address inspection and mutation,
+Net Lattice provides route inspection and mutation, interface inspection,
+DNS resolver inspection and mutation, neighbor inspection and static ARP/NDP
+neighbor mutation, interface-address inspection and mutation,
 capability-gated interface configuration, and whole-system `CurrentState`
 snapshot assembly (`net-lattice-platform::SnapshotProvider`,
 `Lattice::current_state()`, fail-fast on the first constituent read error, no
@@ -61,9 +59,9 @@ privileges on the caller's behalf.
 Route, interface-address, DNS-mutation, and static-neighbor-mutation
 operations are privileged (see [ARCHITECTURE.md](ARCHITECTURE.md)'s Privilege
 Model), gated by `Capability::ROUTE_MUTATION`/`NEIGHBOR_MUTATION` respectively
-(`net-lattice-platform`'s `RouteMutator`/`NeighborMutator`, split from the
-combined `RouteProvider` in this release — see `ARCHITECTURE.md`'s Provider
-trait section). Removing a static neighbor refuses to delete a present but
+(`net-lattice-platform`'s `RouteMutator`/`NeighborMutator`, distinct from the
+read-only `RouteProvider` — see `ARCHITECTURE.md`'s Provider trait section).
+Removing a static neighbor refuses to delete a present but
 non-`Permanent` (dynamically learned) entry, returning `InvalidState`, so a
 removal request cannot silently evict a dynamically learned ARP/NDP cache
 entry. Reports involving unintended network mutation, partial DNS

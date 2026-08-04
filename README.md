@@ -21,8 +21,8 @@
 > address, DNS, administrative-state, MTU, and static ARP/NDP neighbor
 > mutation, inspectable mutation plans, ordered transaction execution with
 > cancellation, snapshots, compensation, and phase-aware reports, and
-> whole-system `CurrentState` snapshots. Stage 0.18 is complete; see Current
-> Status below.
+> whole-system `CurrentState` snapshots on Linux, Windows, and macOS. See
+> Current Status below for the full capability breakdown.
 
 ## Overview
 
@@ -116,19 +116,20 @@ Planned:
 
 ## Current Status
 
-Stage 0.18 adds whole-system `CurrentState` snapshots: `net-lattice-model`'s
+Net Lattice assembles whole-system `CurrentState` snapshots: `net-lattice-model`'s
 `CurrentState` aggregates routes, interfaces, neighbors, interface addresses,
 and DNS configuration; `net-lattice-platform::SnapshotProvider` describes the
 assembly contract; and `Lattice::current_state()` implements it, failing fast
 on the first constituent read error with no partial result. No backend crate
-needed any change to gain this — it is implemented once on `Lattice<B>`. See
-[CHANGELOG.md](CHANGELOG.md)'s `0.18.0` entry for the complete list of
-additions, including the domain-scoped `net_lattice::model`/`mutation`/
-`monitoring` re-export modules and the removal of the crate-root re-export of
-domain items.
+needs any change to gain this — it is implemented once on `Lattice<B>`. See
+[CHANGELOG.md](CHANGELOG.md) for the dated, per-version list of additions,
+including the domain-scoped `net_lattice::model`/`mutation`/`monitoring`
+re-export modules (the crate root no longer re-exports domain items
+directly).
 
-Stage 0.17 implementation of the [architecture](ARCHITECTURE.md)'s Incremental
-Delivery Plan is verified by the privileged Linux, Windows, and macOS CI jobs:
+The following surface, described by the [architecture](ARCHITECTURE.md)'s
+Incremental Delivery Plan, is verified by the privileged Linux, Windows, and
+macOS CI jobs:
 
 - `net-lattice-core`, `net-lattice-ip`
 - `net-lattice-model`'s `route`, `mac`, `interface`, `dns`, `neighbor`, `ifaddr`, `event`, and `mutation` modules; `NewInterfaceAddress`, `NewDnsConfig`, and `StaticNeighbor` express mutation intent separately from observed state
@@ -249,27 +250,31 @@ duplicating those contracts here.
 
 ## Roadmap
 
-1. **Bootstrap** *(completed)* — repository infrastructure, licensing, community health files, and tooling configuration.
-2. **Design** *(completed)* — define the crate layout, core abstractions, and platform abstraction strategy. See [ARCHITECTURE.md](ARCHITECTURE.md) for the planned workspace structure.
-3. **Foundations** *(completed)* — core IP/route/interface types and all three platform backends shipped.
-4. **Platform parity** *(completed)* — Linux, Windows, and macOS route and address mutation, interface, DNS-read, neighbor-read, address-read, and monitoring backends shipped.
-5. **Stage 0.9: Address mutation** *(completed)* — cross-platform assignment and removal of interface IPv4/IPv6 addresses.
-6. **Stage 0.10: Event semantics** *(completed)* — bounded delivery, overflow and resynchronization signaling, filtering, cancellation, and error propagation.
-7. **Stage 0.11: Async events** *(completed)* — optional `async` facade feature, one runtime-agnostic `EventStream`, and native Tokio-backed delivery in every platform backend.
-8. **Stage 0.12: Watcher API stabilization** *(completed)* — composable object/domain filters, filtering before queueing, monitoring-capability validation, and consistent filter semantics across synchronous and async watchers while preserving the released 0.11 API.
-9. **Stage 0.13: DNS mutation** *(completed)* — capability-gated resolver replacement through supported system mechanisms on Linux, Windows, and macOS.
-10. **Stage 0.14: Mutation operation model** *(completed)* — inspectable `Mutation` values and data-only `MutationPlan`s for existing route, address, and DNS mutations; preconditions, idempotency, privilege, confirmation, partial-application, and reversibility are explicit.
-11. **Stage 0.15: Transaction execution** *(completed)* — ordered plans, per-operation outcomes, phase/timing diagnostics, cancellation and failure boundaries, plus compensation only for documented reversible operations.
-12. **Stage 0.16: Interface configuration** *(completed)* — separate desired interface configuration, capability-gated admin-state and MTU mutation, read-after-write results, and platform-parity tests.
-13. **Stage 0.17: Neighbor mutation, IPv6 DNS parity, and isolated topology acceptance** *(completed)* — intent/observed static ARP/NDP management (`NeighborMutator`, ADR-0001), the `RouteProvider`/`RouteMutator` split (ADR-0002), IPv6 DNS parity, and safe cross-platform destructive-operation testing, verified on privileged Linux, Windows, and macOS CI.
-14. **Stage 0.18: Snapshots** *(completed)* — consistently assembled `CurrentState` with explicit scope, consistency, and partial-read semantics.
+The current capability set is described above, under Capabilities and
+Current Status; the list below is the forward delivery plan, kept as a
+sequential overview rather than a status ledger:
+
+1. **Bootstrap** — repository infrastructure, licensing, community health files, and tooling configuration.
+2. **Design** — crate layout, core abstractions, and platform abstraction strategy. See [ARCHITECTURE.md](ARCHITECTURE.md) for the workspace structure.
+3. **Foundations** — core IP/route/interface types and all three platform backends.
+4. **Platform parity** — Linux, Windows, and macOS route and address mutation, interface, DNS-read, neighbor-read, address-read, and monitoring backends.
+5. **Stage 0.9: Address mutation** — cross-platform assignment and removal of interface IPv4/IPv6 addresses.
+6. **Stage 0.10: Event semantics** — bounded delivery, overflow and resynchronization signaling, filtering, cancellation, and error propagation.
+7. **Stage 0.11: Async events** — optional `async` facade feature, one runtime-agnostic `EventStream`, and native Tokio-backed delivery in every platform backend.
+8. **Stage 0.12: Watcher API stabilization** — composable object/domain filters, filtering before queueing, monitoring-capability validation, and consistent filter semantics across synchronous and async watchers.
+9. **Stage 0.13: DNS mutation** — capability-gated resolver replacement through supported system mechanisms on Linux, Windows, and macOS.
+10. **Stage 0.14: Mutation operation model** — inspectable `Mutation` values and data-only `MutationPlan`s for route, address, and DNS mutations; preconditions, idempotency, privilege, confirmation, partial-application, and reversibility are explicit.
+11. **Stage 0.15: Transaction execution** — ordered plans, per-operation outcomes, phase/timing diagnostics, cancellation and failure boundaries, plus compensation for documented reversible operations.
+12. **Stage 0.16: Interface configuration** — separate desired interface configuration, capability-gated admin-state and MTU mutation, read-after-write results, and platform-parity tests.
+13. **Stage 0.17: Neighbor mutation, IPv6 DNS parity, and isolated topology acceptance** — intent/observed static ARP/NDP management (`NeighborMutator`, ADR-0001), the `RouteProvider`/`RouteMutator` split (ADR-0002), IPv6 DNS parity, and safe cross-platform destructive-operation testing, verified on privileged Linux, Windows, and macOS CI.
+14. **Stage 0.18: Snapshots** — consistently assembled `CurrentState` with explicit scope, consistency, and partial-read semantics.
 15. **Stage 0.19: Declarative diff** — separate `DesiredState` configuration types and an inspectable `Diff`, without mutation.
 16. **Stage 0.20: Declarative apply** — compile a `Diff` into an `ApplyPlan` and execute it through the transaction engine.
 17. **Stage 0.21: Pre-1.0 hardening** — freeze public contracts, identity and capability rules, event guarantees, platform matrix, and privileged regression coverage.
 18. **Stage 0.22+: Capability domains** — VLAN, VRF, namespaces, firewall, and tunnels, each with a complete read/intent/mutation/event/capability/test contract. They are not prerequisites for 1.0.
-19. **1.0** — stable foundation for the implemented inspection, monitoring, imperative mutation, transaction, and declarative-apply contracts. It is gated by the 0.21 compatibility audit, not by every future network domain.
+19. **1.0** — stable foundation for the inspection, monitoring, imperative mutation, transaction, and declarative-apply contracts. It is gated by the 0.21 compatibility audit, not by every future network domain.
 
-Stages are delivery boundaries, not a promise of one release per heading: platform validation may split a stage, and focused hardening releases may appear between stages.
+Stages are delivery boundaries, not a promise of one release per heading: platform validation may split a stage, and focused hardening releases may appear between stages. See [CHANGELOG.md](CHANGELOG.md) for what has shipped in each dated release.
 
 ## Contributing
 
