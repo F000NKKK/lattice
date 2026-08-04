@@ -10,8 +10,13 @@ Thank you for your interest in Net Lattice.
 
 ## Project Status
 
-Net Lattice has completed Stage 0.15 of its [architecture](ARCHITECTURE.md)'s
-Incremental Delivery Plan: route and interface-address mutation, DNS resolver
+Net Lattice has completed Stage 0.18 of its [architecture](ARCHITECTURE.md)'s
+Incremental Delivery Plan: whole-system `CurrentState` snapshot assembly
+(`net-lattice-model::CurrentState`, `net-lattice-platform::SnapshotProvider`,
+`Lattice::current_state()`) aggregating routes, interfaces, neighbors,
+interface addresses, and DNS configuration in one fail-fast call with no
+partial result, requiring no backend-crate change to adopt. It builds on
+Stage 0.15's route and interface-address mutation, DNS resolver
 inspection and mutation, interface and neighbor inspection, bounded
 object/domain-filterable monitoring, optional native async event delivery, and
 inspectable data-only mutation plans, side-effect-free `MutationPreflight`

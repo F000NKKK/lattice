@@ -28,8 +28,15 @@ the feature-gated async facade. Monitoring capabilities are domain-specific:
 the aggregate `MONITORING` bit means a native delivery path exists for every
 currently modeled domain, while filtered watches require their selected
 route/interface/neighbor/address bit. Windows has no native neighbor-change
-callback and therefore rejects neighbor and all-domain subscriptions. Everything
-past that stage is still a target, not current state.
+callback and therefore rejects neighbor and all-domain subscriptions. That
+description was accurate as of Stage 0.16; Stage 0.17 (neighbor mutation, the
+`RouteProvider`/`RouteMutator` split, IPv6 DNS parity, isolated destructive
+topology acceptance) and Stage 0.18 (`CurrentState` whole-system snapshots,
+`SnapshotProvider`) have since shipped and are also verified/complete — see
+the Incremental Delivery Plan table below for the current checkmarked stage
+list, and [CHANGELOG.md](CHANGELOG.md)/[README.md](README.md) for full
+per-stage detail. Everything past Stage 0.18 in that table is still a target,
+not current state.
 
 ## Guiding Principle
 
@@ -720,8 +727,8 @@ are introduced only when there is real implementation work for them:
 | 0.14 ✅ | Mutation operation model: inspectable `Mutation` values and ordered `MutationPlan`s for existing route/address/DNS mutations; explicit preconditions, idempotency, privilege, confirmation, partial-application, and reversibility classifications. Adds side-effect-free `MutationPreflight` analysis plus typed `MutationOutcome`, `MutationPlanReport`, and `RollbackStatus` contracts for executor reporting, while plans themselves retain no execution or rollback side effects. |
 | 0.15 ✅ | Transaction execution baseline: runtime capability and object-precondition preflight via `Lattice::validate_plan`, provider-backed `MutationSnapshot` capture through `snapshot_for_mutation`, ordered submission through `Lattice::execute_plan` configured by `ExecutionOptions`, per-operation outcomes, phase/timing diagnostics, first-failure stopping, operation-boundary cancellation, caller-defined prior-state capture, and an explicitly supplied reverse-order compensator. Ignored native facade route round-trip and compensation scenarios run in each privileged CI job; DNS partial-application integration remains intentionally non-destructive. |
 | 0.16 ✅ | Interface configuration: separate desired `InterfaceConfig`, independent admin-state/MTU capability gates, read-after-write mutation on Linux/Windows/macOS, typed executor snapshots, existing native interface-change event mappings, and privileged submission/readback/restoration checks. Destructive end-to-end event proof remains isolated-topology follow-up. |
-| 0.17 | Neighbor mutation plus IPv6 DNS parity and isolated cross-platform topology acceptance for destructive route/address/neighbor and facade flows. Detailed planning will precede implementation. |
-| 0.18 | Snapshot foundation: `CurrentState` assembled consistently from the implemented providers, with snapshot scope, consistency, and partial-read semantics made explicit. |
+| 0.17 ✅ | Neighbor mutation plus IPv6 DNS parity and isolated cross-platform topology acceptance for destructive route/address/neighbor and facade flows. Detailed planning will precede implementation. |
+| 0.18 ✅ | Snapshot foundation: `CurrentState` assembled consistently from the implemented providers, with snapshot scope, consistency, and partial-read semantics made explicit. |
 | 0.19 | Declarative model and diff: `DesiredState` configuration types remain distinct from observed types; produce an inspectable `Diff` without applying it. |
 | 0.20 | Declarative apply: compile a `Diff` into an `ApplyPlan`, execute it through the transaction engine, and report convergence, non-convergence, and compensation results. |
 | 0.21 | Pre-1.0 hardening: freeze the core model, provider extension contracts, identity rules, capability meanings, event guarantees, and platform support matrix; complete cross-platform privileged regression coverage and migration guidance. |

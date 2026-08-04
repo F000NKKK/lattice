@@ -19,10 +19,10 @@
 
 > **Status:** Net Lattice provides cross-platform network inspection, route,
 > address, DNS, administrative-state, MTU, and static ARP/NDP neighbor
-> mutation, inspectable mutation plans, and ordered transaction execution
-> with cancellation, snapshots, compensation, and phase-aware reports. Stage
-> 0.17 is verified on the privileged Linux, Windows, and macOS CI jobs; see
-> Current Status below.
+> mutation, inspectable mutation plans, ordered transaction execution with
+> cancellation, snapshots, compensation, and phase-aware reports, and
+> whole-system `CurrentState` snapshots. Stage 0.18 is complete; see Current
+> Status below.
 
 ## Overview
 
@@ -115,6 +115,17 @@ Planned:
 - Net Lattice does not aim to support every conceivable network protocol or vendor extension from day one.
 
 ## Current Status
+
+Stage 0.18 adds whole-system `CurrentState` snapshots: `net-lattice-model`'s
+`CurrentState` aggregates routes, interfaces, neighbors, interface addresses,
+and DNS configuration; `net-lattice-platform::SnapshotProvider` describes the
+assembly contract; and `Lattice::current_state()` implements it, failing fast
+on the first constituent read error with no partial result. No backend crate
+needed any change to gain this — it is implemented once on `Lattice<B>`. See
+[CHANGELOG.md](CHANGELOG.md)'s `0.18.0` entry for the complete list of
+additions, including the domain-scoped `net_lattice::model`/`mutation`/
+`monitoring` re-export modules and the removal of the crate-root re-export of
+domain items.
 
 Stage 0.17 implementation of the [architecture](ARCHITECTURE.md)'s Incremental
 Delivery Plan is verified by the privileged Linux, Windows, and macOS CI jobs:
@@ -251,7 +262,7 @@ duplicating those contracts here.
 11. **Stage 0.15: Transaction execution** *(completed)* — ordered plans, per-operation outcomes, phase/timing diagnostics, cancellation and failure boundaries, plus compensation only for documented reversible operations.
 12. **Stage 0.16: Interface configuration** *(completed)* — separate desired interface configuration, capability-gated admin-state and MTU mutation, read-after-write results, and platform-parity tests.
 13. **Stage 0.17: Neighbor mutation, IPv6 DNS parity, and isolated topology acceptance** *(completed)* — intent/observed static ARP/NDP management (`NeighborMutator`, ADR-0001), the `RouteProvider`/`RouteMutator` split (ADR-0002), IPv6 DNS parity, and safe cross-platform destructive-operation testing, verified on privileged Linux, Windows, and macOS CI.
-14. **Stage 0.18: Snapshots** — consistently assembled `CurrentState` with explicit scope, consistency, and partial-read semantics.
+14. **Stage 0.18: Snapshots** *(completed)* — consistently assembled `CurrentState` with explicit scope, consistency, and partial-read semantics.
 15. **Stage 0.19: Declarative diff** — separate `DesiredState` configuration types and an inspectable `Diff`, without mutation.
 16. **Stage 0.20: Declarative apply** — compile a `Diff` into an `ApplyPlan` and execute it through the transaction engine.
 17. **Stage 0.21: Pre-1.0 hardening** — freeze public contracts, identity and capability rules, event guarantees, platform matrix, and privileged regression coverage.

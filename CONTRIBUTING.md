@@ -4,26 +4,29 @@ Thank you for your interest in contributing to Net Lattice. This document descri
 
 ## Project Status
 
-Net Lattice has completed Stage 0.15 of its [architecture](ARCHITECTURE.md)'s
-Incremental Delivery Plan: route and interface-address mutation, DNS resolver
-inspection and mutation, interface and neighbor inspection, bounded
-object/domain-filterable monitoring, optional native async event delivery, and
-inspectable data-only mutation plans, side-effect-free `MutationPreflight`
-analysis, and typed execution-report and compensation-boundary contracts for
-the existing route, address, and DNS operations on Linux, Windows, and macOS.
-Stage 0.16 interface configuration is verified by privileged Linux, Windows,
-and macOS CI; `InterfaceConfig` remains a partial imperative patch, not a
-declarative desired-state model. Stage 0.17's IPv6 DNS parity, static ARP/NDP
-neighbor mutation (`NeighborMutator`), the `RouteProvider`/`RouteMutator`
-split, and isolated destructive topology testing are verified on privileged
-Linux, Windows, and macOS CI and are part of the published surface.
+Net Lattice has completed Stage 0.18 of its [architecture](ARCHITECTURE.md)'s
+Incremental Delivery Plan: whole-system `CurrentState` snapshot assembly
+(`net-lattice-model::CurrentState`, `net-lattice-platform::SnapshotProvider`,
+`Lattice::current_state()`), built on Stage 0.15's route and
+interface-address mutation, DNS resolver inspection and mutation, interface
+and neighbor inspection, bounded object/domain-filterable monitoring,
+optional native async event delivery, and inspectable data-only mutation
+plans, side-effect-free `MutationPreflight` analysis, and typed
+execution-report and compensation-boundary contracts for the existing route,
+address, and DNS operations on Linux, Windows, and macOS. Stage 0.16
+interface configuration is verified by privileged Linux, Windows, and macOS
+CI; `InterfaceConfig` remains a partial imperative patch, not a declarative
+desired-state model. Stage 0.17's IPv6 DNS parity, static ARP/NDP neighbor
+mutation (`NeighborMutator`), the `RouteProvider`/`RouteMutator` split, and
+isolated destructive topology testing are verified on privileged Linux,
+Windows, and macOS CI and are part of the published surface.
 Large capability domains remain ahead, but the published read, mutation,
-monitoring, planning, and backend-extension APIs are real public surface. The
-most valuable contributions right now are:
+monitoring, planning, snapshot, and backend-extension APIs are real public
+surface. The most valuable contributions right now are:
 
 - Feedback on the project's vision, scope, and roadmap (see [README.md](README.md))
 - Discussion of API design and architecture for upcoming stages
-- Implementation work on the next stages in [ARCHITECTURE.md](ARCHITECTURE.md)'s delivery plan (interface and neighbor mutation, snapshots, declarative configuration, ...)
+- Implementation work on the next stages in [ARCHITECTURE.md](ARCHITECTURE.md)'s delivery plan (declarative diff, declarative apply, pre-1.0 hardening, ...)
 - Documentation and tooling improvements
 
 Please read [ARCHITECTURE.md](ARCHITECTURE.md) before proposing a new crate, module, or provider trait — it documents the dependency rules (e.g. `net-lattice-platform` never depends on `net-lattice-model`) and the staged delivery order this project follows.

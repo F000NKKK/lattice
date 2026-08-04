@@ -3,13 +3,13 @@
 ## Supported Versions
 
 Net Lattice follows a rolling support policy. Security fixes are provided only
-for the latest stable release series. The current supported line is 0.17.x;
-support for the 0.1.x-0.16.x series has ended.
+for the latest stable release series. The current supported line is 0.18.x;
+support for the 0.1.x-0.17.x series has ended.
 
 | Version | Supported |
 | ------- | --------- |
-| 0.17.x | ✅ |
-| 0.1.x - 0.16.x | ❌ |
+| 0.18.x | ✅ |
+| 0.1.x - 0.17.x | ❌ |
 
 ## Reporting a Vulnerability
 
@@ -31,12 +31,15 @@ informed as the issue is investigated and resolved.
 
 ## Scope
 
-The latest published release, Stage 0.17 of Net Lattice's
+The latest published release, Stage 0.18 of Net Lattice's
 [architecture](ARCHITECTURE.md)'s
 Incremental Delivery Plan, provides route inspection and mutation, interface
 inspection, DNS resolver inspection and mutation, neighbor inspection and
 static ARP/NDP neighbor mutation, interface-address inspection and mutation,
-and capability-gated interface configuration on Linux
+capability-gated interface configuration, and whole-system `CurrentState`
+snapshot assembly (`net-lattice-platform::SnapshotProvider`,
+`Lattice::current_state()`, fail-fast on the first constituent read error, no
+partial result) on Linux
 (`net-lattice-backend-linux`, via Netlink and `/etc/resolv.conf`), Windows
 (`net-lattice-backend-windows`, via the IP Helper API), and macOS
 (`net-lattice-backend-darwin`, via BSD routing sockets, `getifaddrs`, address

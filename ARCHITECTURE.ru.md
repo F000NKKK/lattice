@@ -19,8 +19,16 @@
 мониторинга зависят от домена: aggregate-бит `MONITORING` означает native-путь
 доставки для каждого текущего домена, а filtered watch требует выбранный бит
 route/interface/neighbor/address. В Windows нет native callback изменений
-соседей, поэтому neighbor и all-domain subscriptions отклоняются. Всё, что
-описано дальше этого этапа, по-прежнему только цель, а не текущее состояние.
+соседей, поэтому neighbor и all-domain subscriptions отклоняются. Это описание
+было верным по состоянию на Stage 0.16; с тех пор вышли Stage 0.17 (изменение
+соседей, разделение `RouteProvider`/`RouteMutator`, паритет IPv6 для DNS,
+изолированная деструктивная topology-приёмка) и Stage 0.18 (снапшоты
+`CurrentState` для всей системы, `SnapshotProvider`) — оба тоже проверены и
+завершены; актуальный список этапов с отметками см. в таблице плана поэтапной
+поставки ниже, а подробности по каждому этапу — в
+[CHANGELOG.md](CHANGELOG.md)/[README.ru.md](README.ru.md). Всё, что описано
+дальше Stage 0.18 в этой таблице, по-прежнему только цель, а не текущее
+состояние.
 
 ## Руководящий принцип
 
@@ -723,8 +731,8 @@ Stages 0.15–0.20 должны строить transactions и declarative apply
 | 0.14 ✅ | Модель mutation-операций: inspectable значения `Mutation` и упорядоченные `MutationPlan` для существующих изменений routes/addresses/DNS; явные классификации preconditions, idempotency, privileges, confirmation, partial application и reversibility. Добавлен side-effect-free анализ `MutationPreflight`, а также типизированные `MutationOutcome`, `MutationPlanReport` и `RollbackStatus` для отчёта исполнителя; сами планы не имеют side effects исполнения или rollback. |
 | 0.15 ✅ | Базовое исполнение транзакций: runtime capability и object-precondition preflight через `Lattice::validate_plan`, provider-backed capture `MutationSnapshot` через `snapshot_for_mutation`, отправка операций по порядку через `Lattice::execute_plan`, настроенный единым `ExecutionOptions`, результаты операций с фазами и длительностями, остановка после первой ошибки, cancellation на границе операции, capture prior state и явно переданный compensator в обратном порядке. Ignored native facade route round-trip и compensation scenarios запускаются в каждом privileged CI job; DNS partial-application integration намеренно остаётся non-destructive. |
 | 0.16 ✅ | Конфигурация интерфейсов: отдельный desired `InterfaceConfig`, независимые capability gates для admin state/MTU, read-after-write mutation на Linux/Windows/macOS, typed snapshots executor'а, native mappings событий интерфейса и privileged проверки submission/readback/restoration. Destructive end-to-end event proof остаётся follow-up для isolated topology. |
-| 0.17 | Изменение соседей, паритет IPv6 для DNS и изолированная кроссплатформенная topology-приёмка для деструктивных операций маршрутов/адресов/соседей и facade-потоков. Детальное планирование будет выполнено до реализации. |
-| 0.18 | Основа snapshot: `CurrentState` последовательно собирается из реализованных provider'ов, с явно определёнными scope, consistency и partial-read семантиками snapshot. |
+| 0.17 ✅ | Изменение соседей, паритет IPv6 для DNS и изолированная кроссплатформенная topology-приёмка для деструктивных операций маршрутов/адресов/соседей и facade-потоков. Детальное планирование будет выполнено до реализации. |
+| 0.18 ✅ | Основа snapshot: `CurrentState` последовательно собирается из реализованных provider'ов, с явно определёнными scope, consistency и partial-read семантиками snapshot. |
 | 0.19 | Декларативная модель и diff: конфигурационные типы `DesiredState` остаются отдельными от наблюдаемых типов; создаётся inspectable `Diff` без его применения. |
 | 0.20 | Декларативное применение: `Diff` компилируется в `ApplyPlan`, исполняется через transaction engine и сообщает о convergence, non-convergence и результатах compensation. |
 | 0.21 | Pre-1.0 hardening: заморозка core model, provider extension contracts, правил identity, значений capability, гарантий событий и матрицы поддержки платформ; завершение cross-platform privileged regression coverage и migration guidance. |

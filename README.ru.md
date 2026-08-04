@@ -21,9 +21,9 @@
 > изменение маршрутов, адресов, DNS, administrative state и MTU интерфейсов,
 > а также статических записей ARP/NDP, inspectable планы mutation-операций и
 > упорядоченное исполнение транзакций с cancellation, snapshots, compensation
-> и фазовыми отчётами через нативные API Linux, Windows и macOS. Stage 0.17
-> проверен privileged CI-задачами для Linux, Windows и macOS; см. «Текущий
-> статус» ниже.
+> и фазовыми отчётами, а также согласованными снапшотами `CurrentState` для
+> всей системы через нативные API Linux, Windows и macOS. Stage 0.18
+> завершён; см. «Текущий статус» ниже.
 
 ## Обзор
 
@@ -117,6 +117,16 @@ Net Lattice призвана закрыть этот пробел, предос�
 - Net Lattice не ставит целью поддержку всех мыслимых сетевых протоколов или вендорских расширений с первого дня.
 
 ## Текущий статус
+
+Stage 0.18 добавляет снапшоты `CurrentState` для всей системы: `CurrentState`
+в `net-lattice-model` объединяет маршруты, интерфейсы, соседей, адреса
+интерфейсов и конфигурацию DNS; `net-lattice-platform::SnapshotProvider`
+описывает контракт сборки; `Lattice::current_state()` реализует его,
+завершаясь с первой же ошибкой чтения без частичного результата. Ни один
+backend-крейт не потребовал изменений — реализация написана один раз для
+`Lattice<B>`. Полный список изменений, включая доменные reexport-модули
+`net_lattice::model`/`mutation`/`monitoring` и удаление reexport-а доменных
+типов из корня крейта, см. в записи `0.18.0` [CHANGELOG.md](CHANGELOG.md).
 
 Реализация этапа 0.17 плана поэтапной поставки из
 [архитектуры](ARCHITECTURE.ru.md) проверена privileged CI-задачами:
@@ -224,7 +234,7 @@ if lattice.supports(Capability::ROUTE_MONITORING) {
 11. **Stage 0.15: Исполнение транзакций** *(завершён)* — упорядоченные планы, результаты каждой операции, диагностика фаз и длительностей, границы cancellation и ошибок, а также compensation только для документированно reversible операций.
 12. **Stage 0.16: Конфигурация интерфейсов** *(завершён)* — отдельная desired-конфигурация интерфейса, capability-gated изменение admin state и MTU, read-after-write результаты и platform-parity tests.
 13. **Stage 0.17: Изменение соседей, паритет IPv6 для DNS и изолированная topology-приёмка** *(завершён)* — intent/observed управление статическими ARP/NDP (`NeighborMutator`, ADR-0001), разделение `RouteProvider`/`RouteMutator` (ADR-0002), паритет IPv6 для DNS и безопасное кроссплатформенное тестирование деструктивных операций, проверено на privileged CI Linux, Windows и macOS.
-14. **Stage 0.18: Snapshots** — последовательно собранный `CurrentState` с явно определёнными scope, consistency и partial-read семантиками.
+14. **Stage 0.18: Snapshots** *(завершён)* — последовательно собранный `CurrentState` с явно определёнными scope, consistency и partial-read семантиками.
 15. **Stage 0.19: Декларативный diff** — отдельные конфигурационные типы `DesiredState` и inspectable `Diff` без mutation.
 16. **Stage 0.20: Декларативное применение** — компиляция `Diff` в `ApplyPlan` и его исполнение через transaction engine.
 17. **Stage 0.21: Pre-1.0 hardening** — заморозка публичных контрактов, правил identity и capability, гарантий событий, матрицы платформ и privileged regression coverage.
