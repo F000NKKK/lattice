@@ -25,8 +25,13 @@ workflow (`plan.md`, `AUDIT.md`, `adr/`), which has been retired.
   bug fixes into an unrelated Task.
 
 Use `mcp__youtrack__create_issue` with `parentIssue` to build this hierarchy;
-use `mcp__youtrack__link_issues` for non-parent relations (`relates to`,
-`blocked by`, `duplicates`).
+use `mcp__youtrack__link_issues` for non-parent relations. This instance's
+actual link-type set (confirmed by the tool's own error response, not
+assumed) is `relates to`, `is required for`, `depends on`,
+`is duplicated by`, `duplicates`, `parent for`, `subtask of` — there is no
+`blocked by` type here; use `depends on` (the issue passed as `targetIssueId`
+depends on the one passed as `issueToLinkId`) to express "A is blocked by
+B."
 
 ## Custom fields
 
@@ -153,8 +158,8 @@ owning `Role` matching the role you're about to run — finish in-flight work
 before starting new work; (2) the oldest unblocked `Stage: Backlog` `Task`
 in the active Sprint whose parent Story is not itself blocked; (3) file a
 new `Task` if the researcher/architect pass surfaced one that doesn't exist
-yet. Check `blocked by` links (`mcp__youtrack__get_issue`) before starting —
-do not start a Task that is blocked.
+yet. Check `depends on` links (`mcp__youtrack__get_issue`) before starting —
+do not start a Task that depends on another unfinished issue.
 
 ## Searching YouTrack
 

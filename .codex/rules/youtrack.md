@@ -147,7 +147,11 @@ owning `Role` matching the role about to run — finish in-flight work first;
 (2) the oldest unblocked `Stage: Backlog` `Task` in the active Sprint whose
 parent Story is not itself blocked; (3) file a new `Task` if the
 researcher/architect pass surfaced one that doesn't exist yet. Check
-`blocked by` links before starting — do not start a blocked Task.
+`depends on` links before starting — do not start a Task that depends on
+another unfinished issue. (This instance's link-type set, confirmed via the
+YouTrack MCP tool's own error response, has no `blocked by` type — use
+`depends on` instead, e.g. issue A "depends on" issue B expresses "A is
+blocked by B.")
 
 ## Searching YouTrack
 
