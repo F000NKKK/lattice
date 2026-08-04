@@ -9,7 +9,8 @@
 //! Stage 0.4 added `InterfaceProvider`; Stage 0.5 added `DnsProvider`;
 //! Stage 0.6 added `NeighborProvider`; Stage 0.7 added `AddressProvider`;
 //! Stage 0.8 added `EventProvider`; Stage 0.16 added `InterfaceMutator`;
-//! Stage 0.17 adds `NeighborMutator` and `Capability::NEIGHBOR_MUTATION`.
+//! Stage 0.17 added `NeighborMutator` and `Capability::NEIGHBOR_MUTATION`;
+//! Stage 0.18 adds `SnapshotProvider`.
 
 mod address_mutator;
 mod address_provider;
@@ -22,6 +23,7 @@ mod interface_provider;
 mod neighbor_mutator;
 mod neighbor_provider;
 mod route_provider;
+mod snapshot_provider;
 #[cfg(feature = "async")]
 mod tokio_event_provider;
 
@@ -36,6 +38,7 @@ pub use interface_provider::InterfaceProvider;
 pub use neighbor_mutator::NeighborMutator;
 pub use neighbor_provider::NeighborProvider;
 pub use route_provider::{RouteMutator, RouteProvider};
+pub use snapshot_provider::SnapshotProvider;
 #[cfg(feature = "async")]
 pub use tokio_event_provider::{TokioEventReceiver, TokioEventSender};
 

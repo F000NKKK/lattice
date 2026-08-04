@@ -581,10 +581,15 @@ architecture reserves room for it as:
   that would resolve a `Diff`, which can be inspected before being executed
   and rolled back if a step fails.
 
-None of these types exist yet, and no crate is created for them now — they
-belong to stages 0.18–0.20, after the transaction and remaining imperative
-mutation contracts are stable enough to compute a meaningful diff against.
-The state/config split is named here
+As of stage 0.18, `CurrentState` (the data shape, in `net-lattice-model`) and
+`SnapshotProvider` (the assembly contract, in `net-lattice-platform`) exist,
+but the facade-level blanket implementation that binds `SnapshotProvider`'s
+associated `State` to the concrete `CurrentState` type — the piece that
+actually lets a `Lattice<B>` produce a `CurrentState` — has not landed yet.
+`DesiredState`, `Diff`, and `ApplyPlan` do not exist yet, and no crate is
+created for them now — they belong to stages 0.19–0.20, after the
+transaction and remaining imperative mutation contracts are stable enough to
+compute a meaningful diff against. The state/config split is named here
 — as a parallel `*Config` type per domain object living alongside its state
 type in `net-lattice-model` — so that it is built in from the first `*Config`
 type rather than retrofitted after `CurrentState`/`DesiredState` have
