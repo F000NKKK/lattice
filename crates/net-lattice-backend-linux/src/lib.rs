@@ -22,7 +22,7 @@ use net_lattice_model::interface::{
 };
 use net_lattice_model::mac::MacAddress;
 use net_lattice_model::neighbor::{NeighborEntry, NeighborId, NeighborState, StaticNeighbor};
-use net_lattice_model::route::{Route, RouteId};
+use net_lattice_model::route::{Route, RouteConfig, RouteId};
 use net_lattice_model::{IpAddress, Network};
 use net_lattice_platform::{
     AddressMutator, AddressProvider, Capability, CapabilityProvider, DnsMutator, DnsProvider,
@@ -392,9 +392,9 @@ impl RouteProvider for LinuxBackend {
 }
 
 impl RouteMutator for LinuxBackend {
-    type Route = Route;
+    type RouteConfig = RouteConfig;
 
-    fn add_route(&self, route: Self::Route) -> Result<()> {
+    fn add_route(&self, route: Self::RouteConfig) -> Result<()> {
         self.runtime.block_on(async {
             let message = route_request_message(&route, true);
 
@@ -407,7 +407,7 @@ impl RouteMutator for LinuxBackend {
         })
     }
 
-    fn remove_route(&self, route: Self::Route) -> Result<()> {
+    fn remove_route(&self, route: Self::RouteConfig) -> Result<()> {
         self.runtime.block_on(async {
             let message = route_request_message(&route, false);
 
@@ -426,7 +426,7 @@ impl RouteMutator for LinuxBackend {
 /// A delete request deliberately omits the optional gateway and metric, while
 /// the destination family and output interface are retained for both request
 /// kinds.
-fn route_request_message(route: &Route, include_gateway_and_metric: bool) -> RouteMessage {
+fn route_request_message(route: &RouteConfig, include_gateway_and_metric: bool) -> RouteMessage {
     let (destination, prefix_len) = network_to_std(route.destination);
     match destination {
         IpAddr::V4(addr) => {
@@ -1485,7 +1485,7 @@ mod tests {
             net_lattice_ip::Ipv6Address::new([0x2001, 0xdb8, 0, 0x16, 0, 0, 0, 0]),
             net_lattice_ip::Ipv6PrefixLength::new(64).expect("valid IPv6 prefix"),
         ));
-        let ipv6_route = Route::new(RouteId::new(16), ipv6_destination)
+        let ipv6_route = RouteConfig::new(ipv6_destination)
             .with_gateway(IpAddress::from(net_lattice_ip::Ipv6Address::new([
                 0x2001, 0xdb8, 0, 0x16, 0, 0, 0, 1,
             ])))
@@ -2025,8 +2025,8 @@ mod tests {
         let missing = InterfaceAddress::new(Id::new(u64::MAX), u32::MAX, network);
         assert!(backend.remove_address(missing).is_err());
 
-        let route = Route::new(RouteId::new(0), network).with_interface_index(u32::MAX);
-        assert!(backend.add_route(route.clone()).is_err());
+        let route = RouteConfig::new(network).with_interface_index(u32::MAX);
+        assert!(backend.add_route(route).is_err());
         assert!(backend.remove_route(route).is_err());
     }
 
@@ -2217,9 +2217,9 @@ mod tests {
             Ipv4Address::new(203, 0, 113, 0),
             Ipv4PrefixLength::new(24).unwrap(),
         ));
-        let route = Route::new(RouteId::new(0), destination).with_interface_index(interface_index);
+        let route = RouteConfig::new(destination).with_interface_index(interface_index);
 
-        let add_result = backend.add_route(route.clone());
+        let add_result = backend.add_route(route);
         if matches!(
             add_result,
             Err(Error::PermissionDenied) | Err(Error::Platform(_))
@@ -2272,12 +2272,12 @@ mod tests {
             net_lattice_ip::Ipv6Address::new([0x2001, 0xdb8, 1, 0, 0, 0, 0, 0]),
             net_lattice_ip::Ipv6PrefixLength::new(64).unwrap(),
         ));
-        let route = Route::new(RouteId::new(0), destination).with_interface_index(interface_index);
+        let route = RouteConfig::new(destination).with_interface_index(interface_index);
 
         // Recover from an interrupted prior run before attempting the add.
-        let _ = backend.remove_route(route.clone());
+        let _ = backend.remove_route(route);
 
-        let add_result = backend.add_route(route.clone());
+        let add_result = backend.add_route(route);
         if matches!(
             add_result,
             Err(Error::PermissionDenied) | Err(Error::Platform(_))
@@ -2661,13 +2661,13 @@ mod tests {
             Ipv4Address::new(198, 51, 100, 0),
             Ipv4PrefixLength::new(24).unwrap(),
         ));
-        let route = Route::new(RouteId::new(0), destination).with_interface_index(interface_index);
+        let route = RouteConfig::new(destination).with_interface_index(interface_index);
 
         // Recover from an interrupted prior run before attempting the add.
         // The test route is deliberately isolated to TEST-NET-2.
-        let _ = backend.remove_route(route.clone());
+        let _ = backend.remove_route(route);
         backend
-            .add_route(route.clone())
+            .add_route(route)
             .expect("failed to add monitoring test route");
         // Obtain the identity from the notification itself. A concurrent
         // RTM_GETROUTE dump can be rejected with EBUSY while the multicast
@@ -2742,13 +2742,13 @@ mod tests {
             net_lattice_ip::Ipv6Address::new([0x2001, 0xdb8, 8, 0, 0, 0, 0, 0]),
             net_lattice_ip::Ipv6PrefixLength::new(64).unwrap(),
         ));
-        let route = Route::new(RouteId::new(0), destination).with_interface_index(interface_index);
+        let route = RouteConfig::new(destination).with_interface_index(interface_index);
 
         // Recover from an interrupted prior run before attempting the add.
         // The test route is deliberately isolated to 2001:db8:8::/64.
-        let _ = backend.remove_route(route.clone());
+        let _ = backend.remove_route(route);
         backend
-            .add_route(route.clone())
+            .add_route(route)
             .expect("failed to add monitoring test route");
         // Obtain the identity from the notification itself. A concurrent
         // RTM_GETROUTE dump can be rejected with EBUSY while the multicast

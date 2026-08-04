@@ -27,7 +27,7 @@ use net_lattice_model::interface::{
 };
 use net_lattice_model::mac::MacAddress;
 use net_lattice_model::neighbor::{NeighborEntry, NeighborId, NeighborState, StaticNeighbor};
-use net_lattice_model::route::{Route, RouteId};
+use net_lattice_model::route::{Route, RouteConfig, RouteId};
 use net_lattice_model::{IpAddress, Network};
 use net_lattice_platform::{
     AddressMutator, AddressProvider, Capability, CapabilityProvider, DnsMutator, DnsProvider,
@@ -412,7 +412,7 @@ fn dump_routing_table() -> Result<Vec<u8>> {
     Err(Error::Platform(PlatformErrorCode::Darwin(libc::ENOMEM)))
 }
 
-fn build_add_message(route: &Route) -> Result<Vec<u8>> {
+fn build_add_message(route: &RouteConfig) -> Result<Vec<u8>> {
     let (destination, prefix_len) = network_to_std(route.destination);
     let mut buf = vec![0u8; RTM_MAXSIZE];
     let hdr = unsafe { &mut *(buf.as_mut_ptr() as *mut libc::rt_msghdr) };
@@ -494,7 +494,7 @@ fn build_add_message(route: &Route) -> Result<Vec<u8>> {
     Ok(buf)
 }
 
-fn build_delete_message(route: &Route) -> Result<Vec<u8>> {
+fn build_delete_message(route: &RouteConfig) -> Result<Vec<u8>> {
     let (destination, prefix_len) = network_to_std(route.destination);
     let mut buf = vec![0u8; RTM_MAXSIZE];
     let hdr = unsafe { &mut *(buf.as_mut_ptr() as *mut libc::rt_msghdr) };
@@ -739,16 +739,16 @@ impl RouteProvider for DarwinBackend {
 }
 
 impl RouteMutator for DarwinBackend {
-    type Route = Route;
+    type RouteConfig = RouteConfig;
 
-    fn add_route(&self, route: Self::Route) -> Result<()> {
+    fn add_route(&self, route: Self::RouteConfig) -> Result<()> {
         self.runtime.block_on(async {
             let message = build_add_message(&route)?;
             send_route_request(self.fd, &message, RTM_SEQ_ADD)
         })
     }
 
-    fn remove_route(&self, route: Self::Route) -> Result<()> {
+    fn remove_route(&self, route: Self::RouteConfig) -> Result<()> {
         self.runtime.block_on(async {
             let message = build_delete_message(&route)?;
             send_route_request(self.fd, &message, RTM_SEQ_DELETE)
@@ -2439,7 +2439,7 @@ mod tests {
             net_lattice_ip::Ipv6Address::new([0x2001, 0xdb8, 0, 0x16, 0, 0, 0, 0]),
             net_lattice_ip::Ipv6PrefixLength::new(64).expect("valid IPv6 prefix"),
         ));
-        let route = Route::new(RouteId::new(16), destination)
+        let route = RouteConfig::new(destination)
             .with_gateway(IpAddress::from(net_lattice_ip::Ipv6Address::new([
                 0x2001, 0xdb8, 0, 0x16, 0, 0, 0, 1,
             ])))
@@ -3720,14 +3720,14 @@ mod tests {
             Ipv4Address::new(203, 0, 113, 0),
             Ipv4PrefixLength::new(24).unwrap(),
         ));
-        let route = Route::new(RouteId::new(0), destination).with_interface_index(interface_index);
+        let route = RouteConfig::new(destination).with_interface_index(interface_index);
 
         // Best-effort cleanup of a leftover route from a prior run of this
         // same test (e.g. a run that panicked between add and remove) —
         // guarantees a clean starting state regardless of why one might
         // already be there, rather than the add below spuriously failing
         // with `AlreadyExists`.
-        let _ = backend.remove_route(route.clone());
+        let _ = backend.remove_route(route);
 
         // Diagnostic-only: three rounds of fixes reasoned from reference
         // implementations (netmask parsing, sockaddr_dl shape/sdl_len/name,
@@ -3761,7 +3761,7 @@ mod tests {
             );
         }
 
-        let add_result = backend.add_route(route.clone());
+        let add_result = backend.add_route(route);
 
         let mut spy_buf = [0u8; RTM_MAXSIZE];
         let mut spy_seen = Vec::new();
@@ -3899,13 +3899,13 @@ mod tests {
             net_lattice_ip::Ipv6Address::new([0x2001, 0xdb8, 0xa, 0, 0, 0, 0, 0]),
             net_lattice_ip::Ipv6PrefixLength::new(64).expect("valid IPv6 prefix"),
         ));
-        let route = Route::new(RouteId::new(0), destination).with_interface_index(interface_index);
+        let route = RouteConfig::new(destination).with_interface_index(interface_index);
 
         // Recover from an interrupted prior run before attempting the add.
-        let _ = backend.remove_route(route.clone());
+        let _ = backend.remove_route(route);
 
         backend
-            .add_route(route.clone())
+            .add_route(route)
             .expect("add_route failed - are you running as root?");
 
         let routes = backend
@@ -3959,10 +3959,10 @@ mod tests {
             Ipv4Address::new(198, 51, 100, 0),
             Ipv4PrefixLength::new(24).unwrap(),
         ));
-        let route = Route::new(RouteId::new(0), destination).with_interface_index(interface_index);
+        let route = RouteConfig::new(destination).with_interface_index(interface_index);
 
         backend
-            .add_route(route.clone())
+            .add_route(route)
             .expect("failed to add monitoring test route");
         let watched_id = synthesize_route_id(&destination, &None, Some(interface_index));
 

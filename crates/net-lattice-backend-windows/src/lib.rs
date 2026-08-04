@@ -24,7 +24,7 @@ use net_lattice_model::interface::{
 };
 use net_lattice_model::mac::MacAddress;
 use net_lattice_model::neighbor::{NeighborEntry, NeighborId, NeighborState, StaticNeighbor};
-use net_lattice_model::route::{Route, RouteId};
+use net_lattice_model::route::{Route, RouteConfig, RouteId};
 use net_lattice_model::{IpAddress, Network};
 use net_lattice_platform::{
     AddressMutator, AddressProvider, Capability, CapabilityProvider, DnsMutator, DnsProvider,
@@ -375,9 +375,9 @@ impl RouteProvider for WindowsBackend {
 }
 
 impl RouteMutator for WindowsBackend {
-    type Route = Route;
+    type RouteConfig = RouteConfig;
 
-    fn add_route(&self, route: Self::Route) -> Result<()> {
+    fn add_route(&self, route: Self::RouteConfig) -> Result<()> {
         self.runtime.block_on(async move {
             let row = build_row(route);
             unsafe {
@@ -390,7 +390,7 @@ impl RouteMutator for WindowsBackend {
         })
     }
 
-    fn remove_route(&self, route: Self::Route) -> Result<()> {
+    fn remove_route(&self, route: Self::RouteConfig) -> Result<()> {
         self.runtime.block_on(async move {
             let address_family = match route.destination {
                 Network::V4(_) => AF_INET,
@@ -448,7 +448,7 @@ fn free_table(table: *mut MIB_IPFORWARD_TABLE2) {
     }
 }
 
-fn build_row(route: Route) -> MIB_IPFORWARD_ROW2 {
+fn build_row(route: RouteConfig) -> MIB_IPFORWARD_ROW2 {
     let (destination, prefix_len) = network_to_std(route.destination);
 
     let mut row = MIB_IPFORWARD_ROW2::default();
@@ -2217,7 +2217,7 @@ mod tests {
             Ipv4Address::new(198, 51, 100, 0),
             Ipv4PrefixLength::new(24).unwrap(),
         ));
-        let route = Route::new(RouteId::new(1), destination)
+        let route = RouteConfig::new(destination)
             .with_gateway(IpAddress::from(Ipv4Address::new(192, 0, 2, 1)))
             .with_interface_index(7)
             .with_metric(42);
@@ -2306,13 +2306,13 @@ mod tests {
             net_lattice_ip::Ipv6Address::new([0x2001, 0xdb8, 0, 0x16, 0, 0, 0, 0]),
             net_lattice_ip::Ipv6PrefixLength::new(64).expect("valid IPv6 prefix"),
         ));
-        let route = Route::new(RouteId::new(16), destination)
+        let route = RouteConfig::new(destination)
             .with_gateway(IpAddress::from(net_lattice_ip::Ipv6Address::new([
                 0x2001, 0xdb8, 0, 0x16, 0, 0, 0, 1,
             ])))
             .with_interface_index(7)
             .with_metric(42);
-        let row = build_row(route.clone());
+        let row = build_row(route);
         assert_eq!(unsafe { row.DestinationPrefix.Prefix.si_family }, AF_INET6);
         assert_eq!(unsafe { row.NextHop.si_family }, AF_INET6);
 
@@ -2942,9 +2942,9 @@ mod tests {
             Ipv4Address::new(203, 0, 113, 0),
             Ipv4PrefixLength::new(24).unwrap(),
         ));
-        let route = Route::new(RouteId::new(0), destination).with_interface_index(interface_index);
+        let route = RouteConfig::new(destination).with_interface_index(interface_index);
 
-        let add_result = backend.add_route(route.clone());
+        let add_result = backend.add_route(route);
         if matches!(
             add_result,
             Err(Error::PermissionDenied) | Err(Error::Platform(_))
@@ -2995,9 +2995,9 @@ mod tests {
             net_lattice_ip::Ipv6Address::new([0x2001, 0xdb8, 0xc, 0, 0, 0, 0, 0]),
             net_lattice_ip::Ipv6PrefixLength::new(64).expect("valid IPv6 prefix"),
         ));
-        let route = Route::new(RouteId::new(0), destination).with_interface_index(interface_index);
+        let route = RouteConfig::new(destination).with_interface_index(interface_index);
 
-        let add_result = backend.add_route(route.clone());
+        let add_result = backend.add_route(route);
         if matches!(
             add_result,
             Err(Error::PermissionDenied) | Err(Error::Platform(_))
@@ -3071,10 +3071,10 @@ mod tests {
             Ipv4Address::new(198, 51, 100, 0),
             Ipv4PrefixLength::new(24).unwrap(),
         ));
-        let route = Route::new(RouteId::new(0), destination).with_interface_index(interface_index);
+        let route = RouteConfig::new(destination).with_interface_index(interface_index);
 
         backend
-            .add_route(route.clone())
+            .add_route(route)
             .expect("failed to add monitoring test route");
         // The kernel may canonicalize an on-link next hop differently from
         // the `AF_UNSPEC` value used to create it. Read the canonical row so
