@@ -12,7 +12,7 @@ use crate::dns::NewDnsConfig;
 use crate::ifaddr::{InterfaceAddress, NewInterfaceAddress};
 use crate::interface::{Interface, InterfaceConfig};
 use crate::neighbor::{NeighborEntry, StaticNeighbor};
-use crate::route::Route;
+use crate::route::{Route, RouteConfig};
 use net_lattice_core::Error;
 
 /// One existing imperative network mutation expressed as data.
@@ -25,9 +25,9 @@ use net_lattice_core::Error;
 #[non_exhaustive]
 pub enum Mutation {
     /// Adds a route using the route's currently supported defining fields.
-    AddRoute(Route),
+    AddRoute(RouteConfig),
     /// Removes a route according to the backend's current matching rules.
-    RemoveRoute(Route),
+    RemoveRoute(RouteConfig),
     /// Assigns an interface address.
     AddAddress(NewInterfaceAddress),
     /// Removes an observed interface address.
@@ -624,8 +624,8 @@ mod tests {
 
     #[test]
     fn plan_keeps_declared_order_without_executing_operations() {
-        let first = Mutation::AddRoute(Route::new(crate::route::RouteId::new(1), network()));
-        let second = Mutation::RemoveRoute(Route::new(crate::route::RouteId::new(2), network()));
+        let first = Mutation::AddRoute(RouteConfig::new(network()));
+        let second = Mutation::RemoveRoute(RouteConfig::new(network()).with_interface_index(2));
         let plan = MutationPlan::from_operations([first.clone(), second.clone()]);
         assert_eq!(plan.operations(), [first, second]);
         assert!(plan.operation(0).is_some());
@@ -636,9 +636,9 @@ mod tests {
 
     #[test]
     fn route_operations_expose_strict_native_acknowledgement_contracts() {
-        let route = Route::new(crate::route::RouteId::new(1), network());
+        let route = RouteConfig::new(network());
 
-        let added = Mutation::AddRoute(route.clone()).semantics();
+        let added = Mutation::AddRoute(route).semantics();
         assert_eq!(added.kind, MutationKind::AddRoute);
         assert_eq!(added.precondition, MutationPrecondition::Absent);
         assert_eq!(added.idempotency, MutationIdempotency::Strict);
@@ -696,7 +696,7 @@ mod tests {
         assert!(plan.is_empty());
         assert_eq!(plan.len(), 0);
 
-        let operation = Mutation::AddRoute(Route::new(crate::route::RouteId::new(1), network()));
+        let operation = Mutation::AddRoute(RouteConfig::new(network()));
         plan.push(operation.clone());
         assert_eq!(plan.operations(), std::slice::from_ref(&operation));
         assert_eq!(plan.into_iter().collect::<Vec<_>>(), vec![operation]);
@@ -737,7 +737,7 @@ mod tests {
     #[test]
     fn preflight_identifies_snapshot_and_partial_application_risks() {
         let plan = MutationPlan::from_operations([
-            Mutation::AddRoute(Route::new(crate::route::RouteId::new(1), network())),
+            Mutation::AddRoute(RouteConfig::new(network())),
             Mutation::SetDnsConfig(NewDnsConfig::new()),
         ]);
         let preflight = plan.preflight();
