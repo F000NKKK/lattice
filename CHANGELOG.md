@@ -7,7 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-No unreleased changes.
+### Added
+
+- `net-lattice-model::route::RouteConfig`: a new `#[non_exhaustive]` route
+  mutation intent type (`destination`, `gateway`, `metric`,
+  `interface_index`), distinct from the observed `Route` record, mirroring
+  `StaticNeighbor`'s split from `NeighborEntry`. `RouteConfig::new` plus
+  `with_gateway`/`with_metric`/`with_interface_index` builder methods
+  construct it; it carries no route identifier, since no backend accepts one
+  back as mutation input. `metric` is honored on Linux and Windows only and
+  silently ignored as a no-op on Darwin, matching the pre-existing
+  observed-side gap. Re-exported from `net_lattice::mutation`.
+
+### Changed
+
+- **Breaking:** `net-lattice-platform::RouteMutator` now declares its own
+  `type RouteConfig` associated type instead of reusing
+  `RouteProvider::Route`; `add_route`/`remove_route` take `Self::RouteConfig`
+  instead of `Self::Route`. `RouteProvider::Route` (the observed record) is
+  unchanged. Every backend (`net-lattice-backend-linux`,
+  `net-lattice-backend-windows`, `net-lattice-backend-darwin`) binds
+  `type RouteConfig = net_lattice_model::route::RouteConfig`.
+- **Breaking:** `net-lattice::Lattice::add_route`/`remove_route` and
+  `net_lattice_model::mutation::Mutation::AddRoute`/`RemoveRoute` now take
+  `RouteConfig` instead of `Route`. Callers that previously constructed a
+  placeholder `Route::new(RouteId::new(0), ...)` purely to submit a mutation
+  now construct `RouteConfig::new(destination)` instead, with no dummy
+  identifier required.
 
 ## [0.18.0] - 2026-08-04
 
