@@ -68,18 +68,22 @@ capabilities, then submit it. A successful call returns an observed interface
 read after the native update.
 
 ```rust,no_run
-use net_lattice::model::InterfaceId;
 use net_lattice::mutation::{DesiredAdminState, InterfaceConfig};
-use net_lattice::{Capability, Lattice, Result};
+use net_lattice::{Capability, Error, Lattice, Result};
 
 fn main() -> Result<()> {
     let lattice = Lattice::connect()?;
+    // Replace "eth0" with the actual name of the interface you intend to
+    // change — never select the first/loopback interface for a mutation.
+    let target_name = "eth0";
+    let interface = lattice
+        .interfaces()?
+        .into_iter()
+        .find(|interface| interface.name == target_name)
+        .ok_or(Error::NotFound)?;
+
     if lattice.supports(Capability::INTERFACE_ADMIN_STATE) {
-        let config = InterfaceConfig::new(
-            InterfaceId::new(7),
-            Some(DesiredAdminState::Up),
-            None,
-        )?;
+        let config = InterfaceConfig::new(interface.id, Some(DesiredAdminState::Up), None)?;
         let observed = lattice.set_interface_config(config)?;
         println!("{observed:?}");
     }
@@ -102,15 +106,24 @@ present but non-`Permanent` (dynamically learned) entry is refused with
 `Error::InvalidState` rather than silently evicting it.
 
 ```rust,no_run
-use net_lattice::model::{InterfaceId, IpAddress, MacAddress};
+use net_lattice::model::{IpAddress, MacAddress};
 use net_lattice::mutation::StaticNeighbor;
-use net_lattice::{Capability, Ipv4Address, Lattice, Result};
+use net_lattice::{Capability, Error, Ipv4Address, Lattice, Result};
 
 fn main() -> Result<()> {
     let lattice = Lattice::connect()?;
+    // Replace "eth0" with the actual name of the interface you intend to
+    // change — never select the first/loopback interface for a mutation.
+    let target_name = "eth0";
+    let interface = lattice
+        .interfaces()?
+        .into_iter()
+        .find(|interface| interface.name == target_name)
+        .ok_or(Error::NotFound)?;
+
     if lattice.supports(Capability::NEIGHBOR_MUTATION) {
         let neighbor = StaticNeighbor::new(
-            InterfaceId::new(7),
+            interface.id,
             IpAddress::from(Ipv4Address::new(192, 0, 2, 250)),
             MacAddress::new([0x02, 0x00, 0x00, 0x00, 0x00, 0xfa]),
         );
