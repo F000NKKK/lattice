@@ -94,7 +94,7 @@ an internal facade component until repeated reuse justifies a new crate.
 
 ## Current release and roadmap
 
-Published stage baseline: the `net-lattice 0.17` release line (see
+Published stage baseline: the `net-lattice 0.18` release line (see
 `SECURITY.md`'s supported-version table). Read the current workspace version
 from `crates/net-lattice/Cargo.toml`; do not duplicate a patch version here.
 
@@ -112,8 +112,16 @@ from `crates/net-lattice/Cargo.toml`; do not duplicate a patch version here.
   (`Capability::ROUTE_MUTATION`, ADR-0002), IPv6 DNS parity, and isolated
   destructive topology acceptance for route/address/neighbor CRUD and
   compensation.
-- 0.18: planned consistent `CurrentState` snapshots.
-- 0.19: planned `DesiredState` and inspectable diff.
+- 0.18: completed and released (`0.18.0`): consistent whole-system
+  `CurrentState` snapshots (`SnapshotProvider`, `Lattice::current_state()`)
+  with explicit scope/consistency/partial-read semantics, plus the
+  domain-scoped `net_lattice::model`/`mutation`/`monitoring` re-export
+  modules replacing the former crate-root re-export (breaking).
+- 0.19: implemented — `DesiredState` and inspectable `Diff`/`Diff::compute`
+  in `net-lattice-model` (pure, no backend/native dependency), plus the
+  `RouteConfig` route-mutation intent type and the accompanying
+  `RouteMutator` binding change (breaking). Not yet cut as a dated release
+  (still under `[Unreleased]` in `CHANGELOG.md`).
 - 0.20: planned declarative apply through the transaction executor.
 - 0.21: planned pre-1.0 compatibility and hardening audit.
 

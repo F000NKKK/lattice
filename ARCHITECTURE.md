@@ -727,7 +727,7 @@ discipline once Lattice reaches 1.0.
 The full model above is a target, not a starting point. Crates and modules
 are introduced only when there is real implementation work for them:
 
-Rows through 0.18 are implemented and available today; rows from 0.19 onward
+Rows through 0.19 are implemented and available today; rows from 0.20 onward
 describe planned, not-yet-built work.
 
 | Stage | Scope |
