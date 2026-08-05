@@ -98,8 +98,13 @@
 //!     };
 //!     let route = RouteConfig::new(destination).with_interface_index(interface.index);
 //!
-//!     // Build: an add followed by its own remove is a safe, idempotent demo
-//!     // plan that leaves system state unchanged if executed.
+//!     // Build: illustrative only. If the add succeeds and the remove then
+//!     // fails, the route can remain installed — execution stops after the
+//!     // first error (see below) and this plan has no automatic
+//!     // compensation. Use an explicit snapshot/compensator (see
+//!     // `ExecutionOptions`) when restoration on failure is required, and
+//!     // never run this against a route/interface that was not deliberately
+//!     // selected.
 //!     let plan = MutationPlan::from_operations([
 //!         Mutation::AddRoute(route),
 //!         Mutation::RemoveRoute(route),
@@ -157,10 +162,10 @@
 //! resolves only through the domain-scoped [`model`], [`mutation`], and
 //! [`monitoring`] modules (and, for backend authors, [`backend`]) — it is
 //! not also re-exported at the crate root. `net-lattice` has not reached
-//! 1.0 and this 0.18.0 release has not yet been published, so there is no
-//! external consumer of a prior flat-root path to preserve; keeping items
-//! reachable from two or three separate rendered docs.rs pages would only
-//! ship that duplication to a real audience for no benefit.
+//! 1.0, so pre-1.0 releases may still refine public module organization
+//! when the resulting API is clearer and the change is documented in the
+//! changelog; keeping items reachable from two or three separate rendered
+//! docs.rs pages would only ship redundant duplication for no benefit.
 
 // Async event adapters, enabled by the `async` feature. Not re-exported at
 // the crate root (Category A, see the module docs above); reachable via
