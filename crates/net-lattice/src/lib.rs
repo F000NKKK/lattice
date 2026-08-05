@@ -182,6 +182,13 @@ pub use net_lattice_core::{Error, Id, PlatformErrorCode, Result};
 pub use net_lattice_ip::{
     Ipv4Address, Ipv4Network, Ipv4PrefixLength, Ipv6Address, Ipv6Network, Ipv6PrefixLength,
 };
+// `DesiredState`/`Diff`/`RouteChange` are referenced only by `#[cfg(test)]
+// mod tests` below (via `use super::*;`), so a non-test `cargo check`
+// reports them unused even though `cargo test` uses them.
+#[allow(unused_imports)]
+use net_lattice_model::desired_state::DesiredState;
+#[allow(unused_imports)]
+use net_lattice_model::diff::{Diff, RouteChange};
 use net_lattice_model::dns::{DnsConfig, NewDnsConfig};
 use net_lattice_model::event::{Event, EventDomain, EventFilter};
 // `ChangeKind` is referenced only by `#[cfg(test)] mod tests` below (via
@@ -1539,6 +1546,62 @@ mod tests {
         let result = lattice.current_state();
 
         assert!(matches!(result, Err(Error::Unsupported)));
+    }
+
+    /// Facade-level coverage for `net_lattice::mutation::{DesiredState,
+    /// Diff}`, re-exported from `net-lattice-model` (see `NL-58`) — proves
+    /// the re-export actually resolves and behaves correctly when driven
+    /// through `Lattice::current_state()`, not just that the underlying
+    /// `net-lattice-model` crate's own unit tests pass. `Diff::compute` is
+    /// pure (no I/O, no native calls, see ADR NL-A-12/ADR-0010), so no
+    /// privileged/`#[ignore]` test is needed for it specifically — it needs
+    /// nothing beyond the two already-in-memory state values, which
+    /// `TestBackend` supplies deterministically here.
+    #[test]
+    fn facade_diff_reports_no_changes_when_desired_matches_observed() {
+        let lattice = lattice(Capability::empty());
+        let current = lattice.current_state().expect("current state");
+        let desired = DesiredState::empty().with_routes(vec![route()]);
+
+        let diff = Diff::compute(&current, &desired);
+
+        assert!(diff.routes.is_empty());
+        assert!(diff.interfaces.is_empty());
+        assert!(diff.neighbors.is_empty());
+        assert!(diff.addresses.is_empty());
+        assert!(diff.dns.is_none());
+    }
+
+    #[test]
+    fn facade_diff_reports_added_and_removed_routes_when_desired_differs() {
+        let lattice = lattice(Capability::empty());
+        let current = lattice.current_state().expect("current state");
+        let desired = DesiredState::empty().with_routes(vec![planned_route()]);
+
+        let diff = Diff::compute(&current, &desired);
+
+        assert_eq!(diff.routes.len(), 2);
+        assert!(diff.routes.iter().any(
+            |change| matches!(change, RouteChange::Added(added) if *added == planned_route())
+        ));
+        assert!(diff.routes.iter().any(
+            |change| matches!(change, RouteChange::Removed(removed) if *removed == observed_route())
+        ));
+    }
+
+    #[test]
+    fn facade_diff_reports_no_changes_for_unmanaged_domains() {
+        let lattice = lattice(Capability::empty());
+        let current = lattice.current_state().expect("current state");
+        let desired = DesiredState::empty();
+
+        let diff = Diff::compute(&current, &desired);
+
+        assert!(diff.routes.is_empty());
+        assert!(diff.interfaces.is_empty());
+        assert!(diff.neighbors.is_empty());
+        assert!(diff.addresses.is_empty());
+        assert!(diff.dns.is_none());
     }
 
     #[test]
