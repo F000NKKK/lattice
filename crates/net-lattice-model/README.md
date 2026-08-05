@@ -10,6 +10,10 @@ models data and contracts; it never inspects or mutates the host system.
   `DesiredAdminState` so observed `AdminState::Unknown` is never requested;
 - desired static-neighbor intent (`StaticNeighbor`) for ARP/NDP entries,
   distinct from the observed `NeighborEntry` and requiring an explicit MAC;
+- desired route-mutation intent (`RouteConfig`), distinct from the observed
+  `Route` and carrying no route identifier (no backend accepts one back as
+  mutation input); its `metric` field is honored on Linux and Windows only
+  and silently ignored on Darwin, matching the observed-side platform gap;
 - typed object identifiers and filtered change events;
 - mutation descriptions, semantics, snapshots, plans, and execution reports;
 - explicit separation between inspectable plan data and runtime execution;

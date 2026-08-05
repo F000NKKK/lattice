@@ -127,6 +127,19 @@ including the domain-scoped `net_lattice::model`/`mutation`/`monitoring`
 re-export modules (the crate root no longer re-exports domain items
 directly).
 
+Net Lattice also exposes a declarative model and an inspectable diff,
+without an apply step: `net-lattice-model`'s `DesiredState` is a
+whole-system, caller-authored aggregate parallel to `CurrentState` — one
+`Option`-wrapped field per domain, built via `DesiredState::empty()` plus
+per-domain `with_*` builders, with no backend dependency of its own — and
+`Diff::compute(&CurrentState, &DesiredState) -> Diff` computes a pure,
+side-effect-free difference between the two: route/neighbor/address as
+natural-key add/remove(/change) sets, interface as a per-field patch-diff,
+and DNS as a whole-value comparison. `Diff::compute` performs no I/O and
+calls no provider/backend method; deciding whether or how to apply a `Diff`
+is a later stage's concern (see the [architecture](ARCHITECTURE.md)'s State
+Model section).
+
 The following surface, described by the [architecture](ARCHITECTURE.md)'s
 Incremental Delivery Plan, is verified by the privileged Linux, Windows, and
 macOS CI jobs:

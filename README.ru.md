@@ -129,6 +129,19 @@ backend-крейту не требуется изменение — реализ
 крейта больше не реэкспортирует доменные типы напрямую), см. в
 [CHANGELOG.md](CHANGELOG.md).
 
+Net Lattice также предоставляет декларативную модель и inspectable diff, пока
+без шага применения: `DesiredState` в `net-lattice-model` — это
+whole-system-агрегат, формируемый вызывающей стороной, параллельный
+`CurrentState` — по одному полю-`Option` на домен, собирается через
+`DesiredState::empty()` и подомённые builder-методы `with_*`, без собственной
+зависимости от backend'а — а `Diff::compute(&CurrentState, &DesiredState) ->
+Diff` вычисляет чистую, side-effect-free разницу между ними: маршруты,
+соседи и адреса — как naturally-keyed множества add/remove(/change),
+интерфейс — как patch-diff по полям, DNS — как сравнение целого значения.
+`Diff::compute` не выполняет I/O и не вызывает ни один provider/backend
+метод; решение о том, применять ли `Diff` и как, остаётся за более поздним
+этапом (см. раздел State Model в [архитектуре](ARCHITECTURE.ru.md)).
+
 Следующая поверхность API, описанная в плане поэтапной поставки
 [архитектуры](ARCHITECTURE.ru.md), проверена privileged CI-задачами:
 
