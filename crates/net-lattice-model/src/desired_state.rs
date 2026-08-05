@@ -11,10 +11,10 @@
 //! one is purely a matter of calling this module's constructor/builder
 //! methods with the values a caller wants.
 //!
-//! A future `Diff` type (not part of this crate yet) is expected to compare
-//! a `CurrentState` against a `DesiredState` to compute the actions needed
-//! to reconcile observed state toward desired state. This module defines
-//! only the `DesiredState` data shape; it computes nothing.
+//! [`crate::diff::Diff`] compares a `CurrentState` against a `DesiredState`
+//! to compute the actions needed to reconcile observed state toward desired
+//! state. This module defines only the `DesiredState` data shape; it
+//! computes nothing.
 
 use crate::dns::NewDnsConfig;
 use crate::ifaddr::NewInterfaceAddress;
@@ -29,19 +29,19 @@ use crate::route::RouteConfig;
 /// carries a domain-level, not entry-level, meaning:
 ///
 /// - `None` means this domain is **not managed** by this `DesiredState` at
-///   all — the caller does not care about it. A future `Diff` computed
-///   against a `None` domain must produce no changes for that domain,
-///   including no proposed removals for entries that exist only in the
-///   observed [`crate::snapshot::CurrentState`].
+///   all — the caller does not care about it. [`crate::diff::Diff`] computed
+///   against a `None` domain produces no changes for that domain, including
+///   no proposed removals for entries that exist only in the observed
+///   [`crate::snapshot::CurrentState`].
 /// - `Some(_)` means this domain **is managed**, and the contained value is
 ///   the complete desired content for that domain. For the four
 ///   collection-shaped domains (`routes`, `interfaces`, `neighbors`,
 ///   `addresses`), `Some(vec![])` is a meaningful, distinct value: it means
-///   "this domain is managed, and I want zero entries in it" — a future
-///   `Diff` should treat this as a request to remove every entry currently
-///   observed in that domain, not as "nothing to do." An empty `Vec` is
-///   never equivalent to `None`; the two must not be collapsed into one
-///   representation.
+///   "this domain is managed, and I want zero entries in it" —
+///   [`crate::diff::Diff`] treats this as a request to remove every entry
+///   currently observed in that domain, not as "nothing to do." An empty
+///   `Vec` is never equivalent to `None`; the two must not be collapsed into
+///   one representation.
 ///
 /// This two-level `Option` reading (domain-level opt-out via the outer
 /// `Option` on `DesiredState` itself, versus each per-domain config type's
