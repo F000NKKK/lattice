@@ -3,13 +3,16 @@
 ## Supported Versions
 
 Net Lattice follows a rolling support policy. Security fixes are provided only
-for the latest stable release series. The current supported line is 0.18.x;
-support for the 0.1.x-0.17.x series has ended.
+for the latest stable release series. The current supported line is 0.19.x
+(starting at 0.19.1); 0.19.0 itself is unsupported due to the documentation
+and public-API-reachability defects fixed in 0.19.1 (see
+[CHANGELOG.md](CHANGELOG.md)), and support for the 0.1.x-0.18.x series has
+ended.
 
 | Version | Supported |
 | ------- | --------- |
-| 0.18.x | ✅ |
-| 0.1.x - 0.17.x | ❌ |
+| 0.19.x | ✅ |
+| 0.1.x - 0.19.0 | ❌ |
 
 ## Reporting a Vulnerability
 
