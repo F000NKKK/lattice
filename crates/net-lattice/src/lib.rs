@@ -221,7 +221,7 @@ use net_lattice_platform::{
 };
 pub use net_lattice_platform::{Capability, CapabilityProvider};
 
-/// Observed and desired-state domain objects, plus their read/inspection
+/// Observed networking state, shared domain value types, and read/inspection
 /// provider traits.
 ///
 /// This is the only public path to these items: they are not re-exported at
