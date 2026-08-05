@@ -614,11 +614,22 @@ architecture reserves room for it as:
   `Added`/`Removed` entry (`Single`); a route `Added`/`Removed` pair sharing
   the same destination compiles instead to one `ReplaceRoute { old, new }`
   step, the concrete encoding of the route-replacement-ordering policy
-  covering the native-delete-key ambiguity that varies by backend. Only
-  compilation exists at this stage — execution (submitting the underlying
-  native operations against a specific backend, capability-aware rejection,
-  and rollback) remains out of scope until the transaction engine consumes
-  `ApplyPlan`.
+  covering the native-delete-key ambiguity that varies by backend.
+  Execution now exists too: `Lattice::<B>::execute_apply_plan(&ApplyPlan,
+  &mut ExecutionOptions) -> ApplyPlanReport` submits the underlying native
+  operations against the connected backend, reusing `execute_plan`'s own
+  cancellation/snapshot/dispatch/compensation primitives for `Single`
+  steps and running a dedicated state machine for `ReplaceRoute` steps:
+  plan-wide capability-aware rejection before any native call (for a
+  route-metric change the connected backend cannot honor, per two new
+  additive `RouteMutator` methods, `supports_route_metric`/
+  `route_replace_order`), precondition reuse, per-backend leg ordering,
+  and mandatory read-after-write verification. `ApplyPlanReport`
+  distinguishes `Applied`/`Failed`/`NotAttempted` from two further
+  outcomes no `MutationOutcome` variant can express: `Rejected`
+  (capability-aware, no native call attempted) and `NonConvergent` (a
+  native call was attempted but the resulting state could not be
+  confirmed).
 
 `CurrentState` (the data shape, in `net-lattice-model`) and
 `SnapshotProvider` (the assembly contract, in `net-lattice-platform`) exist,
@@ -634,10 +645,10 @@ trait there is both legal and sufficient — no backend still needs to write
 any code to get whole-system snapshots.
 `DesiredState` and `Diff` (the data shapes, in `net-lattice-model`, see
 above) now exist as of Stage 0.19, and `ApplyPlan`/`ApplyStep` (also
-`net-lattice-model`, compile-only, see above) now exist as of Stage 0.20.
-Executing an `ApplyPlan` against a specific backend — the transaction and
-remaining imperative mutation contracts a real execution path needs — is
-still pending later Stage 0.20 work. The
+`net-lattice-model`, see above) now exist as of Stage 0.20, along with
+`Lattice::<B>::execute_apply_plan` (`net-lattice`), which executes an
+`ApplyPlan` against a specific connected backend and reports convergence,
+non-convergence, and compensation results. The
 state/config split is named here — as a parallel `*Config` type per domain
 object living alongside its state type in `net-lattice-model` — so that it
 is built in from the first `*Config` type rather than retrofitted after

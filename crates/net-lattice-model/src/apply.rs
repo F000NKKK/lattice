@@ -13,13 +13,16 @@
 
 use std::collections::HashMap;
 
+use net_lattice_core::Error;
+
 use crate::address::Network;
 use crate::diff::{AddressChange, Diff, NeighborChange, RouteChange};
 use crate::interface::InterfaceId;
 use crate::mac::MacAddress;
 use crate::mutation::{
-    Mutation, MutationConfirmation, MutationIdempotency, MutationKind, MutationPrecondition,
-    MutationPrivilege, MutationReversibility, MutationSemantics,
+    Mutation, MutationConfirmation, MutationIdempotency, MutationKind, MutationOperationReport,
+    MutationPrecondition, MutationPrivilege, MutationReversibility, MutationSemantics,
+    RollbackStatus,
 };
 use crate::neighbor::{NeighborEntry, StaticNeighbor};
 use crate::route::{Route, RouteConfig};
@@ -91,6 +94,189 @@ impl ApplyStep {
                 may_partially_apply: true,
             },
         }
+    }
+}
+
+/// The result recorded for one [`ApplyStep`] in an executed [`ApplyPlan`].
+///
+/// This mirrors [`crate::mutation::MutationOutcome`]'s shape but adds two
+/// outcomes that no [`crate::mutation::MutationOutcome`] variant can
+/// distinguish: a capability-aware rejection decided before any native call
+/// was attempted, and a native call that completed without confirming the
+/// resulting state matched what was requested. Constructing or inspecting
+/// this type never changes operating-system state.
+///
+/// `#[non_exhaustive]`: a later stage may add an outcome without breaking
+/// callers who don't match exhaustively, matching
+/// [`crate::mutation::MutationOutcome`]'s own convention.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum ApplyStepOutcome {
+    /// The step's native operation(s) completed and, for
+    /// [`ApplyStep::ReplaceRoute`], read-after-write confirmed the expected
+    /// end state.
+    Applied,
+    /// A native operation returned an error.
+    Failed {
+        /// Backend error returned by the operation.
+        error: Error,
+        /// Whether the operation may have changed state before failing. For
+        /// [`ApplyStep::ReplaceRoute`], this reflects exactly which leg of
+        /// the replacement completed before the failing leg was attempted.
+        may_have_applied: bool,
+    },
+    /// The executor did not attempt this step because an earlier step
+    /// failed, was rejected, or execution was cancelled.
+    NotAttempted,
+    /// Rejected before any native call was attempted, because the
+    /// connected backend cannot honor a field this step's replacement
+    /// requires (for example, a route metric change on a backend whose
+    /// native route calls never read or write metric).
+    Rejected {
+        /// The rejection error.
+        error: Error,
+    },
+    /// A native call reported success but the expected end state could not
+    /// be confirmed by a subsequent read, or a precondition this step
+    /// required no longer held when re-checked immediately before
+    /// execution. Distinguishes non-convergence — an operation that was
+    /// attempted but whose effect on observed state is unconfirmed or
+    /// blocked — from an ordinary native failure ([`Self::Failed`]).
+    NonConvergent {
+        /// Why this step's outcome could not be confirmed as convergent.
+        reason: NonConvergentReason,
+    },
+}
+
+/// Why an [`ApplyStepOutcome::NonConvergent`] outcome was recorded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum NonConvergentReason {
+    /// The precondition snapshot this step depended on (the observed route
+    /// being replaced, for [`ApplyStep::ReplaceRoute`]) no longer matched
+    /// when re-checked immediately before execution.
+    StalePrecondition,
+    /// Read-after-write could not confirm both halves of a
+    /// [`ApplyStep::ReplaceRoute`] replacement: the desired route present
+    /// and the observed route it replaces absent.
+    AmbiguousReplacementUnverifiable,
+}
+
+/// Executor report for an ordered [`ApplyPlan`].
+///
+/// Mirrors [`crate::mutation::MutationPlanReport`]'s shape and accessor set:
+/// the outcome at index `n` corresponds to [`ApplyPlan::step`]`(n)`, one
+/// outcome is recorded per [`ApplyStep`] (a [`ApplyStep::ReplaceRoute`]'s two
+/// native calls are reported as one logical unit, not two), and
+/// [`RollbackStatus`]/[`MutationOperationReport`]/
+/// [`crate::mutation::MutationExecutionPhase`] are reused unchanged rather
+/// than duplicated for this report family.
+#[derive(Debug)]
+pub struct ApplyPlanReport {
+    outcomes: Vec<ApplyStepOutcome>,
+    rollback: RollbackStatus,
+    operation_reports: Vec<MutationOperationReport>,
+}
+
+impl ApplyPlanReport {
+    /// Creates a report for outcomes in the plan's declared order.
+    pub fn new(
+        outcomes: impl IntoIterator<Item = ApplyStepOutcome>,
+        rollback: RollbackStatus,
+    ) -> Self {
+        let outcomes: Vec<_> = outcomes.into_iter().collect();
+        Self {
+            operation_reports: vec![MutationOperationReport::not_attempted(); outcomes.len()],
+            outcomes,
+            rollback,
+        }
+    }
+
+    /// Creates a report with phase and timing metadata aligned to outcomes.
+    pub fn with_operation_reports(
+        outcomes: impl IntoIterator<Item = ApplyStepOutcome>,
+        rollback: RollbackStatus,
+        operation_reports: impl IntoIterator<Item = MutationOperationReport>,
+    ) -> Self {
+        Self {
+            outcomes: outcomes.into_iter().collect(),
+            rollback,
+            operation_reports: operation_reports.into_iter().collect(),
+        }
+    }
+
+    /// Returns one outcome for each step attempted or skipped.
+    pub fn outcomes(&self) -> &[ApplyStepOutcome] {
+        &self.outcomes
+    }
+
+    /// Returns the outcome at a plan-local step index, if present.
+    pub fn outcome(&self, index: usize) -> Option<&ApplyStepOutcome> {
+        self.outcomes.get(index)
+    }
+
+    /// Returns the number of recorded outcomes.
+    pub fn len(&self) -> usize {
+        self.outcomes.len()
+    }
+
+    /// Whether no outcomes have been recorded.
+    pub fn is_empty(&self) -> bool {
+        self.outcomes.is_empty()
+    }
+
+    /// Returns the rollback status recorded by the executor.
+    pub fn rollback(&self) -> &RollbackStatus {
+        &self.rollback
+    }
+
+    /// Returns phase and timing metadata aligned with [`Self::outcomes`].
+    pub fn operation_reports(&self) -> &[MutationOperationReport] {
+        &self.operation_reports
+    }
+
+    /// Returns phase and timing metadata for one plan-local step.
+    pub fn operation_report(&self, index: usize) -> Option<&MutationOperationReport> {
+        self.operation_reports.get(index)
+    }
+
+    /// Whether every recorded step was applied successfully.
+    pub fn is_success(&self) -> bool {
+        self.outcomes
+            .iter()
+            .all(|outcome| matches!(outcome, ApplyStepOutcome::Applied))
+    }
+
+    /// Number of steps recorded as applied.
+    pub fn applied_count(&self) -> usize {
+        self.outcomes
+            .iter()
+            .filter(|outcome| matches!(outcome, ApplyStepOutcome::Applied))
+            .count()
+    }
+
+    /// Number of steps the executor did not attempt.
+    pub fn not_attempted_count(&self) -> usize {
+        self.outcomes
+            .iter()
+            .filter(|outcome| matches!(outcome, ApplyStepOutcome::NotAttempted))
+            .count()
+    }
+
+    /// Number of steps rejected before any native call was attempted.
+    pub fn rejected_count(&self) -> usize {
+        self.outcomes
+            .iter()
+            .filter(|outcome| matches!(outcome, ApplyStepOutcome::Rejected { .. }))
+            .count()
+    }
+
+    /// Number of steps recorded as non-convergent.
+    pub fn non_convergent_count(&self) -> usize {
+        self.outcomes
+            .iter()
+            .filter(|outcome| matches!(outcome, ApplyStepOutcome::NonConvergent { .. }))
+            .count()
     }
 }
 
@@ -778,5 +964,81 @@ mod tests {
         let plan = ApplyPlan::from_steps([first.clone(), second.clone()]);
         assert_eq!(plan.steps(), [first.clone(), second.clone()]);
         assert_eq!(plan.into_iter().collect::<Vec<_>>(), vec![first, second]);
+    }
+
+    // ---- ApplyPlanReport ----
+
+    #[test]
+    fn apply_plan_report_counts_every_outcome_kind() {
+        let report = ApplyPlanReport::new(
+            [
+                ApplyStepOutcome::Applied,
+                ApplyStepOutcome::Failed {
+                    error: Error::PermissionDenied,
+                    may_have_applied: true,
+                },
+                ApplyStepOutcome::NotAttempted,
+                ApplyStepOutcome::Rejected {
+                    error: Error::Unsupported,
+                },
+                ApplyStepOutcome::NonConvergent {
+                    reason: NonConvergentReason::StalePrecondition,
+                },
+            ],
+            RollbackStatus::NotAttempted,
+        );
+
+        assert!(!report.is_success());
+        assert_eq!(report.len(), 5);
+        assert!(!report.is_empty());
+        assert_eq!(report.applied_count(), 1);
+        assert_eq!(report.not_attempted_count(), 1);
+        assert_eq!(report.rejected_count(), 1);
+        assert_eq!(report.non_convergent_count(), 1);
+        assert!(matches!(report.rollback(), RollbackStatus::NotAttempted));
+        assert_eq!(report.operation_reports().len(), 5);
+        assert!(report.operation_report(4).is_some());
+        assert!(report.outcome(5).is_none());
+        assert!(matches!(
+            report.outcome(1),
+            Some(ApplyStepOutcome::Failed {
+                may_have_applied: true,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn apply_plan_report_with_operation_reports_preserves_supplied_metadata() {
+        let operation_reports = [
+            MutationOperationReport {
+                phase: crate::mutation::MutationExecutionPhase::Execution,
+                duration: std::time::Duration::from_millis(3),
+                stop_reason: None,
+            },
+            MutationOperationReport::not_attempted(),
+        ];
+        let report = ApplyPlanReport::with_operation_reports(
+            [ApplyStepOutcome::Applied, ApplyStepOutcome::NotAttempted],
+            RollbackStatus::NotNeeded,
+            operation_reports,
+        );
+
+        assert!(!report.is_success());
+        assert_eq!(report.applied_count(), 1);
+        assert_eq!(report.not_attempted_count(), 1);
+        assert_eq!(report.operation_reports(), operation_reports);
+    }
+
+    #[test]
+    fn apply_plan_report_all_applied_is_success() {
+        let report = ApplyPlanReport::new(
+            [ApplyStepOutcome::Applied, ApplyStepOutcome::Applied],
+            RollbackStatus::NotNeeded,
+        );
+        assert!(report.is_success());
+        assert_eq!(report.applied_count(), 2);
+        assert_eq!(report.rejected_count(), 0);
+        assert_eq!(report.non_convergent_count(), 0);
     }
 }

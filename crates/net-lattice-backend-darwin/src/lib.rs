@@ -32,7 +32,7 @@ use net_lattice_model::{IpAddress, Network};
 use net_lattice_platform::{
     AddressMutator, AddressProvider, Capability, CapabilityProvider, DnsMutator, DnsProvider,
     EventProvider, EventReceiver, InterfaceMutator, InterfaceProvider, NeighborMutator,
-    NeighborProvider, RouteMutator, RouteProvider,
+    NeighborProvider, RouteMutator, RouteProvider, RouteReplaceOrder,
 };
 #[cfg(feature = "async")]
 use net_lattice_platform::{TokioEventProvider, TokioEventReceiver};
@@ -753,6 +753,22 @@ impl RouteMutator for DarwinBackend {
             let message = build_delete_message(&route)?;
             send_route_request(self.fd, &message, RTM_SEQ_DELETE)
         })
+    }
+
+    /// `false`: this backend's `build_add_message`/`build_delete_message`
+    /// never read or write a route's metric — no `RTA_*` flag or `rtm_rmx`
+    /// field carries it, matching [`RouteConfig::metric`]'s own documented
+    /// "not supported on Darwin" gap.
+    fn supports_route_metric(&self) -> bool {
+        false
+    }
+
+    /// This backend's delete key (destination/gateway/interface, since
+    /// metric is never part of it) cannot disambiguate an old route from
+    /// its replacement while both exist at once, so the new route must be
+    /// added first and the old one removed only afterward.
+    fn route_replace_order(&self) -> RouteReplaceOrder {
+        RouteReplaceOrder::AddBeforeRemove
     }
 }
 

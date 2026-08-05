@@ -46,7 +46,12 @@ models data and contracts; it never inspects or mutates the host system.
   `Added`/`Removed` pair sharing the same destination lowers instead to one
   `ApplyStep::ReplaceRoute { old, new }`. `ApplyPlan::compile` performs no
   I/O, calls no provider/backend method, and cannot fail — it does not decide
-  which backend executes the plan or whether a step is acceptable there.
+  which backend executes the plan or whether a step is acceptable there;
+- `ApplyPlanReport`, `ApplyStepOutcome`, and `NonConvergentReason`: the typed
+  report shape an executor (the `net-lattice` facade) fills in after actually
+  running an `ApplyPlan` against a backend. Constructing or inspecting these
+  types never changes operating-system state; this crate defines only their
+  shape, not execution itself.
 
 Use this crate directly for offline plan construction, policy analysis,
 serialization layers, or backend development. Use the `net-lattice` facade to

@@ -629,11 +629,24 @@ provider-traits, а не другой контракт backend'а. Дорабо�
   `Added`/`Removed` с одинаковым destination компилируется вместо этого в
   один шаг `ReplaceRoute { old, new }` — конкретное воплощение политики
   порядка замены маршрута, покрывающее неоднозначность native-ключа
-  удаления, которая варьируется по backend'у. На этом этапе существует
-  только компиляция — исполнение (отправка нижележащих native-операций
-  конкретному backend'у, отклонение по возможностям (capability-aware) и
-  откат) остаётся вне области действия до тех пор, пока transaction engine
-  не начнёт потреблять `ApplyPlan`.
+  удаления, которая варьируется по backend'у. Теперь существует и
+  исполнение: `Lattice::<B>::execute_apply_plan(&ApplyPlan, &mut
+  ExecutionOptions) -> ApplyPlanReport` отправляет нижележащие
+  native-операции подключённому backend'у, повторно используя
+  собственные примитивы `execute_plan`
+  (cancellation/snapshot/dispatch/compensation) для шагов `Single` и
+  выполняя отдельный конечный автомат для шагов `ReplaceRoute`:
+  общеплановое отклонение по возможностям (capability-aware) до любого
+  native-вызова (для изменения route-метрики, которое подключённый
+  backend не может поддержать, через два новых additive-метода
+  `RouteMutator`, `supports_route_metric`/`route_replace_order`),
+  повторная проверка precondition, порядок двух native-вызовов по
+  backend'у и обязательная верификация read-after-write.
+  `ApplyPlanReport` различает `Applied`/`Failed`/`NotAttempted` и два
+  дополнительных исхода, которые не может выразить ни один вариант
+  `MutationOutcome`: `Rejected` (capability-aware, ни один native-вызов
+  не был предпринят) и `NonConvergent` (native-вызов был предпринят, но
+  итоговое состояние не удалось подтвердить).
 
 `CurrentState` (форма данных, в `net-lattice-model`)
 и `SnapshotProvider` (контракт сборки, в `net-lattice-platform`) уже
@@ -650,11 +663,11 @@ generic-параметра типа без локального типа в са
 никакого кода, чтобы получить снапшот всей системы.
 `DesiredState` и `Diff` (формы данных, в `net-lattice-model`, см. выше)
 теперь существуют начиная с этапа 0.19, а `ApplyPlan`/`ApplyStep` (тоже
-`net-lattice-model`, только компиляция, см. выше) теперь существуют начиная
-с этапа 0.20. Исполнение `ApplyPlan` для конкретного backend'а —
-transaction-контракты и оставшаяся imperative mutation-поверхность,
-необходимые для реального пути исполнения — всё ещё предстоит в рамках
-последующей работы этапа 0.20. Разделение state/config названо здесь — как параллельный тип `*Config` на
+`net-lattice-model`, см. выше) теперь существуют начиная с этапа 0.20,
+вместе с `Lattice::<B>::execute_apply_plan` (`net-lattice`), который
+исполняет `ApplyPlan` для конкретного подключённого backend'а и сообщает
+о результатах convergence, non-convergence и compensation. Разделение
+state/config названо здесь — как параллельный тип `*Config` на
 каждый доменный объект, живущий рядом с его типом состояния в
 `net-lattice-model` — чтобы оно было заложено с первого типа `*Config`, а не
 доделано после того, как `CurrentState`/`DesiredState` уже были бы слиты в

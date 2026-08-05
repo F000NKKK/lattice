@@ -39,4 +39,51 @@ pub trait RouteMutator {
 
     fn add_route(&self, route: Self::RouteConfig) -> Result<()>;
     fn remove_route(&self, route: Self::RouteConfig) -> Result<()>;
+
+    /// Whether this backend's native add/remove route calls read or write a
+    /// route's metric at all.
+    ///
+    /// `true` by default. A backend whose native route calls never consult
+    /// metric (macOS/BSD's `PF_ROUTE` route socket, for example) overrides
+    /// this to `false`. This is a fixed fact about the backend target, not a
+    /// runtime-dependent capability: it does not vary between two processes
+    /// connected to the same kind of backend, so it is a plain trait method
+    /// rather than a `Capability` flag (which models facts that can differ
+    /// by connected system/privilege at runtime).
+    fn supports_route_metric(&self) -> bool {
+        true
+    }
+
+    /// The native-call ordering this backend needs for a destination-paired
+    /// route replacement (removing one route and adding another at the same
+    /// destination as one logical unit).
+    ///
+    /// [`RouteReplaceOrder::RemoveBeforeAdd`] by default, matching a
+    /// narrow native delete key (destination/gateway/metric/interface) that
+    /// would otherwise ambiguously match the replacement's own add if both
+    /// were present at once. A backend whose delete key cannot disambiguate
+    /// the old and new route while both exist simultaneously (macOS/BSD)
+    /// overrides this to [`RouteReplaceOrder::AddBeforeRemove`].
+    fn route_replace_order(&self) -> RouteReplaceOrder {
+        RouteReplaceOrder::RemoveBeforeAdd
+    }
+}
+
+/// Native-call ordering for a destination-paired route replacement.
+///
+/// `#[non_exhaustive]`: a future backend may need a third ordering strategy
+/// without this being a breaking change for callers who match
+/// non-exhaustively, matching this crate's other capability/policy enums.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum RouteReplaceOrder {
+    /// Remove the old route, then add the new one. Safe whenever the
+    /// backend's delete key can uniquely identify the old route even while
+    /// the new route does not yet exist.
+    RemoveBeforeAdd,
+    /// Add the new route, then remove the old one. Required when the
+    /// backend's delete key cannot disambiguate the old and new route while
+    /// both exist simultaneously, so the old route must be removed only
+    /// after the new one is already present.
+    AddBeforeRemove,
 }

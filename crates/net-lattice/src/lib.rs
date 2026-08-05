@@ -271,6 +271,10 @@ pub mod mutation {
     #[doc(inline)]
     pub use crate::executor::{Cancellation, Compensation, ExecutionOptions, Snapshot};
     #[doc(inline)]
+    pub use net_lattice_model::apply::{
+        ApplyPlan, ApplyPlanReport, ApplyStep, ApplyStepOutcome, NonConvergentReason,
+    };
+    #[doc(inline)]
     pub use net_lattice_model::desired_state::DesiredState;
     #[doc(inline)]
     pub use net_lattice_model::diff::{
@@ -296,6 +300,7 @@ pub mod mutation {
     #[doc(inline)]
     pub use net_lattice_platform::{
         AddressMutator, DnsMutator, InterfaceMutator, NeighborMutator, RouteMutator,
+        RouteReplaceOrder,
     };
 }
 
@@ -342,7 +347,8 @@ pub mod backend {
     pub use net_lattice_platform::{
         AddressMutator, AddressProvider, CapabilityProvider, DnsMutator, DnsProvider,
         EventProvider, EventReceiver, EventSender, InterfaceMutator, InterfaceProvider,
-        NeighborMutator, NeighborProvider, RouteMutator, RouteProvider, SnapshotProvider,
+        NeighborMutator, NeighborProvider, RouteMutator, RouteProvider, RouteReplaceOrder,
+        SnapshotProvider,
     };
     #[cfg(feature = "async")]
     pub use net_lattice_platform::{TokioEventProvider, TokioEventReceiver, TokioEventSender};
@@ -406,6 +412,24 @@ impl<B> LatticeBackend for B where
 /// The top-level entry point: a connected backend for the current system.
 pub struct Lattice<B: LatticeBackend> {
     backend: B,
+}
+
+/// Running conflict-detection state threaded across one plan's preflight,
+/// shared by [`Lattice::validate_plan`] (over a whole [`MutationPlan`]) and
+/// `validate_apply_plan` (over an
+/// [`net_lattice_model::apply::ApplyPlan`]'s `Single` steps).
+///
+/// Kept as an explicit struct instead of loop-local `Vec`s so both preflight
+/// entry points can call [`Lattice::validate_one_mutation`] with one running
+/// accumulator across the whole plan.
+#[derive(Default)]
+struct PlanAccumulators {
+    planned_routes: Vec<RouteConfig>,
+    removed_routes: Vec<RouteConfig>,
+    planned_addresses: Vec<(u32, Network)>,
+    removed_addresses: Vec<(u32, Network)>,
+    planned_neighbors: Vec<(u32, IpAddress)>,
+    removed_neighbors: Vec<(u32, IpAddress)>,
 }
 
 /// Assembles a [`CurrentState`] snapshot of the connected backend.
@@ -555,136 +579,191 @@ impl<B: LatticeBackend> Lattice<B> {
     /// the connected backend before an executor submits any operation; native
     /// privilege and current-state checks can still fail at execution time.
     pub fn validate_plan(&self, plan: &MutationPlan) -> Result<()> {
-        let mut planned_routes = Vec::new();
-        let mut removed_routes = Vec::new();
-        let mut planned_addresses = Vec::new();
-        let mut removed_addresses = Vec::new();
-        let mut planned_neighbors = Vec::new();
-        let mut removed_neighbors = Vec::new();
+        let mut accumulators = PlanAccumulators::default();
         for operation in plan.operations() {
-            if executor::requires_dns_capability(operation)
-                && !self.supports(Capability::DNS_MUTATION)
-            {
-                return Err(Error::Unsupported);
-            }
-            if executor::requires_neighbor_capability(operation)
-                && !self.supports(Capability::NEIGHBOR_MUTATION)
-            {
-                return Err(Error::Unsupported);
-            }
-            if executor::requires_route_capability(operation)
-                && !self.supports(Capability::ROUTE_MUTATION)
-            {
-                return Err(Error::Unsupported);
-            }
+            self.validate_one_mutation(operation, &mut accumulators)?;
+        }
+        Ok(())
+    }
 
-            match operation {
-                Mutation::AddRoute(route) => {
-                    let exists_in_system = self
-                        .routes()?
+    /// Runtime preflight for one operation, threading the running
+    /// conflict-detection state for a whole plan through `accumulators`.
+    ///
+    /// Extracted so [`Self::validate_plan`] (over a [`MutationPlan`]) and
+    /// `validate_apply_plan` (over an [`net_lattice_model::apply::ApplyPlan`]'s
+    /// `Single` steps, interleaved with `ReplaceRoute` steps) both preflight
+    /// each [`Mutation`] through the same logic with one running accumulator
+    /// across the whole plan, rather than duplicating this match.
+    fn validate_one_mutation(
+        &self,
+        operation: &Mutation,
+        accumulators: &mut PlanAccumulators,
+    ) -> Result<()> {
+        if executor::requires_dns_capability(operation) && !self.supports(Capability::DNS_MUTATION)
+        {
+            return Err(Error::Unsupported);
+        }
+        if executor::requires_neighbor_capability(operation)
+            && !self.supports(Capability::NEIGHBOR_MUTATION)
+        {
+            return Err(Error::Unsupported);
+        }
+        if executor::requires_route_capability(operation)
+            && !self.supports(Capability::ROUTE_MUTATION)
+        {
+            return Err(Error::Unsupported);
+        }
+
+        match operation {
+            Mutation::AddRoute(route) => {
+                let exists_in_system = self
+                    .routes()?
+                    .iter()
+                    .any(|candidate| Self::same_route(candidate, route))
+                    && !accumulators
+                        .removed_routes
                         .iter()
-                        .any(|candidate| Self::same_route(candidate, route))
-                        && !removed_routes.iter().any(|candidate| candidate == route);
-                    let exists = exists_in_system
-                        || planned_routes.iter().any(|candidate| candidate == route);
-                    if exists {
-                        return Err(Error::AlreadyExists);
-                    }
-                    planned_routes.push(*route);
-                    removed_routes.retain(|candidate| candidate != route);
-                }
-                Mutation::RemoveRoute(route) => {
-                    let exists_in_system = self
-                        .routes()?
+                        .any(|candidate| candidate == route);
+                let exists = exists_in_system
+                    || accumulators
+                        .planned_routes
                         .iter()
-                        .any(|candidate| Self::same_route(candidate, route))
-                        && !removed_routes.iter().any(|candidate| candidate == route);
-                    let exists = exists_in_system
-                        || planned_routes.iter().any(|candidate| candidate == route);
-                    if !exists {
-                        return Err(Error::NotFound);
-                    }
-                    planned_routes.retain(|candidate| candidate != route);
-                    removed_routes.push(*route);
+                        .any(|candidate| candidate == route);
+                if exists {
+                    return Err(Error::AlreadyExists);
                 }
-                Mutation::AddAddress(address) => {
-                    let interface_index = address.interface_id.value() as u32;
-                    if !self.interfaces()?.iter().any(|interface| {
-                        interface.id == address.interface_id || interface.index == interface_index
-                    }) {
-                        return Err(Error::NotFound);
-                    }
-                    let key = (interface_index, address.address);
-                    let exists_in_system =
-                        self.addresses()?.iter().any(|candidate| {
-                            candidate.interface_index == interface_index
-                                && candidate.address == address.address
-                        }) && !removed_addresses.iter().any(|candidate| candidate == &key);
-                    if exists_in_system
-                        || planned_addresses.iter().any(|candidate| candidate == &key)
-                    {
-                        return Err(Error::AlreadyExists);
-                    }
-                    planned_addresses.push(key);
-                    removed_addresses.retain(|candidate| candidate != &key);
-                }
-                Mutation::RemoveAddress(address) => {
-                    let key = (address.interface_index, address.address);
-                    let exists_in_system =
-                        self.addresses()?.iter().any(|candidate| {
-                            candidate.id == address.id
-                                || (candidate.interface_index == address.interface_index
-                                    && candidate.address == address.address)
-                        }) && !removed_addresses.iter().any(|candidate| candidate == &key);
-                    if !exists_in_system
-                        && !planned_addresses.iter().any(|candidate| candidate == &key)
-                    {
-                        return Err(Error::NotFound);
-                    }
-                    planned_addresses.retain(|candidate| candidate != &key);
-                    removed_addresses.push(key);
-                }
-                Mutation::AddStaticNeighbor(neighbor) => {
-                    let interface_index = neighbor.interface_id.value() as u32;
-                    if !self.interfaces()?.iter().any(|interface| {
-                        interface.id == neighbor.interface_id || interface.index == interface_index
-                    }) {
-                        return Err(Error::NotFound);
-                    }
-                    let key = (interface_index, neighbor.address);
-                    let exists_in_system =
-                        self.neighbors()?.iter().any(|candidate| {
-                            candidate.interface_index == interface_index
-                                && candidate.address == neighbor.address
-                        }) && !removed_neighbors.iter().any(|candidate| candidate == &key);
-                    if exists_in_system
-                        || planned_neighbors.iter().any(|candidate| candidate == &key)
-                    {
-                        return Err(Error::AlreadyExists);
-                    }
-                    planned_neighbors.push(key);
-                    removed_neighbors.retain(|candidate| candidate != &key);
-                }
-                Mutation::RemoveStaticNeighbor(neighbor) => {
-                    let interface_index = neighbor.interface_id.value() as u32;
-                    let key = (interface_index, neighbor.address);
-                    let exists_in_system =
-                        self.neighbors()?.iter().any(|candidate| {
-                            candidate.interface_index == interface_index
-                                && candidate.address == neighbor.address
-                        }) && !removed_neighbors.iter().any(|candidate| candidate == &key);
-                    if !exists_in_system
-                        && !planned_neighbors.iter().any(|candidate| candidate == &key)
-                    {
-                        return Err(Error::NotFound);
-                    }
-                    planned_neighbors.retain(|candidate| candidate != &key);
-                    removed_neighbors.push(key);
-                }
-                Mutation::SetDnsConfig(_) => {}
-                Mutation::SetInterfaceConfig(config) => self.validate_interface_config(config)?,
-                _ => return Err(Error::Unsupported),
+                accumulators.planned_routes.push(*route);
+                accumulators
+                    .removed_routes
+                    .retain(|candidate| candidate != route);
             }
+            Mutation::RemoveRoute(route) => {
+                let exists_in_system = self
+                    .routes()?
+                    .iter()
+                    .any(|candidate| Self::same_route(candidate, route))
+                    && !accumulators
+                        .removed_routes
+                        .iter()
+                        .any(|candidate| candidate == route);
+                let exists = exists_in_system
+                    || accumulators
+                        .planned_routes
+                        .iter()
+                        .any(|candidate| candidate == route);
+                if !exists {
+                    return Err(Error::NotFound);
+                }
+                accumulators
+                    .planned_routes
+                    .retain(|candidate| candidate != route);
+                accumulators.removed_routes.push(*route);
+            }
+            Mutation::AddAddress(address) => {
+                let interface_index = address.interface_id.value() as u32;
+                if !self.interfaces()?.iter().any(|interface| {
+                    interface.id == address.interface_id || interface.index == interface_index
+                }) {
+                    return Err(Error::NotFound);
+                }
+                let key = (interface_index, address.address);
+                let exists_in_system = self.addresses()?.iter().any(|candidate| {
+                    candidate.interface_index == interface_index
+                        && candidate.address == address.address
+                }) && !accumulators
+                    .removed_addresses
+                    .iter()
+                    .any(|candidate| candidate == &key);
+                if exists_in_system
+                    || accumulators
+                        .planned_addresses
+                        .iter()
+                        .any(|candidate| candidate == &key)
+                {
+                    return Err(Error::AlreadyExists);
+                }
+                accumulators.planned_addresses.push(key);
+                accumulators
+                    .removed_addresses
+                    .retain(|candidate| candidate != &key);
+            }
+            Mutation::RemoveAddress(address) => {
+                let key = (address.interface_index, address.address);
+                let exists_in_system = self.addresses()?.iter().any(|candidate| {
+                    candidate.id == address.id
+                        || (candidate.interface_index == address.interface_index
+                            && candidate.address == address.address)
+                }) && !accumulators
+                    .removed_addresses
+                    .iter()
+                    .any(|candidate| candidate == &key);
+                if !exists_in_system
+                    && !accumulators
+                        .planned_addresses
+                        .iter()
+                        .any(|candidate| candidate == &key)
+                {
+                    return Err(Error::NotFound);
+                }
+                accumulators
+                    .planned_addresses
+                    .retain(|candidate| candidate != &key);
+                accumulators.removed_addresses.push(key);
+            }
+            Mutation::AddStaticNeighbor(neighbor) => {
+                let interface_index = neighbor.interface_id.value() as u32;
+                if !self.interfaces()?.iter().any(|interface| {
+                    interface.id == neighbor.interface_id || interface.index == interface_index
+                }) {
+                    return Err(Error::NotFound);
+                }
+                let key = (interface_index, neighbor.address);
+                let exists_in_system = self.neighbors()?.iter().any(|candidate| {
+                    candidate.interface_index == interface_index
+                        && candidate.address == neighbor.address
+                }) && !accumulators
+                    .removed_neighbors
+                    .iter()
+                    .any(|candidate| candidate == &key);
+                if exists_in_system
+                    || accumulators
+                        .planned_neighbors
+                        .iter()
+                        .any(|candidate| candidate == &key)
+                {
+                    return Err(Error::AlreadyExists);
+                }
+                accumulators.planned_neighbors.push(key);
+                accumulators
+                    .removed_neighbors
+                    .retain(|candidate| candidate != &key);
+            }
+            Mutation::RemoveStaticNeighbor(neighbor) => {
+                let interface_index = neighbor.interface_id.value() as u32;
+                let key = (interface_index, neighbor.address);
+                let exists_in_system = self.neighbors()?.iter().any(|candidate| {
+                    candidate.interface_index == interface_index
+                        && candidate.address == neighbor.address
+                }) && !accumulators
+                    .removed_neighbors
+                    .iter()
+                    .any(|candidate| candidate == &key);
+                if !exists_in_system
+                    && !accumulators
+                        .planned_neighbors
+                        .iter()
+                        .any(|candidate| candidate == &key)
+                {
+                    return Err(Error::NotFound);
+                }
+                accumulators
+                    .planned_neighbors
+                    .retain(|candidate| candidate != &key);
+                accumulators.removed_neighbors.push(key);
+            }
+            Mutation::SetDnsConfig(_) => {}
+            Mutation::SetInterfaceConfig(config) => self.validate_interface_config(config)?,
+            _ => return Err(Error::Unsupported),
         }
         Ok(())
     }
@@ -795,105 +874,16 @@ impl<B: LatticeBackend> Lattice<B> {
                 continue;
             }
 
-            if options
-                .cancellation
-                .as_mut()
-                .is_some_and(|callback| callback(index, operation))
-            {
-                outcomes.push(MutationOutcome::NotAttempted);
+            let (outcome, report, prior) = self.execute_one_mutation(index, operation, options);
+            operation_reports[index] = report;
 
-                operation_reports[index] = MutationOperationReport {
-                    phase: MutationExecutionPhase::Cancellation,
-                    duration: std::time::Duration::ZERO,
-                    stop_reason: Some(MutationStopReason::Cancelled),
-                };
-
+            if matches!(outcome, MutationOutcome::Applied) {
+                applied.push((index, prior));
+            } else {
                 stopped = true;
-                continue;
             }
 
-            let prior = match options.snapshot.as_mut() {
-                Some(snapshot) => {
-                    let started = Instant::now();
-
-                    match snapshot(index, operation) {
-                        Ok(prior) => {
-                            operation_reports[index].phase = MutationExecutionPhase::Snapshot;
-                            operation_reports[index].duration = started.elapsed();
-
-                            Some(prior)
-                        }
-                        Err(error) => {
-                            outcomes.push(MutationOutcome::Failed {
-                                error,
-                                may_have_applied: false,
-                            });
-
-                            operation_reports[index] = MutationOperationReport {
-                                phase: MutationExecutionPhase::Snapshot,
-                                duration: started.elapsed(),
-                                stop_reason: Some(MutationStopReason::SnapshotFailed),
-                            };
-
-                            stopped = true;
-                            continue;
-                        }
-                    }
-                }
-                None => None,
-            };
-
-            let started = Instant::now();
-
-            let result = match operation {
-                Mutation::AddRoute(route) => self.add_route(*route),
-
-                Mutation::RemoveRoute(route) => self.remove_route(*route),
-
-                Mutation::AddAddress(address) => self.add_address(address.clone()).map(|_| ()),
-
-                Mutation::RemoveAddress(address) => self.remove_address(address.clone()),
-
-                Mutation::AddStaticNeighbor(neighbor) => {
-                    self.add_static_neighbor(*neighbor).map(|_| ())
-                }
-
-                Mutation::RemoveStaticNeighbor(neighbor) => self.remove_static_neighbor(*neighbor),
-
-                Mutation::SetDnsConfig(config) => self.set_dns_config(config.clone()).map(|_| ()),
-
-                Mutation::SetInterfaceConfig(config) => {
-                    self.set_interface_config(config.clone()).map(|_| ())
-                }
-
-                _ => Err(Error::Unsupported),
-            };
-
-            match result {
-                Ok(()) => {
-                    outcomes.push(MutationOutcome::Applied);
-
-                    operation_reports[index].phase = MutationExecutionPhase::Execution;
-                    operation_reports[index].duration += started.elapsed();
-
-                    applied.push((index, prior));
-                }
-
-                Err(error) => {
-                    outcomes.push(MutationOutcome::Failed {
-                        error,
-                        may_have_applied: operation.semantics().may_partially_apply,
-                    });
-
-                    operation_reports[index] = MutationOperationReport {
-                        phase: MutationExecutionPhase::Execution,
-                        duration: operation_reports[index].duration + started.elapsed(),
-                        stop_reason: Some(MutationStopReason::ExecutionFailed),
-                    };
-
-                    stopped = true;
-                }
-            }
+            outcomes.push(outcome);
         }
 
         let rollback = if !stopped {
@@ -940,6 +930,128 @@ impl<B: LatticeBackend> Lattice<B> {
         };
 
         MutationPlanReport::with_operation_reports(outcomes, rollback, operation_reports)
+    }
+
+    /// Executes one [`Mutation`] at plan-local `index`: cancellation
+    /// boundary, then (if a snapshot hook is installed) prior-state
+    /// capture, then native dispatch.
+    ///
+    /// Extracted so [`Self::execute_plan`] and `execute_apply_plan` (for
+    /// [`net_lattice_model::apply::ApplyStep::Single`] steps) run the exact
+    /// same per-operation body rather than two independent copies of it.
+    /// The returned `bool`-equivalent stop signal is implicit: the caller
+    /// stops the plan whenever the returned [`MutationOutcome`] is not
+    /// [`MutationOutcome::Applied`] — every non-`Applied` outcome this
+    /// method can return (`NotAttempted` for cancellation, `Failed` for a
+    /// snapshot or native execution error) already corresponds to a plan
+    /// stop in [`Self::execute_plan`]'s original, unmodified contract.
+    fn execute_one_mutation(
+        &self,
+        index: usize,
+        operation: &Mutation,
+        options: &mut ExecutionOptions<'_>,
+    ) -> (
+        MutationOutcome,
+        MutationOperationReport,
+        Option<MutationSnapshot>,
+    ) {
+        if options
+            .cancellation
+            .as_mut()
+            .is_some_and(|callback| callback(index, operation))
+        {
+            return (
+                MutationOutcome::NotAttempted,
+                MutationOperationReport {
+                    phase: MutationExecutionPhase::Cancellation,
+                    duration: std::time::Duration::ZERO,
+                    stop_reason: Some(MutationStopReason::Cancelled),
+                },
+                None,
+            );
+        }
+
+        let mut report = MutationOperationReport::not_attempted();
+
+        let prior = match options.snapshot.as_mut() {
+            Some(snapshot) => {
+                let started = Instant::now();
+
+                match snapshot(index, operation) {
+                    Ok(prior) => {
+                        report.phase = MutationExecutionPhase::Snapshot;
+                        report.duration = started.elapsed();
+                        Some(prior)
+                    }
+                    Err(error) => {
+                        report = MutationOperationReport {
+                            phase: MutationExecutionPhase::Snapshot,
+                            duration: started.elapsed(),
+                            stop_reason: Some(MutationStopReason::SnapshotFailed),
+                        };
+                        return (
+                            MutationOutcome::Failed {
+                                error,
+                                may_have_applied: false,
+                            },
+                            report,
+                            None,
+                        );
+                    }
+                }
+            }
+            None => None,
+        };
+
+        let started = Instant::now();
+
+        let result = match operation {
+            Mutation::AddRoute(route) => self.add_route(*route),
+
+            Mutation::RemoveRoute(route) => self.remove_route(*route),
+
+            Mutation::AddAddress(address) => self.add_address(address.clone()).map(|_| ()),
+
+            Mutation::RemoveAddress(address) => self.remove_address(address.clone()),
+
+            Mutation::AddStaticNeighbor(neighbor) => {
+                self.add_static_neighbor(*neighbor).map(|_| ())
+            }
+
+            Mutation::RemoveStaticNeighbor(neighbor) => self.remove_static_neighbor(*neighbor),
+
+            Mutation::SetDnsConfig(config) => self.set_dns_config(config.clone()).map(|_| ()),
+
+            Mutation::SetInterfaceConfig(config) => {
+                self.set_interface_config(config.clone()).map(|_| ())
+            }
+
+            _ => Err(Error::Unsupported),
+        };
+
+        match result {
+            Ok(()) => {
+                report.phase = MutationExecutionPhase::Execution;
+                report.duration += started.elapsed();
+                (MutationOutcome::Applied, report, prior)
+            }
+
+            Err(error) => {
+                report = MutationOperationReport {
+                    phase: MutationExecutionPhase::Execution,
+                    duration: report.duration + started.elapsed(),
+                    stop_reason: Some(MutationStopReason::ExecutionFailed),
+                };
+                (
+                    MutationOutcome::Failed {
+                        error,
+                        may_have_applied: operation.semantics().may_partially_apply,
+                    },
+                    report,
+                    prior,
+                )
+            }
+        }
     }
 
     /// The full set of runtime-dependent [`Capability`] flags the connected

@@ -31,6 +31,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ReplaceRoute`. `ApplyPlan::compile` cannot know or check which backend
   will execute the plan — capability-aware rejection and actual execution
   are a later stage's concern.
+- `net-lattice::Lattice::<B>::execute_apply_plan(&self, plan: &ApplyPlan,
+  options: &mut ExecutionOptions<'_>) -> ApplyPlanReport`: executes an
+  `ApplyPlan` against the connected backend. `ApplyStep::Single` steps run
+  through the exact same cancellation/snapshot/dispatch/compensation
+  primitives `execute_plan` uses for a `MutationPlan`.
+  `ApplyStep::ReplaceRoute` steps run a dedicated state machine: a
+  plan-wide capability-aware rejection (before any native call) for a
+  requested route-metric change the connected backend cannot honor;
+  precondition reuse against the previously observed route; per-backend
+  leg ordering (queried from the two new `RouteMutator` methods below);
+  and mandatory read-after-write verification of both halves of the
+  replacement. The caller's `.compensation(...)` callback (if supplied) is
+  never invoked directly for a `ReplaceRoute` step — its `&Mutation`-typed
+  signature cannot represent a replacement pairing — best-effort
+  compensation for that step is instead performed internally using the
+  already-captured prior route and leg-completion state; the callback
+  continues to fire normally for every compensated `Single` step in the
+  same plan. New report types
+  `net-lattice-model::apply::{ApplyStepOutcome, NonConvergentReason,
+  ApplyPlanReport}` (all re-exported from `net_lattice::mutation`)
+  distinguish `Applied`/`Failed`/`NotAttempted` (mirroring
+  `MutationOutcome`) from two additional outcomes no `MutationOutcome`
+  variant can express: `Rejected` (capability-aware rejection, no native
+  call attempted) and `NonConvergent` (a native call was attempted but the
+  resulting state could not be confirmed, or a precondition no longer
+  held). Two additive `MutationStopReason` variants (`CapabilityRejected`,
+  `NonConvergentReplacement`) record these on
+  `ApplyPlanReport::operation_reports`.
+- `net-lattice-platform::RouteMutator`: two additive, default-provided
+  methods, `supports_route_metric(&self) -> bool` (default `true`) and
+  `route_replace_order(&self) -> RouteReplaceOrder` (default
+  `RouteReplaceOrder::RemoveBeforeAdd`), plus the new
+  `#[non_exhaustive]` `RouteReplaceOrder` enum
+  (`RemoveBeforeAdd`/`AddBeforeRemove`). Existing backends need no code
+  change unless they must override a default; `net-lattice-backend-darwin`
+  overrides both (`supports_route_metric() -> false`,
+  `route_replace_order() -> AddBeforeRemove`), matching its native route
+  calls never reading or writing metric and its delete key being unable to
+  disambiguate an old route from its replacement while both exist at once.
 
 ## [0.19.1] - 2026-08-05
 

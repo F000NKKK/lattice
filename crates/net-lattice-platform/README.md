@@ -10,6 +10,11 @@ public facade and native platform backends.
   (desired administrative-state and MTU patches), `DnsProvider`/
   `DnsMutator`, `NeighborProvider`/`NeighborMutator` (static ARP/NDP entry
   add/remove intent), and `AddressProvider`/`AddressMutator`;
+  `RouteMutator` additionally exposes two default-provided methods,
+  `supports_route_metric` and `route_replace_order` (returning the new
+  `RouteReplaceOrder` enum), describing fixed per-backend facts a
+  destination-paired route replacement needs — most backends inherit the
+  defaults unchanged;
 - `SnapshotProvider`, a generic whole-system state assembly contract; no
   backend implements it directly — the facade supplies the implementation,
   covering any backend that already implements the read providers above;

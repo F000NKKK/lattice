@@ -14,7 +14,11 @@ Rust API. This is the application-facing Net Lattice crate.
 - partial interface MTU and administrative-state configuration;
 - filtered native change monitoring;
 - ordered `MutationPlan` execution with runtime validation, cancellation,
-  snapshots, explicit compensation, and per-operation reports.
+  snapshots, explicit compensation, and per-operation reports;
+- declarative `ApplyPlan` execution (compiled from a `DesiredState`/`Diff`
+  pair) with capability-aware rejection, per-backend route-replacement
+  ordering, mandatory read-after-write verification, and convergence/
+  non-convergence reporting.
 
 Enable the optional `async` feature for a runtime-independent
 `futures::Stream` watcher surface.
@@ -59,6 +63,33 @@ fn main() -> Result<()> {
 state, and perform explicit compensation without multiplying facade methods.
 The returned report preserves plan indices and distinguishes validation,
 snapshot, execution, cancellation, and compensation boundaries.
+
+## Declarative apply execution
+
+`DesiredState` and `Diff::compute` produce a pure, side-effect-free `Diff`;
+`ApplyPlan::compile(&diff)` compiles it into an ordered list of `ApplyStep`s,
+still with no side effects. `Lattice::execute_apply_plan` executes that plan
+against the connected backend, given one `ExecutionOptions` value the same
+way `execute_plan` is. Most steps (`ApplyStep::Single`) run through the exact
+same cancellation/snapshot/compensation primitives `execute_plan` uses. A
+destination-paired route replacement (`ApplyStep::ReplaceRoute`) runs a
+dedicated path instead: it is rejected before any native call if the
+connected backend cannot honor a requested route-metric change, submits its
+two native calls in the backend's own required order, and requires a
+read-after-write re-read to confirm both the new route is present and the
+old one is gone before it counts as converged.
+
+**Compensation nuance:** a caller-supplied `.compensation(...)` callback
+(typed for a single `Mutation`) is never invoked directly for a
+`ReplaceRoute` step — its shape cannot represent a replacement pairing. If a
+plan stops at or after a `ReplaceRoute` step and a compensation callback was
+supplied, `execute_apply_plan` performs that step's best-effort reversal
+internally instead; the callback still fires normally for every compensated
+`Single` step in the same plan. The returned `ApplyPlanReport` distinguishes
+`Applied`/`Failed`/`NotAttempted` (as `MutationOutcome` does) plus two
+further outcomes: `Rejected` (a capability-aware rejection before any native
+call) and `NonConvergent` (a native call was attempted but the resulting
+state could not be confirmed, or a precondition no longer held).
 
 ## Interface configuration
 

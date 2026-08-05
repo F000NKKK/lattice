@@ -361,6 +361,16 @@ pub enum MutationStopReason {
     Cancelled,
     /// An explicitly supplied compensator failed.
     CompensationFailed,
+    /// The operation was rejected before any native call was attempted
+    /// because the connected backend cannot honor a field the operation's
+    /// intent requires (for example, a route metric change on a backend
+    /// whose native route calls never read or write metric).
+    CapabilityRejected,
+    /// A native call was attempted but the resulting state could not be
+    /// confirmed to match the requested replacement, or a precondition the
+    /// operation required no longer held when re-checked immediately before
+    /// execution.
+    NonConvergentReplacement,
 }
 
 /// Timing and phase metadata for one plan-local operation.

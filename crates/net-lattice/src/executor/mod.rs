@@ -1,8 +1,11 @@
-//! Internal Stage 0.15 transaction orchestration helpers.
+//! Internal Stage 0.15 transaction orchestration helpers, plus (`apply`) the
+//! Stage 0.20 [`net_lattice_model::apply::ApplyPlan`] execution engine.
 //!
 //! The mutation model remains in `net-lattice-model`. This module owns only
 //! execution policy shared by the facade methods and deliberately has no
 //! dependency on a concrete operating-system backend.
+
+pub(crate) mod apply;
 
 use net_lattice_core::{Error, Result};
 use net_lattice_model::{
