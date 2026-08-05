@@ -130,17 +130,19 @@ backend-крейту не требуется изменение — реализ
 [CHANGELOG.md](CHANGELOG.md).
 
 Net Lattice также предоставляет декларативную модель и inspectable diff, пока
-без шага применения: `DesiredState` в `net-lattice-model` — это
-whole-system-агрегат, формируемый вызывающей стороной, параллельный
-`CurrentState` — по одному полю-`Option` на домен, собирается через
-`DesiredState::empty()` и подомённые builder-методы `with_*`, без собственной
-зависимости от backend'а — а `Diff::compute(&CurrentState, &DesiredState) ->
-Diff` вычисляет чистую, side-effect-free разницу между ними: маршруты,
-соседи и адреса — как naturally-keyed множества add/remove(/change),
-интерфейс — как patch-diff по полям, DNS — как сравнение целого значения.
-`Diff::compute` не выполняет I/O и не вызывает ни один provider/backend
-метод; решение о том, применять ли `Diff` и как, остаётся за более поздним
-этапом (см. раздел State Model в [архитектуре](ARCHITECTURE.ru.md)).
+без шага применения: `DesiredState` (`net-lattice-model`, также доступен как
+`net_lattice::mutation::DesiredState`) — это whole-system-агрегат,
+формируемый вызывающей стороной, параллельный `CurrentState` — по одному
+полю-`Option` на домен, собирается через `DesiredState::empty()` и
+подомённые builder-методы `with_*`, без собственной зависимости от
+backend'а — а `Diff::compute(&CurrentState, &DesiredState) -> Diff`
+(`net_lattice::mutation::Diff`) вычисляет чистую, side-effect-free разницу
+между ними: маршруты, соседи и адреса — как naturally-keyed множества
+add/remove(/change), интерфейс — как patch-diff по полям, DNS — как
+сравнение целого значения. `Diff::compute` не выполняет I/O и не вызывает ни
+один provider/backend метод; решение о том, применять ли `Diff` и как,
+остаётся за более поздним этапом (см. раздел State Model в
+[архитектуре](ARCHITECTURE.ru.md)). Рабочий пример — `declarative_diff`.
 
 Следующая поверхность API, описанная в плане поэтапной поставки
 [архитектуры](ARCHITECTURE.ru.md), проверена privileged CI-задачами:
@@ -224,6 +226,7 @@ if lattice.supports(Capability::ROUTE_MONITORING) {
 | Замена конфигурации резолвера | [`dns_mutation`](crates/net-lattice/examples/dns_mutation.rs) | `NewDnsConfig`, `set_dns_config`, read-after-write verification |
 | Настройка интерфейса | [`interface_configuration`](crates/net-lattice/examples/interface_configuration.rs) | `InterfaceConfig`, `DesiredAdminState`, capability checks, `set_interface_config` |
 | Просмотр mutation | [`mutation_plan`](crates/net-lattice/examples/mutation_plan.rs) | все варианты `Mutation`, `Mutation::semantics`, `MutationPlan` |
+| Декларативный diff (только чтение) | [`declarative_diff`](crates/net-lattice/examples/declarative_diff.rs) | `DesiredState`, `Diff`, `Diff::compute`, `RouteChange` |
 
 Запуск: `cargo run -p net-lattice --example <name>`. Для `async_monitor`
 добавьте `--features async`.

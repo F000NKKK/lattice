@@ -128,17 +128,19 @@ re-export modules (the crate root no longer re-exports domain items
 directly).
 
 Net Lattice also exposes a declarative model and an inspectable diff,
-without an apply step: `net-lattice-model`'s `DesiredState` is a
-whole-system, caller-authored aggregate parallel to `CurrentState` — one
-`Option`-wrapped field per domain, built via `DesiredState::empty()` plus
-per-domain `with_*` builders, with no backend dependency of its own — and
-`Diff::compute(&CurrentState, &DesiredState) -> Diff` computes a pure,
-side-effect-free difference between the two: route/neighbor/address as
-natural-key add/remove(/change) sets, interface as a per-field patch-diff,
-and DNS as a whole-value comparison. `Diff::compute` performs no I/O and
-calls no provider/backend method; deciding whether or how to apply a `Diff`
-is a later stage's concern (see the [architecture](ARCHITECTURE.md)'s State
-Model section).
+without an apply step: `DesiredState` (`net-lattice-model`, also reachable as
+`net_lattice::mutation::DesiredState`) is a whole-system, caller-authored
+aggregate parallel to `CurrentState` — one `Option`-wrapped field per domain,
+built via `DesiredState::empty()` plus per-domain `with_*` builders, with no
+backend dependency of its own — and
+`Diff::compute(&CurrentState, &DesiredState) -> Diff`
+(`net_lattice::mutation::Diff`) computes a pure, side-effect-free difference
+between the two: route/neighbor/address as natural-key add/remove(/change)
+sets, interface as a per-field patch-diff, and DNS as a whole-value
+comparison. `Diff::compute` performs no I/O and calls no provider/backend
+method; deciding whether or how to apply a `Diff` is a later stage's concern
+(see the [architecture](ARCHITECTURE.md)'s State Model section). See the
+`declarative_diff` example for a runnable walkthrough.
 
 The following surface, described by the [architecture](ARCHITECTURE.md)'s
 Incremental Delivery Plan, is verified by the privileged Linux, Windows, and
@@ -252,6 +254,7 @@ elevated operating-system privilege.
 | Resolver replacement | [`dns_mutation`](crates/net-lattice/examples/dns_mutation.rs) | `NewDnsConfig`, `set_dns_config`, read-after-write verification |
 | Interface configuration | [`interface_configuration`](crates/net-lattice/examples/interface_configuration.rs) | `InterfaceConfig`, `DesiredAdminState`, capability checks, `set_interface_config` |
 | Mutation inspection | [`mutation_plan`](crates/net-lattice/examples/mutation_plan.rs) | every `Mutation` variant, `Mutation::semantics`, `MutationPlan` |
+| Declarative diff (read-only) | [`declarative_diff`](crates/net-lattice/examples/declarative_diff.rs) | `DesiredState`, `Diff`, `Diff::compute`, `RouteChange` |
 
 Run an example with `cargo run -p net-lattice --example <name>`. Add
 `--features async` for `async_monitor`.
