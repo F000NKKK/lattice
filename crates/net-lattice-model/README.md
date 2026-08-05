@@ -24,7 +24,16 @@ models data and contracts; it never inspects or mutates the host system.
   collection) means it is managed with that exact desired content. Unlike
   `CurrentState`, it is never assembled from a backend read — build one with
   `DesiredState::empty()` and its `with_routes`/`with_interfaces`/
-  `with_neighbors`/`with_addresses`/`with_dns` builder methods.
+  `with_neighbors`/`with_addresses`/`with_dns` builder methods;
+- `Diff`, the pure, side-effect-free computed difference between a
+  `CurrentState` and a `DesiredState`, via
+  `Diff::compute(&CurrentState, &DesiredState) -> Diff`: route/neighbor/
+  address use a natural-key set-diff (`RouteChange`/`NeighborChange`/
+  `AddressChange`, route never producing a `Changed` case), interface uses a
+  per-field patch-diff (`InterfaceDiff`) mirroring `InterfaceConfig`'s
+  "don't touch" semantics, and DNS is a whole-value comparison (`DnsChange`).
+  `Diff::compute` performs no I/O and calls no provider/backend method — it
+  does not decide how or whether a diff gets applied.
 
 Use this crate directly for offline plan construction, policy analysis,
 serialization layers, or backend development. Use the `net-lattice` facade to

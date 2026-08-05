@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `net-lattice-model::Diff`: a new `#[non_exhaustive]`, pure, side-effect-free
+  computed difference between a `CurrentState` and a `DesiredState`, one
+  field per domain (`routes`, `interfaces`, `neighbors`, `addresses`, `dns`).
+  Route/neighbor/address share a natural-key set-diff shape
+  (`RouteChange`/`NeighborChange`/`AddressChange`, each `#[non_exhaustive]`)
+  — route never produces a `Changed` variant, since its four-field natural
+  key already covers every settable field. Interface uses a distinct
+  per-field patch-diff shape (`InterfaceDiff` plus `Change<C, D>`) mirroring
+  `InterfaceConfig`'s own "don't touch" semantics: a field is populated only
+  when it was requested and differs from the observed value; an interface
+  with nothing actionable does not appear in `Diff::interfaces` at all. DNS
+  is a whole-value singleton comparison (`DnsChange`); `Diff::dns` is `None`
+  both when DNS is unmanaged and when the desired configuration already
+  matches the observed one. Computed by
+  `Diff::compute(current: &CurrentState, desired: &DesiredState) -> Diff`, an
+  inherent associated function with no `Result`, no I/O, and no
+  provider/backend dependency — deciding whether or how to apply a `Diff` is
+  out of scope for this type. If a `DesiredState` collection contains
+  duplicate natural keys, the later entry in iteration order wins. All new
+  types re-exported from the crate root.
 - `net-lattice-model::DesiredState`: a new `#[non_exhaustive]`, whole-system,
   caller-authored desired-state aggregate paralleling `CurrentState` — one
   `Option`-wrapped field per domain (`routes`, `interfaces`, `neighbors`,

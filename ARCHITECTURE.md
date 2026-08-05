@@ -592,7 +592,16 @@ architecture reserves room for it as:
   backend read).
 - `Diff` — the computed difference between a `CurrentState` and a
   `DesiredState`, comparing state and config types field-by-field where
-  they overlap.
+  they overlap. Implemented as of Stage 0.19: `Diff` (`net-lattice-model`)
+  is a pure, side-effect-free struct with one field per domain, computed by
+  `Diff::compute(&CurrentState, &DesiredState) -> Diff`. Route, neighbor,
+  and address share a natural-key set-diff shape (`Added`/`Removed`, plus
+  `Changed` for neighbor/address); interface uses a distinct per-field
+  patch-diff shape (`InterfaceDiff`) mirroring `InterfaceConfig`'s own
+  "don't touch" semantics; DNS is a whole-value singleton comparison
+  (`DnsChange`). `Diff::compute` performs no I/O and calls no
+  provider/backend method — it is inspectable only, with no `ApplyPlan` or
+  execution attached.
 - `ApplyPlan` — an ordered sequence of provider calls (add/remove/modify)
   that would resolve a `Diff`, which can be inspected before being executed
   and rolled back if a step fails.
@@ -609,15 +618,14 @@ blanket-implemented for a bare generic type parameter with no local type in
 the impl. `Lattice<B>` is the facade's own local type, so implementing the
 trait there is both legal and sufficient — no backend still needs to write
 any code to get whole-system snapshots.
-`DesiredState` (the data shape, in `net-lattice-model`, see above) now
-exists as of Stage 0.19. `Diff` and `ApplyPlan` do not exist yet — they
-belong to the rest of Stage 0.19 and to Stage 0.20, after the transaction
-and remaining imperative mutation contracts are stable enough to compute a
-meaningful diff against. The state/config split is named here — as a
-parallel `*Config` type per domain object living alongside its state type
-in `net-lattice-model` — so that it is built in from the first `*Config`
-type rather than retrofitted after `CurrentState`/`DesiredState` have
-already been conflated into one type.
+`DesiredState` and `Diff` (the data shapes, in `net-lattice-model`, see
+above) now exist as of Stage 0.19. `ApplyPlan` does not exist yet — it
+belongs to Stage 0.20, after the transaction and remaining imperative
+mutation contracts are stable enough to execute a diff against. The
+state/config split is named here — as a parallel `*Config` type per domain
+object living alongside its state type in `net-lattice-model` — so that it
+is built in from the first `*Config` type rather than retrofitted after
+`CurrentState`/`DesiredState` have already been conflated into one type.
 
 ## Mutation and Event Contract Before Transactions
 

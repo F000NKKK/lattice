@@ -5,11 +5,14 @@
 //! (`ifaddr`), and change-event (`event`) observed state; mutation intent
 //! and plan/execution/report machinery (`mutation`), including
 //! `StaticNeighbor` desired-neighbor intent and its `Mutation` variants; the
-//! whole-system `CurrentState` snapshot (`snapshot`); and the whole-system,
-//! caller-authored `DesiredState` aggregate (`desired_state`).
+//! whole-system `CurrentState` snapshot (`snapshot`); the whole-system,
+//! caller-authored `DesiredState` aggregate (`desired_state`); and the pure,
+//! side-effect-free computed `Diff` between a `CurrentState` and a
+//! `DesiredState` (`diff`).
 
 mod address;
 pub mod desired_state;
+pub mod diff;
 pub mod dns;
 pub mod event;
 pub mod ifaddr;
@@ -22,6 +25,9 @@ pub mod snapshot;
 
 pub use address::{IpAddress, Network};
 pub use desired_state::DesiredState;
+pub use diff::{
+    AddressChange, Change, Diff, DnsChange, InterfaceDiff, NeighborChange, RouteChange,
+};
 pub use dns::{DnsConfig, NewDnsConfig};
 pub use event::{ChangeKind, Event, EventDomain, EventFilter};
 pub use ifaddr::{InterfaceAddress, InterfaceAddressId, NewInterfaceAddress};
