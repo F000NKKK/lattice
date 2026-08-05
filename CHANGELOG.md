@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `net-lattice-model::ApplyPlan`/`ApplyStep`: a new `#[non_exhaustive]`,
+  pure, side-effect-free ordered list of steps compiled from a `Diff`, via
+  `ApplyPlan::compile(diff: &Diff) -> ApplyPlan` — infallible, no I/O, no
+  provider/backend dependency, mirroring `Diff::compute`'s own scope
+  discipline. `ApplyStep` (`#[non_exhaustive]`) wraps a `Mutation` directly
+  for interface, neighbor, address, and DNS changes and for any route
+  `Added`/`Removed` entry with no matching counterpart at the same
+  destination (`ApplyStep::Single`); a route `Added`/`Removed` pair sharing
+  one destination compiles instead to one
+  `ApplyStep::ReplaceRoute { old: Route, new: RouteConfig }` step, encoding
+  the route-replacement-ordering policy for the native-delete-key ambiguity
+  that varies by backend. Neighbor/address `Changed` entries compile to a
+  remove-then-add pair of `Single` steps, the only order compatible with
+  `Mutation::AddStaticNeighbor`/`Mutation::AddAddress`'s existing `Absent`
+  precondition. `ApplyStep::semantics() -> MutationSemantics` delegates to
+  `Mutation::semantics()` for `Single` and synthesizes a `Replace`-flavored
+  contract (mandatory read-after-write confirmation,
+  `RequiresPriorState` reversibility, `may_partially_apply: true`, and a
+  new, purely additive `MutationKind::ReplaceRoute` variant) for
+  `ReplaceRoute`. `ApplyPlan::compile` cannot know or check which backend
+  will execute the plan — capability-aware rejection and actual execution
+  are a later stage's concern.
+
 ## [0.19.1] - 2026-08-05
 
 ### Added

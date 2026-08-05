@@ -37,7 +37,16 @@ models data and contracts; it never inspects or mutates the host system.
   per-field patch-diff (`InterfaceDiff`) mirroring `InterfaceConfig`'s
   "don't touch" semantics, and DNS is a whole-value comparison (`DnsChange`).
   `Diff::compute` performs no I/O and calls no provider/backend method — it
-  does not decide how or whether a diff gets applied.
+  does not decide how or whether a diff gets applied;
+- `ApplyPlan`, the pure, side-effect-free ordered list of steps compiled from
+  a `Diff`, via `ApplyPlan::compile(&Diff) -> ApplyPlan`: interface,
+  neighbor, address, and DNS changes lower to `ApplyStep::Single(Mutation)`,
+  and route/neighbor/address `Changed`/unpaired entries lower the same way
+  (remove-then-add for a neighbor/address `Changed` pair); a route
+  `Added`/`Removed` pair sharing the same destination lowers instead to one
+  `ApplyStep::ReplaceRoute { old, new }`. `ApplyPlan::compile` performs no
+  I/O, calls no provider/backend method, and cannot fail — it does not decide
+  which backend executes the plan or whether a step is acceptable there.
 
 Use this crate directly for offline plan construction, policy analysis,
 serialization layers, or backend development. Use the `net-lattice` facade to

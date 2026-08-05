@@ -83,6 +83,11 @@ pub enum MutationKind {
     SetInterfaceConfig,
     AddStaticNeighbor,
     RemoveStaticNeighbor,
+    /// A destination-paired route replacement ([`crate::apply::ApplyStep::ReplaceRoute`]):
+    /// one logical unit removing an observed route and adding its desired
+    /// replacement, distinct from a bare [`MutationKind::AddRoute`] so
+    /// preflight/report code inspecting `kind` does not mislabel it.
+    ReplaceRoute,
 }
 
 /// State that must hold for an operation to be meaningful.

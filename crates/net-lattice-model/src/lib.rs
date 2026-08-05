@@ -6,11 +6,13 @@
 //! and plan/execution/report machinery (`mutation`), including
 //! `StaticNeighbor` desired-neighbor intent and its `Mutation` variants; the
 //! whole-system `CurrentState` snapshot (`snapshot`); the whole-system,
-//! caller-authored `DesiredState` aggregate (`desired_state`); and the pure,
+//! caller-authored `DesiredState` aggregate (`desired_state`); the pure,
 //! side-effect-free computed `Diff` between a `CurrentState` and a
-//! `DesiredState` (`diff`).
+//! `DesiredState` (`diff`); and the pure, side-effect-free `ApplyPlan`
+//! compiled from a `Diff` (`apply`).
 
 mod address;
+pub mod apply;
 pub mod desired_state;
 pub mod diff;
 pub mod dns;
@@ -24,6 +26,7 @@ pub mod route;
 pub mod snapshot;
 
 pub use address::{IpAddress, Network};
+pub use apply::{ApplyPlan, ApplyStep};
 pub use desired_state::DesiredState;
 pub use diff::{
     AddressChange, Change, Diff, DnsChange, InterfaceDiff, NeighborChange, RouteChange,

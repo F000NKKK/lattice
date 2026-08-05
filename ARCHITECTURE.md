@@ -604,7 +604,21 @@ architecture reserves room for it as:
   execution attached.
 - `ApplyPlan` — an ordered sequence of provider calls (add/remove/modify)
   that would resolve a `Diff`, which can be inspected before being executed
-  and rolled back if a step fails.
+  and rolled back if a step fails. Implemented as of Stage 0.20:
+  `ApplyPlan` (`net-lattice-model`) is a pure, side-effect-free
+  `#[non_exhaustive]` struct of `ApplyStep`s, compiled by
+  `ApplyPlan::compile(&Diff) -> ApplyPlan` — infallible, no I/O, no
+  provider/backend dependency, mirroring `Diff::compute`'s own scope
+  discipline. `ApplyStep` (`#[non_exhaustive]`) wraps a `Mutation` directly
+  for interface, neighbor, address, and DNS changes and any unpaired route
+  `Added`/`Removed` entry (`Single`); a route `Added`/`Removed` pair sharing
+  the same destination compiles instead to one `ReplaceRoute { old, new }`
+  step, the concrete encoding of the route-replacement-ordering policy
+  covering the native-delete-key ambiguity that varies by backend. Only
+  compilation exists at this stage — execution (submitting the underlying
+  native operations against a specific backend, capability-aware rejection,
+  and rollback) remains out of scope until the transaction engine consumes
+  `ApplyPlan`.
 
 `CurrentState` (the data shape, in `net-lattice-model`) and
 `SnapshotProvider` (the assembly contract, in `net-lattice-platform`) exist,
@@ -619,9 +633,11 @@ the impl. `Lattice<B>` is the facade's own local type, so implementing the
 trait there is both legal and sufficient — no backend still needs to write
 any code to get whole-system snapshots.
 `DesiredState` and `Diff` (the data shapes, in `net-lattice-model`, see
-above) now exist as of Stage 0.19. `ApplyPlan` does not exist yet — it
-belongs to Stage 0.20, after the transaction and remaining imperative
-mutation contracts are stable enough to execute a diff against. The
+above) now exist as of Stage 0.19, and `ApplyPlan`/`ApplyStep` (also
+`net-lattice-model`, compile-only, see above) now exist as of Stage 0.20.
+Executing an `ApplyPlan` against a specific backend — the transaction and
+remaining imperative mutation contracts a real execution path needs — is
+still pending later Stage 0.20 work. The
 state/config split is named here — as a parallel `*Config` type per domain
 object living alongside its state type in `net-lattice-model` — so that it
 is built in from the first `*Config` type rather than retrofitted after
