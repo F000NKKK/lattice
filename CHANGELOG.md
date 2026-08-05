@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.1] - 2026-08-05
+
 ### Added
 
 - `net-lattice-model::Diff`: a new `#[non_exhaustive]`, pure, side-effect-free
@@ -27,8 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   inherent associated function with no `Result`, no I/O, and no
   provider/backend dependency — deciding whether or how to apply a `Diff` is
   out of scope for this type. If a `DesiredState` collection contains
-  duplicate natural keys, the later entry in iteration order wins. All new
-  types re-exported from the crate root.
+  duplicate natural keys, the later entry in iteration order wins.
+  Re-exported, along with `DesiredState` below, from `net_lattice::mutation`.
 - `net-lattice-model::DesiredState`: a new `#[non_exhaustive]`, whole-system,
   caller-authored desired-state aggregate paralleling `CurrentState` — one
   `Option`-wrapped field per domain (`routes`, `interfaces`, `neighbors`,
@@ -39,7 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Unlike `CurrentState`, it has no backend/provider dependency and is never
   assembled from a backend read; it is built via `DesiredState::empty()`
   plus `with_routes`/`with_interfaces`/`with_neighbors`/`with_addresses`/
-  `with_dns` builder methods. Re-exported from the crate root.
+  `with_dns` builder methods.
 - `net-lattice-model::route::RouteConfig`: a new `#[non_exhaustive]` route
   mutation intent type (`destination`, `gateway`, `metric`,
   `interface_index`), distinct from the observed `Route` record, mirroring
@@ -49,6 +51,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   back as mutation input. `metric` is honored on Linux and Windows only and
   silently ignored as a no-op on Darwin, matching the pre-existing
   observed-side gap. Re-exported from `net_lattice::mutation`.
+- `net-lattice`: facade-level tests for `DesiredState`/`Diff` (no-diff when
+  desired matches observed, `Added`/`Removed` when it differs, no-diff for
+  unmanaged domains), exercised through the facade crate CI actually builds,
+  not only `net-lattice-model`'s own unit tests.
+- `net-lattice`: a `declarative_diff` example demonstrating
+  `DesiredState`/`Diff` usage.
 
 ### Changed
 
@@ -65,6 +73,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   placeholder `Route::new(RouteId::new(0), ...)` purely to submit a mutation
   now construct `RouteConfig::new(destination)` instead, with no dummy
   identifier required.
+
+### Fixed
+
+- `net-lattice`: crate-level rustdoc no longer claims "this 0.18.0 release
+  has not yet been published" (stale even at 0.18.0's own publish, and
+  would go stale again after every future release); replaced with a
+  version-independent statement.
+- `net-lattice`: the transaction-plan rustdoc example no longer calls an
+  add-then-remove `MutationPlan` "safe, idempotent" or claims it "leaves
+  system state unchanged if executed" — contradicted by this crate's own
+  documented failure semantics (execution stops after the first error, no
+  automatic compensation).
+- `net-lattice`: `README.md`'s interface-configuration and static-neighbor
+  mutation examples no longer construct a hardcoded `InterfaceId::new(7)`;
+  both now select the target interface explicitly by name at runtime and
+  fail with `Error::NotFound` if it isn't present.
+- `net-lattice`: the `model` module's rustdoc no longer describes itself as
+  containing "desired-state domain objects" (it doesn't — that conflated
+  mutation intent, which lives in `mutation`, with what `model` actually
+  contains).
 
 ## [0.18.0] - 2026-08-04
 
