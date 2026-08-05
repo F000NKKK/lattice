@@ -253,8 +253,9 @@ pub mod model {
     };
 }
 
-/// Mutation intent types, plan/execution/report machinery, and mutator
-/// traits.
+/// Mutation intent types, plan/execution/report machinery, mutator traits,
+/// and the declarative `DesiredState`/`Diff` pair built from those intent
+/// types.
 ///
 /// This is the only public path to these items: they are not re-exported at
 /// the crate root. Platform traits re-exported here may additionally appear
@@ -262,6 +263,12 @@ pub mod model {
 pub mod mutation {
     #[doc(inline)]
     pub use crate::executor::{Cancellation, Compensation, ExecutionOptions, Snapshot};
+    #[doc(inline)]
+    pub use net_lattice_model::desired_state::DesiredState;
+    #[doc(inline)]
+    pub use net_lattice_model::diff::{
+        AddressChange, Change, Diff, DnsChange, InterfaceDiff, NeighborChange, RouteChange,
+    };
     #[doc(inline)]
     pub use net_lattice_model::dns::NewDnsConfig;
     #[doc(inline)]
