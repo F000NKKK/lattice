@@ -111,18 +111,28 @@ enum AppliedApplyStep {
 impl<B: LatticeBackend> Lattice<B> {
     /// Performs the runtime portion of [`ApplyPlan`] preflight: the same
     /// per-[`Mutation`] capability/precondition checks
-    /// [`Lattice::validate_plan`] runs (via
-    /// [`Lattice::validate_one_mutation`]) for every [`ApplyStep::Single`]
-    /// step, plus a capability-aware rejection for every
-    /// [`ApplyStep::ReplaceRoute`] step (and every bare
+    /// [`Lattice::validate_plan`] runs internally for every
+    /// [`ApplyStep::Single`] step, plus a capability-aware rejection for
+    /// every [`ApplyStep::ReplaceRoute`] step (and every bare
     /// `Single(Mutation::AddRoute(_))` requesting a metric) whose requested
     /// metric the connected backend cannot honor
-    /// ([`RouteMutator::supports_route_metric`] `== false`).
+    /// (`RouteMutator::supports_route_metric` `== false`).
     ///
     /// Evaluated plan-wide before any step executes, mirroring
     /// [`Lattice::validate_plan`]'s existing preflight-rejects-the-whole-
     /// plan-before-any-native-call contract.
-    fn validate_apply_plan(&self, plan: &ApplyPlan) -> Result<()> {
+    ///
+    /// Public for the same reason [`Lattice::validate_plan`] is: a caller
+    /// that wants to preflight-check a compiled [`ApplyPlan`] (for example
+    /// one built via [`Self::current_state`]/[`net_lattice_model::diff::Diff::compute`]/
+    /// [`ApplyPlan::compile`], the same steps [`Self::apply`] chains
+    /// internally) without submitting any native call can call this
+    /// directly instead of going through [`Self::execute_apply_plan`],
+    /// exactly mirroring the existing `validate_plan`/`execute_plan` pair
+    /// for [`net_lattice_model::mutation::MutationPlan`]. This check is
+    /// side-effect free; native privilege and current-state checks can
+    /// still fail at execution time.
+    pub fn validate_apply_plan(&self, plan: &ApplyPlan) -> Result<()> {
         let mut accumulators = PlanAccumulators::default();
         for step in plan.steps() {
             match step {

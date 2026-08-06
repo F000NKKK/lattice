@@ -185,6 +185,7 @@ pub use net_lattice_ip::{
 // `DesiredState`/`Diff`/`RouteChange` are referenced only by `#[cfg(test)]
 // mod tests` below (via `use super::*;`), so a non-test `cargo check`
 // reports them unused even though `cargo test` uses them.
+use net_lattice_model::apply::{ApplyPlan, ApplyPlanReport};
 #[allow(unused_imports)]
 use net_lattice_model::desired_state::DesiredState;
 #[allow(unused_imports)]
@@ -571,6 +572,39 @@ impl<B: LatticeBackend> Lattice<B> {
     /// directly instead.
     pub fn current_state(&self) -> Result<CurrentState> {
         SnapshotProvider::snapshot(self)
+    }
+
+    /// Computes the gap between the connected backend's observed state and
+    /// `desired`, compiles it into an [`ApplyPlan`], and executes that plan
+    /// through this backend in one call.
+    ///
+    /// This is the facade-level convenience chaining the three pure/read
+    /// steps a caller would otherwise write out by hand:
+    /// [`Self::current_state`] → [`Diff::compute`] → [`ApplyPlan::compile`]
+    /// → [`Self::execute_apply_plan`]. Only [`Self::current_state`]'s
+    /// underlying read can fail before compilation; `Diff::compute` and
+    /// `ApplyPlan::compile` are both infallible pure computations over
+    /// already-in-memory values (see ADR-0012), so the `Err` case of this
+    /// method's `Result` is exactly the `Err` case of the initial state
+    /// read. Once a plan exists, execution itself always produces a report
+    /// rather than an error — including a plan rejected before any native
+    /// call (see ADR-0013) — so the `Ok` case always carries a complete
+    /// [`ApplyPlanReport`], never a partially-applied `Err`.
+    ///
+    /// Prefer calling [`Self::current_state`], [`Diff::compute`], and
+    /// [`ApplyPlan::compile`] directly instead of this method when the
+    /// caller wants to inspect or preflight the compiled [`ApplyPlan`]
+    /// (for example via [`Self::validate_apply_plan`]) before deciding
+    /// whether to execute it at all — this convenience always executes.
+    pub fn apply(
+        &self,
+        desired: &DesiredState,
+        options: &mut ExecutionOptions<'_>,
+    ) -> Result<ApplyPlanReport> {
+        let current = self.current_state()?;
+        let diff = Diff::compute(&current, desired);
+        let plan = ApplyPlan::compile(&diff);
+        Ok(self.execute_apply_plan(&plan, options))
     }
 
     /// Performs the runtime portion of mutation preflight.
@@ -1714,6 +1748,90 @@ mod tests {
         assert!(diff.neighbors.is_empty());
         assert!(diff.addresses.is_empty());
         assert!(diff.dns.is_none());
+    }
+
+    /// A route destination distinct from [`network`] (`observed_route`'s
+    /// destination), so a [`DesiredState`] can request adding it without
+    /// pairing against the already-observed route as a
+    /// [`net_lattice_model::apply::ApplyStep::ReplaceRoute`] candidate.
+    fn extra_network() -> Network {
+        Network::from(Ipv4Network::new(
+            Ipv4Address::new(203, 0, 113, 0),
+            Ipv4PrefixLength::new(24).expect("valid prefix"),
+        ))
+    }
+
+    fn extra_route() -> RouteConfig {
+        RouteConfig::new(extra_network()).with_interface_index(1)
+    }
+
+    /// Facade-level coverage for [`Lattice::apply`] — proves the
+    /// `current_state` → `Diff::compute` → `ApplyPlan::compile` →
+    /// `execute_apply_plan` chain it wraps actually resolves and executes
+    /// end to end, not just that each step passes in isolation (already
+    /// covered by the `facade_diff_*` tests above and `executor::apply`'s
+    /// own unit tests).
+    #[test]
+    fn facade_apply_reports_no_changes_when_desired_matches_observed() {
+        let lattice = lattice(Capability::ROUTE_MUTATION);
+        let desired = DesiredState::empty().with_routes(vec![route()]);
+
+        let report = lattice
+            .apply(&desired, &mut ExecutionOptions::default())
+            .expect("apply");
+
+        assert_eq!(report.len(), 0);
+        assert!(report.is_success());
+        assert!(matches!(report.rollback(), RollbackStatus::NotNeeded));
+    }
+
+    #[test]
+    fn facade_apply_executes_an_added_route() {
+        let lattice = lattice(Capability::ROUTE_MUTATION);
+        // Keep the already-observed route unchanged and additionally
+        // request a route at a distinct destination, so `Diff::compute`
+        // produces exactly one unpaired `Added` route and `ApplyPlan::compile`
+        // lowers it to a single `ApplyStep::Single(Mutation::AddRoute(_))`
+        // rather than an `ApplyStep::ReplaceRoute` (see ADR-0012 Decision 4).
+        let desired = DesiredState::empty().with_routes(vec![route(), extra_route()]);
+
+        let report = lattice
+            .apply(&desired, &mut ExecutionOptions::default())
+            .expect("apply");
+
+        assert_eq!(report.len(), 1);
+        assert!(report.is_success(), "{report:?}");
+        assert_eq!(report.applied_count(), 1);
+    }
+
+    #[test]
+    fn facade_apply_rejects_a_plan_the_backend_lacks_capability_for() {
+        let lattice = lattice(Capability::empty());
+        let desired = DesiredState::empty().with_routes(vec![route(), extra_route()]);
+
+        let report = lattice
+            .apply(&desired, &mut ExecutionOptions::default())
+            .expect("apply");
+
+        assert!(!report.is_success());
+        assert_eq!(report.rejected_count(), 1);
+    }
+
+    #[test]
+    fn facade_apply_propagates_a_current_state_read_failure() {
+        let lattice = Lattice {
+            backend: TestBackend {
+                capabilities: Capability::ROUTE_MUTATION,
+                fail_events: false,
+                fail_mutations: false,
+                fail_dns_read: true,
+            },
+        };
+        let desired = DesiredState::empty().with_routes(vec![extra_route()]);
+
+        let result = lattice.apply(&desired, &mut ExecutionOptions::default());
+
+        assert!(matches!(result, Err(Error::Unsupported)));
     }
 
     #[test]
