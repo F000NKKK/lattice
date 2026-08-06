@@ -648,7 +648,15 @@ above) now exist as of Stage 0.19, and `ApplyPlan`/`ApplyStep` (also
 `net-lattice-model`, see above) now exist as of Stage 0.20, along with
 `Lattice::<B>::execute_apply_plan` (`net-lattice`), which executes an
 `ApplyPlan` against a specific connected backend and reports convergence,
-non-convergence, and compensation results. The
+non-convergence, and compensation results. A thin facade convenience,
+`Lattice::<B>::apply(&self, desired: &DesiredState, options: &mut
+ExecutionOptions<'_>) -> Result<ApplyPlanReport>`, chains
+`current_state()` → `Diff::compute` → `ApplyPlan::compile` →
+`execute_apply_plan` for the common case where a caller has no need to
+inspect the compiled plan before executing it; callers that do want to
+preflight or inspect a plan first still call `current_state()`/
+`Diff::compute`/`ApplyPlan::compile` directly (or the now-public
+`Lattice::<B>::validate_apply_plan`) instead of `apply()`. The
 state/config split is named here — as a parallel `*Config` type per domain
 object living alongside its state type in `net-lattice-model` — so that it
 is built in from the first `*Config` type rather than retrofitted after
@@ -754,7 +762,7 @@ discipline once Lattice reaches 1.0.
 The full model above is a target, not a starting point. Crates and modules
 are introduced only when there is real implementation work for them:
 
-Rows through 0.19 are implemented and available today; rows from 0.20 onward
+Rows through 0.20 are implemented and available today; rows from 0.21 onward
 describe planned, not-yet-built work.
 
 | Stage | Scope |

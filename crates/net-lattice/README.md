@@ -91,6 +91,15 @@ further outcomes: `Rejected` (a capability-aware rejection before any native
 call) and `NonConvergent` (a native call was attempted but the resulting
 state could not be confirmed, or a precondition no longer held).
 
+For the common case — no need to inspect the compiled plan before
+executing it — `Lattice::apply(&self, desired: &DesiredState, options: &mut
+ExecutionOptions<'_>) -> Result<ApplyPlanReport>` is a thin convenience that
+chains `current_state()` → `Diff::compute` → `ApplyPlan::compile` →
+`execute_apply_plan` in one call. Callers that do want to preflight or
+inspect the compiled plan first should call those steps directly (or the
+public `Lattice::validate_apply_plan`) instead of `apply()`. See the
+`declarative_apply` example for a runnable walkthrough.
+
 ## Interface configuration
 
 `InterfaceConfig` is desired intent, distinct from the observed `Interface`.

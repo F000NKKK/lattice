@@ -70,6 +70,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `route_replace_order() -> AddBeforeRemove`), matching its native route
   calls never reading or writing metric and its delete key being unable to
   disambiguate an old route from its replacement while both exist at once.
+- `net-lattice::Lattice::<B>::apply(&self, desired: &DesiredState, options:
+  &mut ExecutionOptions<'_>) -> Result<ApplyPlanReport>`: a thin facade
+  convenience chaining `current_state()` → `Diff::compute` →
+  `ApplyPlan::compile` → `execute_apply_plan` for callers that do not need
+  to inspect the compiled plan before executing it. `Lattice::<B>::
+  validate_apply_plan` (previously a private helper) is now public, for
+  callers that want to preflight a compiled `ApplyPlan` without executing
+  it. New `declarative_apply` example demonstrates the full
+  `DesiredState` → `apply()` → `ApplyPlanReport` walkthrough.
 
 ## [0.19.1] - 2026-08-05
 

@@ -129,20 +129,32 @@ backend-крейту не требуется изменение — реализ
 крейта больше не реэкспортирует доменные типы напрямую), см. в
 [CHANGELOG.md](CHANGELOG.md).
 
-Net Lattice также предоставляет декларативную модель и inspectable diff, пока
-без шага применения: `DesiredState` (`net-lattice-model`, также доступен как
-`net_lattice::mutation::DesiredState`) — это whole-system-агрегат,
-формируемый вызывающей стороной, параллельный `CurrentState` — по одному
-полю-`Option` на домен, собирается через `DesiredState::empty()` и
-подомённые builder-методы `with_*`, без собственной зависимости от
-backend'а — а `Diff::compute(&CurrentState, &DesiredState) -> Diff`
+Net Lattice также предоставляет декларативную модель, inspectable diff и
+скомпилированный, исполняемый apply-план: `DesiredState`
+(`net-lattice-model`, также доступен как `net_lattice::mutation::DesiredState`)
+— это whole-system-агрегат, формируемый вызывающей стороной, параллельный
+`CurrentState` — по одному полю-`Option` на домен, собирается через
+`DesiredState::empty()` и подомённые builder-методы `with_*`, без
+собственной зависимости от backend'а — а
+`Diff::compute(&CurrentState, &DesiredState) -> Diff`
 (`net_lattice::mutation::Diff`) вычисляет чистую, side-effect-free разницу
 между ними: маршруты, соседи и адреса — как naturally-keyed множества
 add/remove(/change), интерфейс — как patch-diff по полям, DNS — как
 сравнение целого значения. `Diff::compute` не выполняет I/O и не вызывает ни
-один provider/backend метод; решение о том, применять ли `Diff` и как,
-остаётся за более поздним этапом (см. раздел State Model в
-[архитектуре](ARCHITECTURE.ru.md)). Рабочий пример — `declarative_diff`.
+один provider/backend метод. `ApplyPlan::compile(&Diff) -> ApplyPlan`
+(`net_lattice::mutation::ApplyPlan`) точно так же чистая и side-effect-free
+функция, компилирующая diff в упорядоченный список `ApplyStep` (см. раздел
+State Model в [архитектуре](ARCHITECTURE.ru.md) о том, как парная
+add/remove-пара маршрутов с одним destination компилируется в один шаг
+`ReplaceRoute` вместо двух независимых); `Lattice::execute_apply_plan()`
+исполняет этот план для подключённого backend'а с capability-aware
+отклонением, порядком замены маршрута по backend'у и обязательной
+read-after-write верификацией, а тонкое удобство
+`Lattice::apply(&DesiredState, &mut ExecutionOptions)` объединяет все
+четыре шага (`current_state` → `Diff::compute` → `ApplyPlan::compile` →
+`execute_apply_plan`) для вызывающих, которым не нужно инспектировать
+скомпилированный план заранее. Рабочий пример только для чтения —
+`declarative_diff`; полный пример применения — `declarative_apply`.
 
 Следующая поверхность API, описанная в плане поэтапной поставки
 [архитектуры](ARCHITECTURE.ru.md), проверена privileged CI-задачами:
@@ -151,7 +163,7 @@ add/remove(/change), интерфейс — как patch-diff по полям, D
 - модули `route`, `mac`, `interface`, `dns`, `neighbor`, `ifaddr`, `event` и `mutation` в `net-lattice-model`; `NewInterfaceAddress`, `NewDnsConfig` и `StaticNeighbor` выражают намерение изменения отдельно от наблюдаемого состояния
 - `RouteProvider`, `RouteMutator`, `InterfaceProvider`, `InterfaceMutator`, `DnsProvider`, `DnsMutator`, `NeighborProvider`, `NeighborMutator`, `AddressProvider`, `AddressMutator`, `CapabilityProvider`, синхронные `EventProvider`/bounded `EventReceiver` и опциональная async-поддержка мониторинга в `net-lattice-platform`
 - `net-lattice-async`, предоставляющий единый runtime-agnostic тип `EventStream`
-- фасад `net-lattice`, включая `Lattice::add_address()`, `Lattice::remove_address()`, `Lattice::set_dns_config()`, `Lattice::set_interface_config()`, `Lattice::add_static_neighbor()`, `Lattice::remove_static_neighbor()`, `Lattice::capabilities()`, `Lattice::supports()`, `Lattice::watch()`, `Lattice::watch_filtered()`, `Lattice::execute_plan()` и feature-gated `Lattice::watch_async()`
+- фасад `net-lattice`, включая `Lattice::add_address()`, `Lattice::remove_address()`, `Lattice::set_dns_config()`, `Lattice::set_interface_config()`, `Lattice::add_static_neighbor()`, `Lattice::remove_static_neighbor()`, `Lattice::capabilities()`, `Lattice::supports()`, `Lattice::watch()`, `Lattice::watch_filtered()`, `Lattice::execute_plan()`, `Lattice::execute_apply_plan()`, `Lattice::apply()` и feature-gated `Lattice::watch_async()`
 
 Это даёт реальное управление маршрутами, IP-адресами интерфейсов и статическими записями ARP/NDP, desired-патчи `InterfaceConfig` для administrative state и MTU, просмотр интерфейсов, просмотр и изменение DNS-конфигурации резолвера, чтение таблиц соседей (ARP/NDP), inspectable планы mutation-операций, упорядоченное исполнение транзакций и bounded-мониторинг сетевых изменений на Linux, Windows и macOS. `InterfaceConfig` не переиспользует observed `Interface`: он выбирает один интерфейс и запрашивает одно или оба поддерживаемых свойства. Для каждого свойства проверяйте `Capability::INTERFACE_ADMIN_STATE` и `Capability::INTERFACE_MTU`. Native backend может применять свойства разными вызовами, поэтому ошибка combined patch может означать partial application; перечитайте состояние и при необходимости используйте явный compensator executor'а. Создание адреса принимает `NewInterfaceAddress` и возвращает результирующий наблюдаемый `InterfaceAddress`; замена конфигурации резолвера принимает `NewDnsConfig` и возвращает результирующий наблюдаемый `DnsConfig`. Создание статической записи соседа принимает `StaticNeighbor` (отдельный от `NeighborEntry` тип: без синтезированного ID или наблюдаемого состояния, MAC-адрес обязателен) и возвращает результирующий наблюдаемый `NeighborEntry`; сначала проверяйте `Capability::NEIGHBOR_MUTATION`, а удаление присутствующей, но не `Permanent` (динамически изученной) записи отклоняется с `Error::InvalidState`, а не молча её вытесняет. `MutationPlan` — только данные, а `Lattice::execute_plan` исполняет его через единый `ExecutionOptions` с runtime-проверками, cancellation на границах операций, типизированными snapshots, явной compensation и фазовыми отчётами. `EventFilter` сочетает селекторы доменов (`routes()`) и объектов (`route(route_id)`); каждый backend применяет filter до помещения обычного события в очередь. Перед watching проверяйте capability каждого выбранного filter-домена; `Capability::MONITORING` означает, что доступны все текущие домены. Feature `async` в Net Lattice использует и реэкспортирует реализацию `EventStream` из `net-lattice-async`; приложению достаточно включить эту feature фасада. Это всё ещё не полноценная библиотека: VLAN, VRF, namespaces, интеграция с firewall, декларативная настройка сети и другие продвинутые возможности ещё впереди; см. [ARCHITECTURE.ru.md](ARCHITECTURE.ru.md) для поэтапной дорожной карты и [CHANGELOG.md](CHANGELOG.md) для того, что реально вышло.
 
@@ -227,6 +239,7 @@ if lattice.supports(Capability::ROUTE_MONITORING) {
 | Настройка интерфейса | [`interface_configuration`](crates/net-lattice/examples/interface_configuration.rs) | `InterfaceConfig`, `DesiredAdminState`, capability checks, `set_interface_config` |
 | Просмотр mutation | [`mutation_plan`](crates/net-lattice/examples/mutation_plan.rs) | все варианты `Mutation`, `Mutation::semantics`, `MutationPlan` |
 | Декларативный diff (только чтение) | [`declarative_diff`](crates/net-lattice/examples/declarative_diff.rs) | `DesiredState`, `Diff`, `Diff::compute`, `RouteChange` |
+| Декларативное применение | [`declarative_apply`](crates/net-lattice/examples/declarative_apply.rs) | `DesiredState`, `ApplyPlan`, `Lattice::apply`, `ApplyPlanReport` |
 
 Запуск: `cargo run -p net-lattice --example <name>`. Для `async_monitor`
 добавьте `--features async`.

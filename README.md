@@ -127,20 +127,32 @@ including the domain-scoped `net_lattice::model`/`mutation`/`monitoring`
 re-export modules (the crate root no longer re-exports domain items
 directly).
 
-Net Lattice also exposes a declarative model and an inspectable diff,
-without an apply step: `DesiredState` (`net-lattice-model`, also reachable as
-`net_lattice::mutation::DesiredState`) is a whole-system, caller-authored
-aggregate parallel to `CurrentState` — one `Option`-wrapped field per domain,
-built via `DesiredState::empty()` plus per-domain `with_*` builders, with no
-backend dependency of its own — and
+Net Lattice also exposes a declarative model, an inspectable diff, and a
+compiled, executable apply plan: `DesiredState` (`net-lattice-model`, also
+reachable as `net_lattice::mutation::DesiredState`) is a whole-system,
+caller-authored aggregate parallel to `CurrentState` — one `Option`-wrapped
+field per domain, built via `DesiredState::empty()` plus per-domain `with_*`
+builders, with no backend dependency of its own — and
 `Diff::compute(&CurrentState, &DesiredState) -> Diff`
 (`net_lattice::mutation::Diff`) computes a pure, side-effect-free difference
 between the two: route/neighbor/address as natural-key add/remove(/change)
 sets, interface as a per-field patch-diff, and DNS as a whole-value
 comparison. `Diff::compute` performs no I/O and calls no provider/backend
-method; deciding whether or how to apply a `Diff` is a later stage's concern
-(see the [architecture](ARCHITECTURE.md)'s State Model section). See the
-`declarative_diff` example for a runnable walkthrough.
+method. `ApplyPlan::compile(&Diff) -> ApplyPlan`
+(`net_lattice::mutation::ApplyPlan`) is likewise pure and side-effect-free,
+compiling the diff into an ordered list of `ApplyStep`s (see the
+[architecture](ARCHITECTURE.md)'s State Model section for how a paired
+route add/remove at the same destination compiles to one `ReplaceRoute`
+step instead of two independent ones); `Lattice::execute_apply_plan()`
+executes that plan against the connected backend with capability-aware
+rejection, per-backend route-replacement ordering, and mandatory
+read-after-write verification, and the thin `Lattice::apply(&DesiredState,
+&mut ExecutionOptions)` convenience chains all four steps
+(`current_state` → `Diff::compute` → `ApplyPlan::compile` →
+`execute_apply_plan`) for callers who do not need to inspect the compiled
+plan first. See the `declarative_diff` example for a read-only diff
+walkthrough and the `declarative_apply` example for a full apply
+walkthrough.
 
 The following surface, described by the [architecture](ARCHITECTURE.md)'s
 Incremental Delivery Plan, is verified by the privileged Linux, Windows, and
@@ -150,7 +162,7 @@ macOS CI jobs:
 - `net-lattice-model`'s `route`, `mac`, `interface`, `dns`, `neighbor`, `ifaddr`, `event`, and `mutation` modules; `NewInterfaceAddress`, `NewDnsConfig`, and `StaticNeighbor` express mutation intent separately from observed state
 - `net-lattice-platform`'s `RouteProvider`, `RouteMutator`, `InterfaceProvider`, `InterfaceMutator`, `DnsProvider`, `DnsMutator`, `NeighborProvider`, `NeighborMutator`, `AddressProvider`, `AddressMutator`, `CapabilityProvider`, synchronous `EventProvider`/bounded `EventReceiver`, and optional async monitoring support
 - `net-lattice-async`, which exposes the single runtime-agnostic `EventStream` type
-- the `net-lattice` facade, including `Lattice::add_address()`, `Lattice::remove_address()`, `Lattice::set_dns_config()`, `Lattice::set_interface_config()`, `Lattice::add_static_neighbor()`, `Lattice::remove_static_neighbor()`, `Lattice::capabilities()`, `Lattice::supports()`, `Lattice::watch()`, `Lattice::watch_filtered()`, `Lattice::execute_plan()`, and feature-gated `Lattice::watch_async()`
+- the `net-lattice` facade, including `Lattice::add_address()`, `Lattice::remove_address()`, `Lattice::set_dns_config()`, `Lattice::set_interface_config()`, `Lattice::add_static_neighbor()`, `Lattice::remove_static_neighbor()`, `Lattice::capabilities()`, `Lattice::supports()`, `Lattice::watch()`, `Lattice::watch_filtered()`, `Lattice::execute_plan()`, `Lattice::execute_apply_plan()`, `Lattice::apply()`, and feature-gated `Lattice::watch_async()`
 
 This gives real route, interface-address, and static ARP/NDP neighbor
 management, desired `InterfaceConfig` patches for administrative state and
@@ -255,6 +267,7 @@ elevated operating-system privilege.
 | Interface configuration | [`interface_configuration`](crates/net-lattice/examples/interface_configuration.rs) | `InterfaceConfig`, `DesiredAdminState`, capability checks, `set_interface_config` |
 | Mutation inspection | [`mutation_plan`](crates/net-lattice/examples/mutation_plan.rs) | every `Mutation` variant, `Mutation::semantics`, `MutationPlan` |
 | Declarative diff (read-only) | [`declarative_diff`](crates/net-lattice/examples/declarative_diff.rs) | `DesiredState`, `Diff`, `Diff::compute`, `RouteChange` |
+| Declarative apply | [`declarative_apply`](crates/net-lattice/examples/declarative_apply.rs) | `DesiredState`, `ApplyPlan`, `Lattice::apply`, `ApplyPlanReport` |
 
 Run an example with `cargo run -p net-lattice --example <name>`. Add
 `--features async` for `async_monitor`.
