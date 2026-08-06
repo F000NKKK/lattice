@@ -23,8 +23,15 @@ delivery, and whole-system `CurrentState` snapshot assembly
 interface addresses, and DNS configuration in one fail-fast call with no
 partial result. `RouteProvider`/`RouteMutator` and every other domain follow
 the same read-only provider / mutator pattern, gated by explicit
-`Capability` flags. `InterfaceConfig` is a partial imperative patch, not a
-declarative desired-state model. This surface is verified by privileged
-Linux, Windows, and macOS CI and is part of the published support surface.
-See [README.md](README.md)'s Current Status for the full capability matrix;
-questions about usage, direction, and design are all welcome.
+`Capability` flags. `InterfaceConfig` remains a partial imperative patch, but
+a declarative desired-state layer now sits alongside it: `DesiredState`
+expresses whole-system intent, `Diff::compute` computes a pure, side-effect-
+free difference against an observed `CurrentState`, `ApplyPlan::compile`
+compiles that difference into a pure, inspectable plan (including
+backend-aware route-replacement ordering), and `Lattice::execute_apply_plan`/
+`Lattice::apply` execute that plan against the connected backend, reporting
+convergence, non-convergence, and capability-aware rejection distinctly.
+This surface is verified by privileged Linux, Windows, and macOS CI and is
+part of the published support surface. See [README.md](README.md)'s Current
+Status for the full capability matrix; questions about usage, direction, and
+design are all welcome.

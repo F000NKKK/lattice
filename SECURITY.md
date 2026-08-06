@@ -72,3 +72,34 @@ application, privilege confusion, or memory-safety issues in route,
 interface, DNS, neighbor, address, or monitoring message/data handling are
 in scope. Firewall, VLAN, VRF, namespace, isolated destructive topology
 orchestration, and tunnel domains do not exist yet.
+
+The model also publishes a declarative desired-state layer built on top of
+the same providers above: a whole-system `DesiredState` aggregate, a pure
+`Diff` computed between an observed `CurrentState` and a `DesiredState`, and
+a pure `ApplyPlan` compiled from that `Diff`. Both `Diff` and `ApplyPlan` are
+inspectable, side-effect-free values — computing or compiling one performs
+no I/O and calls no provider or native API, so building and reviewing either
+before deciding whether to act on it carries no privilege or mutation risk.
+Only executing a compiled `ApplyPlan` (via the executor's plan-execution
+entry point, or the facade convenience that chains snapshot, diff, compile,
+and execute in one call) is privileged, and it is privileged exactly like
+the underlying route, interface, DNS, neighbor, and address mutations it
+lowers to — the declarative layer introduces no new privilege surface and no
+new capability gate beyond the ones already covering those mutations.
+Before any native call is attempted, plan execution rejects a desired field
+a given backend cannot honor at all (for example, a route metric on a
+backend whose native route calls never read or write it) rather than
+silently building a step that can never converge. Route replacement — an
+added route and a removed route that resolve to the same destination — is
+sequenced per backend according to how precisely that backend's native
+delete call can distinguish the old route from its replacement, always
+followed by a mandatory read-after-write check confirming both that the new
+route is present and that the old route is gone. If that check cannot
+confirm the expected before/after state, the affected step is treated as
+failed rather than assumed successful, is reported distinctly from an
+ordinary native error, and is eligible for the same best-effort compensation
+behavior as any other failed step in a plan. Reports involving a declarative
+plan converging to an unintended state, a route replacement leaving both the
+old and new route present (or neither present), silent application of a
+desired field a backend cannot actually honor, or partial-apply/rollback
+behavior that does not match the reported outcome are in scope.
