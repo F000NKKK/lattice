@@ -2,14 +2,17 @@
 //! without applying anything.
 //!
 //! `DesiredState`/`Diff` are inspectable only as of this stage — see
-//! `ARCHITECTURE.md`'s State Model section. `Diff::compute` never touches
-//! the network; nothing here requires elevated privilege or changes host
-//! state.
+//! `ARCHITECTURE.md`'s State Model section. [`net_lattice::Lattice::diff`]
+//! (the facade convenience this example calls) chains
+//! [`net_lattice::Lattice::current_state`] → `Diff::compute` internally and
+//! never touches the network itself; nothing here requires elevated
+//! privilege or changes host state. Unlike `declarative_apply` (which
+//! executes the resulting plan), this stops at the inspectable `Diff`.
 //!
 //! Run with `cargo run -p net-lattice --example declarative_diff`.
 
-use net_lattice::model::{CurrentState, Network};
-use net_lattice::mutation::{DesiredState, Diff, RouteChange, RouteConfig};
+use net_lattice::model::Network;
+use net_lattice::mutation::{DesiredState, RouteChange, RouteConfig};
 use net_lattice::{Error, Ipv4Address, Ipv4Network, Ipv4PrefixLength, Lattice, Result};
 
 fn main() -> Result<()> {
@@ -24,8 +27,6 @@ fn main() -> Result<()> {
         .find(|interface| interface.name == target_name)
         .ok_or(Error::NotFound)?;
 
-    let current: CurrentState = lattice.current_state()?;
-
     // Manage only the `routes` domain: express exactly one desired route on
     // the selected interface, leave every other domain unmanaged (`None`)
     // so `Diff` proposes no changes for interfaces, neighbors, addresses,
@@ -37,7 +38,9 @@ fn main() -> Result<()> {
     let desired_route = RouteConfig::new(destination).with_interface_index(interface.index);
     let desired = DesiredState::empty().with_routes(vec![desired_route]);
 
-    let diff = Diff::compute(&current, &desired);
+    // `Lattice::diff` reads current state and computes the gap in one call;
+    // it never submits a native mutation.
+    let diff = lattice.diff(&desired)?;
 
     if diff.routes.is_empty() {
         println!("routes already match the desired state, nothing to do");
