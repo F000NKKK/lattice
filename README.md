@@ -98,6 +98,10 @@ Implemented:
 - Neighbor tables (ARP/NDP)
 - Network monitoring and change notifications
 - Optional runtime-agnostic async event stream
+- Whole-system `CurrentState` snapshots
+- Declarative desired-state configuration: `DesiredState`, a pure `Diff`
+  computed against a `CurrentState`, a pure compiled `ApplyPlan`, and
+  `Lattice::apply()`/`execute_apply_plan()` to run it against a backend
 
 Planned:
 
@@ -105,7 +109,6 @@ Planned:
 - VRFs
 - Network namespaces
 - Firewall integration
-- Declarative networking
 
 ## Non-Goals
 

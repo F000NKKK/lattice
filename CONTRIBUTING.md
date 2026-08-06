@@ -15,16 +15,21 @@ monitoring with optional native async event delivery, and whole-system
 `CurrentState` snapshot assembly (`net-lattice-model::CurrentState`,
 `net-lattice-platform::SnapshotProvider`, `Lattice::current_state()`) on
 Linux, Windows, and macOS, verified by privileged CI on all three platforms.
-`InterfaceConfig` is a partial imperative patch, not a declarative
-desired-state model; `RouteProvider`/`RouteMutator` follow the read-only
+`InterfaceConfig` remains a partial imperative patch, but a declarative
+desired-state layer now sits alongside it: `DesiredState` expresses
+whole-system intent, `Diff::compute` computes a pure, side-effect-free
+difference against an observed `CurrentState`, `ApplyPlan::compile` compiles
+that difference into a pure, inspectable plan, and
+`Lattice::execute_apply_plan`/`Lattice::apply` execute that plan against the
+connected backend. `RouteProvider`/`RouteMutator` follow the read-only
 provider / mutator pattern used by every other domain.
 Large capability domains remain ahead, but the published read, mutation,
-monitoring, planning, snapshot, and backend-extension APIs are real public
-surface. The most valuable contributions right now are:
+monitoring, planning, snapshot, declarative-apply, and backend-extension
+APIs are real public surface. The most valuable contributions right now are:
 
 - Feedback on the project's vision, scope, and roadmap (see [README.md](README.md))
 - Discussion of API design and architecture for upcoming stages
-- Implementation work on the next stages in [ARCHITECTURE.md](ARCHITECTURE.md)'s delivery plan (declarative diff, declarative apply, pre-1.0 hardening, ...)
+- Implementation work on the next stages in [ARCHITECTURE.md](ARCHITECTURE.md)'s delivery plan (pre-1.0 hardening, VLAN/VRF/namespace/firewall/tunnel capability domains, ...)
 - Documentation and tooling improvements
 
 Please read [ARCHITECTURE.md](ARCHITECTURE.md) before proposing a new crate, module, or provider trait — it documents the dependency rules (e.g. `net-lattice-platform` never depends on `net-lattice-model`) and the staged delivery order this project follows.
