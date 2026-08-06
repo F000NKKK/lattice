@@ -560,6 +560,7 @@ mod tests {
     use net_lattice_model::event::{Event, EventFilter};
     use net_lattice_model::ifaddr::{InterfaceAddress, NewInterfaceAddress};
     use net_lattice_model::interface::{Interface, InterfaceConfig, InterfaceKind};
+    use net_lattice_model::mutation::MutationPlan;
     use net_lattice_model::neighbor::{NeighborEntry, StaticNeighbor};
     use net_lattice_model::route::RouteId;
     use net_lattice_platform::{
@@ -1155,6 +1156,156 @@ mod tests {
         let mut options = ExecutionOptions::default();
         let report = lattice.execute_apply_plan(&replace_route_plan(), &mut options);
 
+        assert!(matches!(report.rollback(), RollbackStatus::NotAttempted));
+    }
+
+    // ---- ADR NL-A-15's own required coverage: Single-step parity and a
+    // mixed Single/ReplaceRoute plan (NL-73's reviewed gap #1) ----
+
+    #[test]
+    fn single_step_parity_with_execute_plan_and_mixed_plan_compensates_both_step_kinds() {
+        // Part 1: a bare `ApplyStep::Single` step run through
+        // `execute_apply_plan` produces the same outcome/report shape as an
+        // equivalent `MutationPlan` run through `execute_plan` — the ADR's
+        // own required "Single step execution parity" coverage.
+        let single_operation =
+            Mutation::AddRoute(RouteConfig::new(network(9)).with_interface_index(3));
+
+        let apply_lattice = lattice(FakeRouteBackend::new(
+            RouteReplaceOrder::RemoveBeforeAdd,
+            true,
+        ));
+        let apply_plan = ApplyPlan::from_steps([ApplyStep::Single(single_operation.clone())]);
+        let mut apply_options = ExecutionOptions::default();
+        let apply_report = apply_lattice.execute_apply_plan(&apply_plan, &mut apply_options);
+
+        let plan_lattice = lattice(FakeRouteBackend::new(
+            RouteReplaceOrder::RemoveBeforeAdd,
+            true,
+        ));
+        let mutation_plan = MutationPlan::from_operations([single_operation]);
+        let mut plan_options = ExecutionOptions::default();
+        let plan_report = plan_lattice.execute_plan(&mutation_plan, &mut plan_options);
+
+        assert!(apply_report.is_success(), "{apply_report:?}");
+        assert!(plan_report.is_success(), "{plan_report:?}");
+        assert_eq!(apply_report.applied_count(), 1);
+        assert_eq!(plan_report.applied_count(), 1);
+        assert!(matches!(
+            apply_report.outcome(0),
+            Some(ApplyStepOutcome::Applied)
+        ));
+        assert!(matches!(
+            plan_report.outcome(0),
+            Some(MutationOutcome::Applied)
+        ));
+        assert!(matches!(apply_report.rollback(), RollbackStatus::NotNeeded));
+        assert!(matches!(plan_report.rollback(), RollbackStatus::NotNeeded));
+        assert_eq!(
+            apply_lattice.routes().expect("routes").len(),
+            plan_lattice.routes().expect("routes").len(),
+        );
+
+        // Part 2: a mixed plan (`Single`, `ReplaceRoute`, then a failing
+        // `Single`) exercises both `AppliedApplyStep` variants together and
+        // the reverse-order compensation loop across mixed step kinds.
+        let mut backend = FakeRouteBackend::new(RouteReplaceOrder::RemoveBeforeAdd, true);
+        backend.capabilities = Capability::ROUTE_MUTATION | Capability::INTERFACE_ADMIN_STATE;
+        let lattice = lattice(backend);
+
+        let single_add_config = RouteConfig::new(network(9)).with_interface_index(3);
+        let single_add = Mutation::AddRoute(single_add_config);
+        let failing_interface_patch = Mutation::SetInterfaceConfig(
+            net_lattice_model::interface::InterfaceConfig::new(
+                net_lattice_model::interface::InterfaceId::new(1),
+                Some(net_lattice_model::interface::DesiredAdminState::Up),
+                None,
+            )
+            .expect("valid admin-state-only patch"),
+        );
+        let plan = ApplyPlan::from_steps([
+            ApplyStep::Single(single_add),
+            ApplyStep::ReplaceRoute {
+                old: old_route(),
+                new: new_route_config(),
+            },
+            ApplyStep::Single(failing_interface_patch),
+        ]);
+
+        let compensated_indices: RefCell<Vec<usize>> = RefCell::new(Vec::new());
+        let mut compensate =
+            |index: usize, operation: &Mutation, _prior: Option<&MutationSnapshot>| {
+                compensated_indices.borrow_mut().push(index);
+                // Perform the reversal for real, the way a real caller
+                // would, so the resulting route state below actually
+                // proves the callback ran and did its job.
+                if let Mutation::AddRoute(config) = operation {
+                    lattice.remove_route(*config)?;
+                }
+                Ok(())
+            };
+        let mut options = ExecutionOptions::default().compensation(&mut compensate);
+        let report = lattice.execute_apply_plan(&plan, &mut options);
+
+        assert!(matches!(report.outcome(0), Some(ApplyStepOutcome::Applied)));
+        assert!(matches!(report.outcome(1), Some(ApplyStepOutcome::Applied)));
+        assert!(matches!(
+            report.outcome(2),
+            Some(ApplyStepOutcome::Failed { .. })
+        ));
+        assert!(matches!(report.rollback(), RollbackStatus::Completed));
+
+        // The `Single` step (index 0) is compensated via the caller's own
+        // callback; the `ReplaceRoute` step (index 1) is reversed
+        // internally (see `execute_apply_plan`'s rustdoc) and never reaches
+        // the callback — so only index 0 shows up here, even though both
+        // were rolled back, and it is only invoked after the `ReplaceRoute`
+        // step's own internal reversal completes (reverse plan order).
+        assert_eq!(*compensated_indices.borrow(), vec![0]);
+
+        // Both reversals actually happened: `ReplaceRoute`'s `new` route
+        // (interface_index 2) is gone and `old` (interface_index 1) is
+        // restored (internal compensation); the `Single` step's added
+        // route (interface_index 3) is gone too (caller callback).
+        let routes = lattice.routes().expect("routes");
+        assert!(routes.iter().any(|route| route.interface_index == Some(1)));
+        assert!(!routes.iter().any(|route| route.interface_index == Some(2)));
+        assert!(!routes.iter().any(|route| route.interface_index == Some(3)));
+    }
+
+    // ---- read-after-write: precondition/snapshot re-read failure (NL-73's
+    // reviewed gap #2) ----
+
+    #[test]
+    fn replace_route_reports_snapshot_failed_when_precondition_read_fails() {
+        // `FakeRouteBackend::fail_routes_read` fails every `routes()` call,
+        // so `execute_replace_route_step`'s step-3 precondition re-read
+        // fails before either native leg is attempted — the `ReplaceRoute`
+        // counterpart of a snapshot-read failure, distinct from the
+        // read-after-write ambiguity covered by the `stale_readback` tests
+        // above (that branch is only reached once the precondition re-read
+        // itself has already succeeded).
+        let mut backend = FakeRouteBackend::new(RouteReplaceOrder::RemoveBeforeAdd, true);
+        backend.fail_routes_read = true;
+        let lattice = lattice(backend);
+        let mut options = ExecutionOptions::default();
+        let report = lattice.execute_apply_plan(&replace_route_plan(), &mut options);
+
+        assert!(matches!(
+            report.outcome(0),
+            Some(ApplyStepOutcome::Failed {
+                error: Error::InvalidState,
+                may_have_applied: false,
+            })
+        ));
+        let operation_report = report.operation_report(0).expect("operation report");
+        assert_eq!(operation_report.phase, MutationExecutionPhase::Snapshot);
+        assert_eq!(
+            operation_report.stop_reason,
+            Some(MutationStopReason::SnapshotFailed)
+        );
+        // No leg was attempted, so nothing needs compensating even though
+        // execution stopped.
         assert!(matches!(report.rollback(), RollbackStatus::NotAttempted));
     }
 }
