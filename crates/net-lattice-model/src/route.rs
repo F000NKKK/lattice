@@ -35,6 +35,7 @@ pub struct Route {
 pub type RouteId = Id<Route>;
 
 impl Route {
+    /// Creates a route with no gateway, metric, or outgoing interface set.
     pub fn new(id: RouteId, destination: Network) -> Self {
         Self {
             id,
@@ -45,16 +46,19 @@ impl Route {
         }
     }
 
+    /// Sets the next-hop gateway address.
     pub fn with_gateway(mut self, gateway: IpAddress) -> Self {
         self.gateway = Some(gateway);
         self
     }
 
+    /// Sets the route metric.
     pub fn with_metric(mut self, metric: u32) -> Self {
         self.metric = Some(metric);
         self
     }
 
+    /// Sets the outgoing interface's raw OS-level index.
     pub fn with_interface_index(mut self, interface_index: u32) -> Self {
         self.interface_index = Some(interface_index);
         self
@@ -97,6 +101,8 @@ pub struct RouteConfig {
 }
 
 impl RouteConfig {
+    /// Creates a route intent with no gateway, metric, or outgoing interface
+    /// requested.
     pub fn new(destination: Network) -> Self {
         Self {
             destination,
@@ -106,16 +112,19 @@ impl RouteConfig {
         }
     }
 
+    /// Requests a next-hop gateway address.
     pub fn with_gateway(mut self, gateway: IpAddress) -> Self {
         self.gateway = Some(gateway);
         self
     }
 
+    /// Requests a route metric.
     pub fn with_metric(mut self, metric: u32) -> Self {
         self.metric = Some(metric);
         self
     }
 
+    /// Requests an outgoing interface, identified by its raw OS-level index.
     pub fn with_interface_index(mut self, interface_index: u32) -> Self {
         self.interface_index = Some(interface_index);
         self

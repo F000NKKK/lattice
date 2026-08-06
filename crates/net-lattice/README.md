@@ -100,6 +100,11 @@ inspect the compiled plan first should call those steps directly (or the
 public `Lattice::validate_apply_plan`) instead of `apply()`. See the
 `declarative_apply` example for a runnable walkthrough.
 
+For the common "what would change" case — no need to execute anything —
+`Lattice::diff(&self, desired: &DesiredState) -> Result<Diff>` chains
+`current_state()` → `Diff::compute` without compiling or executing a plan.
+See the `declarative_diff` example.
+
 ## Interface configuration
 
 `InterfaceConfig` is desired intent, distinct from the observed `Interface`.

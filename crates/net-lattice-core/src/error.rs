@@ -45,6 +45,43 @@ pub enum PlatformErrorCode {
     Darwin(i32),
 }
 
+impl Error {
+    /// Returns `true` if this is [`Error::PermissionDenied`].
+    pub const fn is_permission_denied(&self) -> bool {
+        matches!(self, Error::PermissionDenied)
+    }
+
+    /// Returns `true` if this is [`Error::NotFound`].
+    pub const fn is_not_found(&self) -> bool {
+        matches!(self, Error::NotFound)
+    }
+
+    /// Returns `true` if this is [`Error::AlreadyExists`].
+    pub const fn is_already_exists(&self) -> bool {
+        matches!(self, Error::AlreadyExists)
+    }
+
+    /// Returns `true` if this is [`Error::Unsupported`].
+    pub const fn is_unsupported(&self) -> bool {
+        matches!(self, Error::Unsupported)
+    }
+
+    /// Returns `true` if this is [`Error::InvalidState`].
+    pub const fn is_invalid_state(&self) -> bool {
+        matches!(self, Error::InvalidState)
+    }
+
+    /// Returns `true` if this is [`Error::Disconnected`].
+    pub const fn is_disconnected(&self) -> bool {
+        matches!(self, Error::Disconnected)
+    }
+
+    /// Returns `true` if this is [`Error::Platform`].
+    pub const fn is_platform(&self) -> bool {
+        matches!(self, Error::Platform(_))
+    }
+}
+
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -88,5 +125,29 @@ mod tests {
     fn platform_error_codes_preserve_their_platform_and_value() {
         assert_eq!(PlatformErrorCode::Linux(-1), PlatformErrorCode::Linux(-1));
         assert_ne!(PlatformErrorCode::Windows(1), PlatformErrorCode::Darwin(1));
+    }
+
+    #[test]
+    fn is_helpers_match_only_their_own_variant() {
+        assert!(Error::PermissionDenied.is_permission_denied());
+        assert!(!Error::NotFound.is_permission_denied());
+
+        assert!(Error::NotFound.is_not_found());
+        assert!(!Error::AlreadyExists.is_not_found());
+
+        assert!(Error::AlreadyExists.is_already_exists());
+        assert!(!Error::Unsupported.is_already_exists());
+
+        assert!(Error::Unsupported.is_unsupported());
+        assert!(!Error::InvalidState.is_unsupported());
+
+        assert!(Error::InvalidState.is_invalid_state());
+        assert!(!Error::Disconnected.is_invalid_state());
+
+        assert!(Error::Disconnected.is_disconnected());
+        assert!(!Error::Platform(PlatformErrorCode::Linux(-1)).is_disconnected());
+
+        assert!(Error::Platform(PlatformErrorCode::Linux(-1)).is_platform());
+        assert!(!Error::PermissionDenied.is_platform());
     }
 }

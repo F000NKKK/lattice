@@ -63,18 +63,22 @@ impl EventFilter {
             address_ids: None,
         }
     }
+    /// Selects the route domain, delivering every route event.
     pub const fn routes(mut self) -> Self {
         self.routes = true;
         self
     }
+    /// Selects the interface domain, delivering every interface event.
     pub const fn interfaces(mut self) -> Self {
         self.interfaces = true;
         self
     }
+    /// Selects the neighbor domain, delivering every neighbor event.
     pub const fn neighbors(mut self) -> Self {
         self.neighbors = true;
         self
     }
+    /// Selects the address domain, delivering every interface-address event.
     pub const fn addresses(mut self) -> Self {
         self.addresses = true;
         self

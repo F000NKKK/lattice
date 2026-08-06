@@ -28,6 +28,8 @@ pub struct NewInterfaceAddress {
 }
 
 impl NewInterfaceAddress {
+    /// Creates an address-assignment intent with no explicit broadcast
+    /// address requested.
     pub fn new(interface_id: InterfaceId, address: Network) -> Self {
         Self {
             interface_id,
@@ -36,6 +38,7 @@ impl NewInterfaceAddress {
         }
     }
 
+    /// Requests an explicit IPv4 broadcast address.
     pub fn with_broadcast(mut self, broadcast: Ipv4Address) -> Self {
         self.broadcast = Some(broadcast);
         self
@@ -73,6 +76,7 @@ pub struct InterfaceAddress {
 }
 
 impl InterfaceAddress {
+    /// Creates an observed interface address with no broadcast address set.
     pub fn new(id: InterfaceAddressId, interface_index: u32, address: Network) -> Self {
         Self {
             id,
@@ -82,6 +86,7 @@ impl InterfaceAddress {
         }
     }
 
+    /// Sets the observed IPv4 broadcast address.
     pub fn with_broadcast(mut self, broadcast: IpAddress) -> Self {
         self.broadcast = Some(broadcast);
         self

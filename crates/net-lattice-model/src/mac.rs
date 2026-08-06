@@ -9,10 +9,12 @@ use std::fmt;
 pub struct MacAddress([u8; 6]);
 
 impl MacAddress {
+    /// Creates a MAC address from six octets in transmission order.
     pub const fn new(octets: [u8; 6]) -> Self {
         Self(octets)
     }
 
+    /// Returns the six octets in transmission order.
     pub const fn octets(&self) -> [u8; 6] {
         self.0
     }

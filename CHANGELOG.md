@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `net-lattice::Lattice::<B>::diff(&self, desired: &DesiredState) ->
+  Result<Diff>`: a convenience chaining `current_state()` →
+  `Diff::compute`, for callers who only want to inspect what would change
+  (a dry-run / diff-preview) without compiling or executing a plan the way
+  `apply()` does.
+- `net-lattice-core::Error::is_permission_denied`/`is_not_found`/
+  `is_already_exists`/`is_unsupported`/`is_invalid_state`/`is_disconnected`/
+  `is_platform`: one matching-helper method per existing `Error` variant,
+  for callers who prefer `if err.is_not_found() { ... }` over `matches!`.
+
+### Changed
+
+- Documented previously undocumented public constructor/builder methods
+  across `net-lattice-model` (`Route`, `RouteConfig`, `Interface`,
+  `NeighborEntry`, `StaticNeighbor`, `InterfaceAddress`,
+  `NewInterfaceAddress`, `MacAddress`, `EventFilter`'s domain-selector
+  methods) and `net-lattice-ip` (`Ipv4Address`, `Ipv4Network`,
+  `Ipv6Address`, `Ipv6Network`), and `net-lattice`'s `Lattice::routes`/
+  `interfaces`/`dns_config`/`neighbors`/`addresses` read methods. No
+  behavior change; a rustdoc completeness pass only.
+
 ## [0.20.0] - 2026-08-06
 
 ### Added

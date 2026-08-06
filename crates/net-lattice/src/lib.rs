@@ -472,6 +472,8 @@ impl<B: LatticeBackend> SnapshotProvider for Lattice<B> {
 static FORCE_CONNECT_FAILURE: AtomicBool = AtomicBool::new(false);
 
 impl<B: LatticeBackend> Lattice<B> {
+    /// Reads the observed routing table. Requires no capability; see
+    /// [`Capability`] for mutation-side gating.
     pub fn routes(&self) -> Result<Vec<Route>> {
         self.backend.routes()
     }
@@ -490,6 +492,8 @@ impl<B: LatticeBackend> Lattice<B> {
         self.backend.remove_route(route)
     }
 
+    /// Reads the observed network interfaces. Requires no capability; see
+    /// [`Capability`] for mutation-side gating.
     pub fn interfaces(&self) -> Result<Vec<Interface>> {
         self.backend.interfaces()
     }
@@ -509,6 +513,8 @@ impl<B: LatticeBackend> Lattice<B> {
         self.backend.set_interface_config(config)
     }
 
+    /// Reads the observed resolver configuration. Requires no capability;
+    /// see [`Capability`] for mutation-side gating.
     pub fn dns_config(&self) -> Result<DnsConfig> {
         self.backend.dns_config()
     }
@@ -519,6 +525,8 @@ impl<B: LatticeBackend> Lattice<B> {
         self.backend.set_dns_config(config)
     }
 
+    /// Reads the observed neighbor (ARP/NDP) table. Requires no capability;
+    /// see [`Capability`] for mutation-side gating.
     pub fn neighbors(&self) -> Result<Vec<NeighborEntry>> {
         self.backend.neighbors()
     }
@@ -542,6 +550,8 @@ impl<B: LatticeBackend> Lattice<B> {
         self.backend.remove_static_neighbor(neighbor)
     }
 
+    /// Reads the observed interface addresses. Requires no capability; see
+    /// [`Capability`] for mutation-side gating.
     pub fn addresses(&self) -> Result<Vec<InterfaceAddress>> {
         self.backend.addresses()
     }
@@ -605,6 +615,23 @@ impl<B: LatticeBackend> Lattice<B> {
         let diff = Diff::compute(&current, desired);
         let plan = ApplyPlan::compile(&diff);
         Ok(self.execute_apply_plan(&plan, options))
+    }
+
+    /// Computes the gap between the connected backend's observed state and
+    /// `desired`, without compiling or executing anything.
+    ///
+    /// This is the facade-level convenience chaining the two steps
+    /// [`Self::apply`]'s own doc comment names a caller "would otherwise
+    /// write out by hand": [`Self::current_state`] → [`Diff::compute`].
+    /// Callers who only want to inspect what would change (a dry-run /
+    /// diff-preview) can use this instead of [`Self::apply`], which always
+    /// executes; the `Err` case of this method's `Result` is exactly the
+    /// `Err` case of the underlying state read, since `Diff::compute` is an
+    /// infallible pure computation over already-in-memory values (see
+    /// ADR-0012).
+    pub fn diff(&self, desired: &DesiredState) -> Result<Diff> {
+        let current = self.current_state()?;
+        Ok(Diff::compute(&current, desired))
     }
 
     /// Performs the runtime portion of mutation preflight.
@@ -1832,6 +1859,23 @@ mod tests {
         let result = lattice.apply(&desired, &mut ExecutionOptions::default());
 
         assert!(matches!(result, Err(Error::Unsupported)));
+    }
+
+    /// Facade-level coverage for [`Lattice::diff`] — proves the
+    /// `current_state` → `Diff::compute` chain it wraps actually resolves
+    /// and matches what a caller would get by writing the two steps out by
+    /// hand (already covered by the `facade_diff_*` tests above).
+    #[test]
+    fn facade_lattice_diff_matches_the_hand_written_current_state_then_compute_chain() {
+        let lattice = lattice(Capability::empty());
+        let desired = DesiredState::empty().with_routes(vec![route(), extra_route()]);
+
+        let diff = lattice.diff(&desired).expect("diff");
+
+        let current = lattice.current_state().expect("current state");
+        let expected = Diff::compute(&current, &desired);
+        assert_eq!(diff, expected);
+        assert_eq!(diff.routes.len(), 1);
     }
 
     #[test]

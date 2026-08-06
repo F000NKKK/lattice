@@ -171,6 +171,8 @@ pub struct Interface {
 }
 
 impl Interface {
+    /// Creates an interface with no MAC address, MTU, admin state, or
+    /// operational state set (the latter two default to `Unknown`).
     pub fn new(id: InterfaceId, index: u32, name: impl Into<String>, kind: InterfaceKind) -> Self {
         Self {
             id,
@@ -184,21 +186,25 @@ impl Interface {
         }
     }
 
+    /// Sets the hardware (link-layer) address.
     pub fn with_mac(mut self, mac: MacAddress) -> Self {
         self.mac = Some(mac);
         self
     }
 
+    /// Sets the maximum transmission unit.
     pub fn with_mtu(mut self, mtu: u32) -> Self {
         self.mtu = Some(mtu);
         self
     }
 
+    /// Sets the observed administrative state.
     pub fn with_admin_state(mut self, state: AdminState) -> Self {
         self.admin_state = state;
         self
     }
 
+    /// Sets the observed operational (link-layer) state.
     pub fn with_operational_state(mut self, state: OperationalState) -> Self {
         self.operational_state = state;
         self

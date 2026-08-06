@@ -8,6 +8,7 @@ use crate::Ipv6PrefixLength;
 pub struct Ipv6Address(Ipv6Addr);
 
 impl Ipv6Address {
+    /// Creates an address from its eight 16-bit segments in network order.
     pub const fn new(segments: [u16; 8]) -> Self {
         Self(Ipv6Addr::new(
             segments[0],
@@ -21,6 +22,7 @@ impl Ipv6Address {
         ))
     }
 
+    /// Returns the eight 16-bit segments in network order.
     pub const fn segments(&self) -> [u16; 8] {
         self.0.segments()
     }
@@ -52,14 +54,17 @@ pub struct Ipv6Network {
 }
 
 impl Ipv6Network {
+    /// Creates a network from an address and prefix length.
     pub const fn new(address: Ipv6Address, prefix: Ipv6PrefixLength) -> Self {
         Self { address, prefix }
     }
 
+    /// Returns the network's address.
     pub const fn address(&self) -> Ipv6Address {
         self.address
     }
 
+    /// Returns the network's prefix length.
     pub const fn prefix(&self) -> Ipv6PrefixLength {
         self.prefix
     }

@@ -61,6 +61,8 @@ pub struct NeighborEntry {
 }
 
 impl NeighborEntry {
+    /// Creates a neighbor entry with no MAC address and an unknown
+    /// reachability state.
     pub fn new(id: NeighborId, interface_index: u32, address: IpAddress) -> Self {
         Self {
             id,
@@ -71,11 +73,13 @@ impl NeighborEntry {
         }
     }
 
+    /// Sets the resolved link-layer (MAC) address.
     pub fn with_mac(mut self, mac: MacAddress) -> Self {
         self.mac = Some(mac);
         self
     }
 
+    /// Sets the observed reachability state.
     pub fn with_state(mut self, state: NeighborState) -> Self {
         self.state = state;
         self
@@ -109,6 +113,8 @@ pub struct StaticNeighbor {
 }
 
 impl StaticNeighbor {
+    /// Creates a static neighbor request mapping `address` on `interface_id`
+    /// to `mac`.
     pub fn new(
         interface_id: crate::interface::InterfaceId,
         address: IpAddress,

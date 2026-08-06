@@ -8,10 +8,12 @@ use crate::Ipv4PrefixLength;
 pub struct Ipv4Address(Ipv4Addr);
 
 impl Ipv4Address {
+    /// Creates an address from its four octets in network order.
     pub const fn new(a: u8, b: u8, c: u8, d: u8) -> Self {
         Self(Ipv4Addr::new(a, b, c, d))
     }
 
+    /// Returns the four octets in network order.
     pub const fn octets(&self) -> [u8; 4] {
         self.0.octets()
     }
@@ -43,14 +45,17 @@ pub struct Ipv4Network {
 }
 
 impl Ipv4Network {
+    /// Creates a network from an address and prefix length.
     pub const fn new(address: Ipv4Address, prefix: Ipv4PrefixLength) -> Self {
         Self { address, prefix }
     }
 
+    /// Returns the network's address.
     pub const fn address(&self) -> Ipv4Address {
         self.address
     }
 
+    /// Returns the network's prefix length.
     pub const fn prefix(&self) -> Ipv4PrefixLength {
         self.prefix
     }
